@@ -148,7 +148,7 @@ where
             return Err(ProtocolError::UnterminatedFrame);
         }
 
-        let newline = available.iter().position(|byte| *byte == b'\\n');
+        let newline = available.iter().position(|byte| *byte == b'\n');
         let chunk_len = newline.map_or(available.len(), |position| position + 1);
         if bytes.len() + chunk_len > MAX_FRAME_SIZE + 1 {
             return Err(ProtocolError::FrameTooLarge);
