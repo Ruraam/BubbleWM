@@ -21,9 +21,7 @@ use smithay::{
     backend::{
         renderer::{
             Color32F, Frame, Renderer,
-            utils::{
-                draw_render_elements, on_commit_buffer_handler, with_renderer_surface_state,
-            },
+            utils::{draw_render_elements, on_commit_buffer_handler, with_renderer_surface_state},
         },
         winit::{self, WinitEvent},
     },
@@ -58,7 +56,7 @@ use smithay::{
         buffer::BufferHandler,
         compositor::{
             CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
-            TraversalAction, add_post_commit_hook, with_surface_tree_downward, with_states,
+            TraversalAction, add_post_commit_hook, with_states, with_surface_tree_downward,
         },
         output::OutputHandler,
         seat::WaylandFocus,
@@ -159,7 +157,8 @@ impl CompositorStateData {
         self.windows
             .iter()
             .find(|entry| {
-                entry.window
+                entry
+                    .window
                     .toplevel()
                     .is_some_and(|toplevel| toplevel.wl_surface() == surface)
             })
@@ -186,8 +185,11 @@ impl CompositorStateData {
         let serial = SERIAL_COUNTER.next_serial();
         let target = self.space.elements().last().cloned();
         if let Some(keyboard) = self.keyboard.clone() {
-            let focus = target
-                .and_then(|window| window.toplevel().map(|toplevel| toplevel.wl_surface().clone()));
+            let focus = target.and_then(|window| {
+                window
+                    .toplevel()
+                    .map(|toplevel| toplevel.wl_surface().clone())
+            });
             keyboard.set_focus(self, focus, serial);
         }
     }
@@ -203,8 +205,8 @@ impl CompositorStateData {
         };
 
         let window = self.windows[index].window.clone();
-        let has_buffer = with_renderer_surface_state(surface, |state| state.buffer().is_some())
-            .unwrap_or(false);
+        let has_buffer =
+            with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false);
 
         if !has_buffer {
             if let Some(location) = self.space.element_location(&window) {
@@ -226,14 +228,11 @@ impl CompositorStateData {
 
         if self.space.element_location(&window).is_none() {
             let location = self.windows[index].location;
-            let activate =
-                !self.windows[index].mapped_once || self.space.elements().next().is_none();
+            let activate = !self.windows[index].mapped_once || self.space.elements().next().is_none();
             self.windows[index].mapped_once = true;
             self.space.map_element(window.clone(), location, activate);
             if activate {
-                if let (Some(keyboard), Some(toplevel)) =
-                    (self.keyboard.clone(), window.toplevel())
-                {
+                if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel()) {
                     keyboard.set_focus(
                         self,
                         Some(toplevel.wl_surface().clone()),
@@ -251,12 +250,12 @@ impl CompositorStateData {
             let geometry = window.geometry();
             let mut location = session.initial_location;
             if session.edges & RESIZE_EDGE_LEFT != 0 {
-                location.x = session.initial_location.x
-                    + (session.initial_size.w - geometry.size.w);
+                location.x =
+                    session.initial_location.x + (session.initial_size.w - geometry.size.w);
             }
             if session.edges & RESIZE_EDGE_TOP != 0 {
-                location.y = session.initial_location.y
-                    + (session.initial_size.h - geometry.size.h);
+                location.y =
+                    session.initial_location.y + (session.initial_size.h - geometry.size.h);
             }
             self.set_window_location(&window, location, false);
 
@@ -273,12 +272,7 @@ impl CompositorStateData {
         }
     }
 
-    fn begin_move(
-        &mut self,
-        surface: &ToplevelSurface,
-        seat: &Seat<Self>,
-        serial: Serial,
-    ) {
+    fn begin_move(&mut self, surface: &ToplevelSurface, seat: &Seat<Self>, serial: Serial) {
         let Some(pointer) = seat.get_pointer() else {
             return;
         };
@@ -460,11 +454,7 @@ impl XdgShellHandler for CompositorStateData {
 
         // Keep a stable handle and its last position even while the client
         // temporarily unmaps the surface with a null buffer.
-        self.windows.push(ManagedWindow {
-            window,
-            location,
-            mapped_once: false,
-        });
+        self.windows.push(ManagedWindow { window, location, mapped_once: false });
 
         // The XDG role's first configure/commit cycle is managed by Smithay.
         // This post-commit hook maps the window only once it has a real buffer
@@ -506,11 +496,7 @@ impl XdgShellHandler for CompositorStateData {
             self.space.unmap_elem(&entry.window);
         }
 
-        if self
-            .resize_session
-            .as_ref()
-            .is_some_and(|session| session.surface == root)
-        {
+        if self.resize_session.as_ref().is_some_and(|session| session.surface == root) {
             self.resize_session = None;
         }
 
@@ -549,8 +535,6 @@ impl SeatHandler for CompositorStateData {
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, _image: CursorImageStatus) {}
 }
-
-
 
 fn calculate_resize_size(
     initial_size: Size<i32, Logical>,
