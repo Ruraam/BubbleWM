@@ -215,7 +215,8 @@ impl CompositorStateData {
             return;
         };
 
-        let location = parent_location + (WINDOW_CASCADE_STEP, WINDOW_CASCADE_STEP);
+        let location = parent_location
+            + Size::from((WINDOW_CASCADE_STEP, WINDOW_CASCADE_STEP));
         self.windows[index].location = location;
         let window = self.windows[index].window.clone();
         if self.space.element_location(&window).is_some() {
