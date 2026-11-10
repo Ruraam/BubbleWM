@@ -2,7 +2,7 @@
 
 A native, lightweight and customizable Wayland compositor for BubbleOS, written in Rust and built on Smithay.
 
-> **Status:** early development. BubbleWM now starts an initial nested Winit compositor with a single advertised `wl_output`, core Wayland globals, xdg-toplevel rendering, a Smithay window space, pointer routing and basic click-to-focus. It is a development milestone, not yet a complete or daily-usable desktop environment.
+> **Status:** early development. BubbleWM now starts an initial nested Winit compositor with a single advertised `wl_output`, core Wayland globals, xdg-toplevel rendering, tracked window lifecycle, pointer routing, click-to-focus and interactive XDG move/resize. It is a development milestone, not yet a complete or daily-usable desktop environment.
 
 ## Project principles
 
@@ -42,16 +42,19 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - One nested Winit window and one Wayland display socket.
 - Core `wl_compositor`, `wl_shm`, `wl_seat`, `xdg-shell` and `wl_output` globals.
 - One virtual output whose advertised pixel mode follows Winit window resize events. The development mode currently advertises 60 Hz.
-- A Smithay `Space<Window>` for mapped xdg toplevels, initial cascading placement, output enter/leave tracking and scene rendering.
+- A stable toplevel registry tracks creation, mapping, unmapping, remapping and destruction while preserving each window's last floating position.
+- A Smithay `Space<Window>` handles mapped xdg toplevels, initial cascading placement, output enter/leave tracking and scene rendering.
 - Absolute pointer motion, mouse buttons and scroll-axis events are routed to the surface under the pointer.
-- A click raises and activates the clicked window and moves keyboard focus to its toplevel. New toplevels are initially activated and focused.
+- A click raises and activates the clicked window and moves keyboard focus to its toplevel. Focus and activation are restored to the topmost remaining window after an unmap or destruction.
+- XDG interactive move and resize requests are accepted only when their serial matches an active pointer grab for the requesting client. Resize requests use the client's minimum/maximum size hints and complete with a final configure after release.
+- Window geometry is refreshed after root-surface and subsurface commits.
 - Frame pacing is throttled to approximately 60 updates per second in the nested development loop.
 - The IPC server starts and stops with the compositor. Capability discovery works, but workspace commands correctly return `unavailable` until workspace management exists.
 
 ### Not implemented yet
 
-- Pointer cursor rendering, touch input, keyboard shortcuts and robust focus/grab policies.
-- Window move/resize, maximize/minimize, close controls, decorations and tiling.
+- Pointer cursor rendering, touch input, keyboard shortcuts, popup grabs and a complete focus/grab policy.
+- Maximize/minimize, compositor-provided close controls, server-side decorations and tiling.
 - Virtual workspaces and workspace switching.
 - `wlr-layer-shell`, output-management protocols, multiple outputs and native DRM/KMS.
 - BubblePanel integration and real system status modules.
