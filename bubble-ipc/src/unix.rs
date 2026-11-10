@@ -7,12 +7,9 @@
 use std::{
     fs::{self, DirBuilder},
     io::{BufReader, ErrorKind},
-    os::{
-        linux::fs::MetadataExt,
-        unix::{
-            fs::{DirBuilderExt, MetadataExt as UnixMetadataExt, PermissionsExt},
-            net::{UnixListener, UnixStream},
-        },
+    os::unix::{
+        fs::{DirBuilderExt, MetadataExt, PermissionsExt},
+        net::{UnixListener, UnixStream},
     },
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
