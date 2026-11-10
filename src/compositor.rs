@@ -21,7 +21,10 @@ use smithay::{
     backend::{
         renderer::{
             Color32F, Frame, Renderer,
-            element::{Kind, solid::{SolidColorBuffer, SolidColorRenderElement}},
+            element::{
+                Kind,
+                solid::{SolidColorBuffer, SolidColorRenderElement},
+            },
             utils::{draw_render_elements, on_commit_buffer_handler, with_renderer_surface_state},
         },
         winit::{self, WinitEvent},
@@ -45,11 +48,9 @@ use smithay::{
     },
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
-        wayland_protocols::{
-            xdg::{
-                decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
-                shell::server::xdg_toplevel,
-            },
+        wayland_protocols::xdg::{
+            decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
+            shell::server::xdg_toplevel,
         },
         wayland_server::{
             Client, Display, ListeningSocket, Resource,
@@ -388,7 +389,8 @@ impl CompositorStateData {
 
         for (window, location) in &restored {
             let content_location = self.content_location(window, *location);
-            self.space.map_element(window.clone(), content_location, false);
+            self.space
+                .map_element(window.clone(), content_location, false);
         }
 
         if let Some(window) = self.managed_window_for_surface(&root) {
@@ -432,7 +434,8 @@ impl CompositorStateData {
                 continue;
             }
 
-            let close_x = entry.location.x + width - DECORATION_BUTTON_MARGIN - DECORATION_BUTTON_SIZE;
+            let close_x =
+                entry.location.x + width - DECORATION_BUTTON_MARGIN - DECORATION_BUTTON_SIZE;
             let maximize_x = close_x - DECORATION_BUTTON_GAP - DECORATION_BUTTON_SIZE;
             let minimize_x = maximize_x - DECORATION_BUTTON_GAP - DECORATION_BUTTON_SIZE;
             let button_y = entry.location.y + (TITLEBAR_HEIGHT - DECORATION_BUTTON_SIZE) / 2;
@@ -518,7 +521,12 @@ impl CompositorStateData {
         elements
     }
 
-    fn handle_decoration_action(&mut self, window: &Window, action: DecorationAction, serial: Serial) {
+    fn handle_decoration_action(
+        &mut self,
+        window: &Window,
+        action: DecorationAction,
+        serial: Serial,
+    ) {
         self.raise_window_family(window);
 
         let Some(surface) = window.toplevel() else {
@@ -528,7 +536,11 @@ impl CompositorStateData {
             DecorationAction::Close => surface.send_close(),
             DecorationAction::Minimize => self.minimize_window(&surface),
             DecorationAction::Maximize => {
-                if surface.current_state().states.contains(xdg_toplevel::State::Maximized) {
+                if surface
+                    .current_state()
+                    .states
+                    .contains(xdg_toplevel::State::Maximized)
+                {
                     self.unmaximize_window(&surface);
                 } else {
                     self.maximize_window(&surface);
@@ -543,7 +555,10 @@ impl CompositorStateData {
                     button: 0x110,
                     location: self.pointer_location,
                 });
-                let Some(location) = self.windows.iter().find(|entry| entry.window == *window)
+                let Some(location) = self
+                    .windows
+                    .iter()
+                    .find(|entry| entry.window == *window)
                     .map(|entry| entry.location)
                 else {
                     return;
@@ -690,7 +705,8 @@ impl CompositorStateData {
             entry.location = location;
         }
         let content_location = self.content_location(window, location);
-        self.space.map_element(window.clone(), content_location, activate);
+        self.space
+            .map_element(window.clone(), content_location, activate);
     }
 
     fn focus_topmost_window(&mut self) {
@@ -749,7 +765,8 @@ impl CompositorStateData {
             let activate =
                 !self.windows[index].mapped_once || self.space.elements().next().is_none();
             self.windows[index].mapped_once = true;
-            self.space.map_element(window.clone(), content_location, activate);
+            self.space
+                .map_element(window.clone(), content_location, activate);
             if activate {
                 if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel())
                 {
@@ -1653,7 +1670,9 @@ pub fn run_winit() -> Result<()> {
 
                 let mut decoration_move = None;
                 if event.state() == ButtonState::Pressed {
-                    if let Some((window, action)) = state.decoration_hit_test(state.pointer_location) {
+                    if let Some((window, action)) =
+                        state.decoration_hit_test(state.pointer_location)
+                    {
                         if action == DecorationAction::Move {
                             decoration_move = Some(window.clone());
                         }
@@ -1676,9 +1695,7 @@ pub fn run_winit() -> Result<()> {
                     pointer.frame(&mut state);
 
                     if let Some(window) = decoration_move {
-                        if event.state() == ButtonState::Pressed
-                            && event.button_code() == 0x110
-                        {
+                        if event.state() == ButtonState::Pressed && event.button_code() == 0x110 {
                             if let Some(location) = state
                                 .windows
                                 .iter()
