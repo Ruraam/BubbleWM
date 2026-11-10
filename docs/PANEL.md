@@ -18,7 +18,7 @@ The first implementation lives in the `bubblepanel/` workspace member. It is int
 
 - Periodic clock refresh (the event loop polls Wayland with a one-second timeout and redraws only when the displayed minute changes).
 - Actual workspace state or task-list integration.
-- Click, scroll, keyboard and popup interactions.
+- Scroll, keyboard and popup interactions. Pointer enter/motion/leave and left-click press/release tracking are implemented; a click is confirmed only when press and release target the same panel action.
 - Real network, audio, Bluetooth, battery or notification modules.
 - Multi-monitor surface management.
 - User-facing panel configuration and IPC.
@@ -28,7 +28,7 @@ The first implementation lives in the `bubblepanel/` workspace member. It is int
 
 1. Introduce a typed panel configuration and configurable top/bottom placement, dimensions and colors.
 2. Add protocol capability discovery and real workspace state.
-3. Add interactive module contracts and status providers.
+3. Add scroll/keyboard/popup interactions, then define interactive module contracts and status providers.
 4. Add per-output management and hotplug handling.
 5. Connect the panel configuration to BubbleSettings.
 
