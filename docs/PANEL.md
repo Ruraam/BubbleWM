@@ -25,12 +25,12 @@ The first implementation lives in the `bubblepanel/` workspace member. It is int
 - Real network, audio, Bluetooth, battery or notification modules.
 - Multi-monitor surface management.
 - User-facing panel configuration.
-- BubblePanel's IPC client and live workspace state integration. The shared wire protocol and Linux Unix-socket server transport are implemented and tested in bubble-ipc, but BubbleWM does not start the listener yet.
+- BubblePanel's IPC client and live workspace state integration. BubbleWM now has a tested worker-to-compositor bounded-channel bridge, but the bridge is not started by the executable until a real Smithay event loop exists.
 - Blur, transparency and GPU rendering.
 
 ### Development order after the prototype
 
-1. Add a compositor-owned state-dispatch channel and start the IPC server on a dedicated worker thread during compositor startup/shutdown.
+1. Implement the Smithay compositor lifecycle and event loop; start/stop IpcRuntime with that lifecycle and drain CoreCommandReceiver on the compositor thread.
 2. Connect workspace commands to BubbleWM's authoritative workspace state and return capability/state responses.
 3. Implement the BubblePanel IPC client, capability discovery and real workspace state.
 4. Introduce typed panel configuration, configurable placement and per-output management.
