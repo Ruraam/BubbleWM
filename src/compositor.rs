@@ -48,14 +48,14 @@ use smithay::{
             CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
             TraversalAction, with_surface_tree_downward,
         },
-        output::{OutputHandler, OutputManagerState},
+        output::OutputHandler,
         shell::xdg::{
             PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
         },
         shm::{ShmHandler, ShmState},
     },
 };
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::ipc::IpcRuntime;
 
@@ -135,7 +135,6 @@ impl CompositorStateData {
         if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel()) {
             keyboard.set_focus(self, Some(toplevel.wl_surface().clone()), serial);
         }
-
     }
 }
 
