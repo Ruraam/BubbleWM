@@ -187,6 +187,22 @@ fn compositor_shortcut(modifiers: ModifiersState, keysym: Keysym) -> Option<Comp
     }
 }
 
+fn suppress_shortcut_press(suppressed: &mut Vec<Keysym>, keysym: Keysym) -> bool {
+    if suppressed.contains(&keysym) {
+        return false;
+    }
+    suppressed.push(keysym);
+    true
+}
+
+fn consume_shortcut_release(suppressed: &mut Vec<Keysym>, keysym: Keysym) -> bool {
+    if !suppressed.contains(&keysym) {
+        return false;
+    }
+    suppressed.retain(|key| *key != keysym);
+    true
+}
+
 impl CompositorStateData {
     fn pointer_focus(
         &self,
@@ -1633,27 +1649,24 @@ pub fn run_winit() -> Result<()> {
                             let keysym = key.modified_sym();
                             if event.state() == smithay::backend::input::KeyState::Pressed {
                                 if let Some(action) = compositor_shortcut(*modifiers, keysym) {
-                                    if !compositor.suppressed_keys.contains(&keysym) {
-                                        compositor.suppressed_keys.push(keysym);
-                                    }
-
-                                    match action {
-                                        CompositorShortcut::Minimize => {
-                                            compositor.minimize_focused_window();
-                                        }
-                                        CompositorShortcut::Restore => {
-                                            compositor.restore_last_minimized_window();
-                                        }
-                                        CompositorShortcut::Close => {
-                                            compositor.close_focused_window();
+                                    if suppress_shortcut_press(&mut compositor.suppressed_keys, keysym) {
+                                        match action {
+                                            CompositorShortcut::Minimize => {
+                                                compositor.minimize_focused_window();
+                                            }
+                                            CompositorShortcut::Restore => {
+                                                compositor.restore_last_minimized_window();
+                                            }
+                                            CompositorShortcut::Close => {
+                                                compositor.close_focused_window();
+                                            }
                                         }
                                     }
                                     FilterResult::Intercept(())
                                 } else {
                                     FilterResult::Forward
                                 }
-                            } else if compositor.suppressed_keys.contains(&keysym) {
-                                compositor.suppressed_keys.retain(|key| *key != keysym);
+                            } else if consume_shortcut_release(&mut compositor.suppressed_keys, keysym) {
                                 FilterResult::Intercept(())
                             } else {
                                 FilterResult::Forward
@@ -1916,6 +1929,17 @@ mod tests {
             ),
             Some(CompositorShortcut::Minimize)
         );
+    }
+
+    #[test]
+    fn held_shortcut_repeats_do_not_repeat_compositor_actions() {
+        let mut suppressed = Vec::new();
+        assert!(suppress_shortcut_press(&mut suppressed, Keysym::Tab));
+        assert!(!suppress_shortcut_press(&mut suppressed, Keysym::Tab));
+        assert_eq!(suppressed, vec![Keysym::Tab]);
+        assert!(consume_shortcut_release(&mut suppressed, Keysym::Tab));
+        assert!(suppressed.is_empty());
+        assert!(suppress_shortcut_press(&mut suppressed, Keysym::Tab));
     }
 
     #[test]
