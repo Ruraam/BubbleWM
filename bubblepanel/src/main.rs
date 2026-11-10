@@ -2,10 +2,13 @@
 //!
 //! This milestone provides an independent Wayland client, a bottom layer-shell
 //! surface and a software-rendered three-zone layout. The clock is sampled when
-//! the surface is configured; periodic refresh and interactive modules follow
-//! in the next implementation step.
+//! the surface is configured; the clock refreshes on a low-overhead event-loop
+//! timeout, while interactive modules follow in a later implementation step.
 
-use std::{num::NonZeroU32, os::fd::{AsFd, AsRawFd}};
+use std::{
+    num::NonZeroU32,
+    os::fd::{AsFd, AsRawFd},
+};
 
 use anyhow::{Context, Result};
 use smithay_client_toolkit::{
