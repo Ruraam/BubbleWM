@@ -1,50 +1,36 @@
 # BubbleWM IPC lifecycle
 
-The Linux socket transport is implemented by `bubble-ipc::unix`. BubbleWM's
-application-side bridge is exposed by `bubblewm::ipc`.
+The Linux socket transport is implemented by bubble-ipc::unix. BubbleWM's application-side bridge is exposed by bubblewm::ipc and is now owned by the Winit compositor lifecycle.
 
 ## Thread ownership
 
-The IPC runtime owns one named worker thread. It accepts local connections,
-authenticates peer credentials, validates the protocol envelope and sends
-commands through a bounded channel with a capacity of 64 requests.
+The IPC runtime owns one named worker thread. It accepts local connections, authenticates peer credentials, validates the protocol envelope and sends commands through a bounded channel with a capacity of 64 requests.
 
-The compositor owns the receiving half. It calls
-`CoreCommandReceiver::dispatch_pending` from its event loop; the supplied
-handler therefore runs on the compositor thread and is the only place where
-requests may inspect or mutate compositor state.
+The compositor owns the receiving half. It calls CoreCommandReceiver::dispatch_pending from its event loop; the supplied handler therefore runs on the compositor thread and is the only place where requests may inspect or mutate compositor state.
 
-The IPC worker waits up to two seconds for a response. Queue saturation,
-a stopped receiver, or a compositor that does not dispatch requests in time
-returns a structured `unavailable` response rather than blocking indefinitely.
+The IPC worker waits up to two seconds for a response. Queue saturation, a stopped receiver, or a compositor that does not dispatch requests in time returns a structured unavailable response rather than blocking indefinitely.
 
-## Intended compositor integration
+## Current lifecycle
 
-The lifecycle belongs to the compositor runtime, not to BubblePanel and not to
-a detached process. The intended startup sequence is:
+1. BubbleWM loads and validates its configuration.
+2. It creates the Wayland display and core compositor, shm, seat and xdg-shell state.
+3. It binds a Wayland listening socket and initializes the Winit/EGL backend.
+4. It starts IpcRuntime::start_default() and retains the runtime owner for the compositor lifetime.
+5. Each Winit event-loop iteration calls CoreCommandReceiver::dispatch_pending on the compositor thread.
+6. Closing the Winit window ends the loop; BubbleWM calls IpcRuntime::shutdown() before returning. Dropping the runtime also requests shutdown and joins its worker as a fallback.
 
-1. Load and validate configuration.
-2. Initialize the Smithay backend and compositor state.
-3. Start `IpcRuntime::start_default()` and retain the returned runtime owner
-   for the complete compositor lifetime.
-4. Poll and dispatch IPC commands from the compositor event loop using
-   `CoreCommandReceiver::dispatch_pending`.
-5. On normal shutdown, call `IpcRuntime::shutdown()` before destroying
-   compositor state. Dropping the runtime also requests shutdown and joins
-   its worker as a fallback.
+The event-loop handler must remain quick and must not perform blocking I/O. It must validate workspace indices and feature availability against authoritative compositor state before returning success.
 
-The event-loop handler must remain quick and must not perform blocking I/O.
-It must validate workspace indices and feature availability against the
-authoritative compositor state before returning success.
+## Current command capabilities
+
+- GetCapabilities succeeds and currently reports workspace_control = false.
+- GetWorkspaceState returns unavailable because workspace state does not exist yet.
+- WorkspacePrevious, WorkspaceNext and ActivateWorkspace return unavailable for the same reason.
+
+This is intentional. The endpoint is live and correctly reports the current feature boundary rather than pretending that workspace switching works.
 
 ## Current implementation boundary
 
-The bridge, bounded channel, timeout behavior and worker lifecycle are
-implemented and covered by tests. The current `bubblewm` executable still
-only loads configuration and exits; it does not create a Smithay backend or
-event loop. Therefore it intentionally does not open the IPC socket yet.
-Starting the listener before a compositor event loop exists would produce an
-endpoint that cannot truthfully manage workspaces.
+The compositor is still an early nested prototype. It advertises the core wl_compositor, wl_shm, wl_seat and xdg-shell globals, accepts clients and renders xdg toplevel surfaces. It does not yet implement workspace management, output management, proper pointer focus or the layer-shell server protocol.
 
-The next compositor milestone must instantiate the runtime during actual
-compositor startup and poll the receiver as part of its event loop.
+See docs/ARCHITECTURE.md and docs/ROADMAP.md for the next integration milestones.
