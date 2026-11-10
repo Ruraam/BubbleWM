@@ -654,6 +654,27 @@ impl CompositorHandler for CompositorStateData {
         }
         if let Some(window) = self.managed_window_for_surface(&root_surface) {
             window.on_commit();
+
+            // The first xdg_toplevel commit is normally the client's initial
+            // null-buffer commit. Send the initial configure only after
+            // Smithay has processed that commit and initialized renderer state.
+            if root_surface == *surface {
+                if let Some(toplevel) = window.toplevel() {
+                    if !toplevel.is_initial_configure_sent() {
+                        toplevel.send_configure();
+                    }
+                }
+            }
+        }
+
+        // PopupManager::commit promotes newly parented popups into the popup
+        // tree. Their first configure must be sent after that transition.
+        if let Some(PopupKind::Xdg(popup)) = self.popups.find_popup(surface) {
+            if !popup.is_initial_configure_sent() {
+                if let Err(error) = popup.send_configure() {
+                    info!(?error, "Unable to send initial xdg popup configure");
+                }
+            }
         }
 
         self.popups.cleanup();
