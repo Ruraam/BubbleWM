@@ -34,10 +34,16 @@ The shared protocol lives in the `bubble-ipc` workspace crate and is consumed by
 - The server checks Linux `SO_PEERCRED` and accepts only clients with the same effective UID by default. Stale sockets may be removed; regular files and active sockets are never replaced.
 - Frames are bounded, each connection is limited to one request/response exchange, and client reads/writes have timeouts. The accept loop must run on a dedicated worker thread, never on the compositor event loop.
 - The server transport and tests are implemented in `bubble-ipc::unix`. BubbleWM exposes an application-side bridge in `bubblewm::ipc`: a dedicated worker forwards requests through a bounded channel (64 entries) and waits up to two seconds for the compositor thread to respond.
-- The compositor thread must call `CoreCommandReceiver::dispatch_pending` from its own event loop. This keeps state access on the owner thread and prevents the IPC worker from touching Smithay state.
-- `IpcRuntime` owns worker startup/shutdown and joins the worker on explicit shutdown or drop. The bridge is tested, but the current executable does not start it because no Smithay event loop exists yet. See [IPC lifecycle](IPC.md).
+- The compositor thread calls `CoreCommandReceiver::dispatch_pending` from the Winit event loop. This keeps state access on the owner thread and prevents the IPC worker from touching Smithay state.
+- `IpcRuntime` starts after Wayland/Winit initialization and is shut down when the nested compositor exits. It also joins the worker on drop. The live endpoint reports workspace control as unavailable until workspace state is implemented. See [IPC lifecycle](IPC.md).
 - Unsupported protocol versions receive structured errors. The application-level handler remains responsible for capability checks, workspace bounds and command execution.
 
+
+## Initial compositor milestone
+
+The current executable starts a nested Winit/EGL backend and a Wayland server socket. It advertises the core compositor, shared-memory, seat and xdg-shell globals, accepts clients, and renders committed xdg toplevel surface trees. Keyboard events are forwarded using a temporary focus policy that targets the first toplevel.
+
+This is a bring-up milestone, not yet a complete desktop. Output management, pointer/touch routing, robust focus and window management, decorations, workspaces, layer-shell and DRM/KMS are not implemented yet. BubblePanel therefore still needs a separate layer-shell-compatible compositor for visual testing.
 
 ## Settings-first design
 
