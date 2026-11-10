@@ -266,6 +266,30 @@ fn scroll_directions(horizontal: &AxisScroll, vertical: &AxisScroll) -> Option<S
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkspaceScrollDirection {
+    Previous,
+    Next,
+}
+
+/// Workspace navigation is intentionally limited to vertical scrolling over
+/// a workspace hit region. Horizontal scrolling and other panel modules do not
+/// implicitly change the active workspace.
+fn workspace_scroll_direction(
+    action: Option<PanelAction>,
+    directions: ScrollDirections,
+) -> Option<WorkspaceScrollDirection> {
+    if !matches!(action, Some(PanelAction::Workspace(_))) {
+        return None;
+    }
+
+    match directions.vertical {
+        Some(VerticalScrollDirection::Up) => Some(WorkspaceScrollDirection::Previous),
+        Some(VerticalScrollDirection::Down) => Some(WorkspaceScrollDirection::Next),
+        None => None,
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct PointerInteraction {
     hovered: Option<PanelAction>,
@@ -544,13 +568,25 @@ impl PointerHandler for BubblePanel {
                     ..
                 } => {
                     if let Some(directions) = scroll_directions(horizontal, vertical) {
-                        info!(
-                            ?directions,
-                            ?action,
-                            x,
-                            y,
-                            "BubblePanel pointer scroll detected"
-                        );
+                        if let Some(workspace_direction) =
+                            workspace_scroll_direction(action, directions)
+                        {
+                            info!(
+                                ?workspace_direction,
+                                ?action,
+                                x,
+                                y,
+                                "BubblePanel workspace navigation requested"
+                            );
+                        } else {
+                            info!(
+                                ?directions,
+                                ?action,
+                                x,
+                                y,
+                                "BubblePanel pointer scroll detected"
+                            );
+                        }
                     }
                 }
                 _ => {}
@@ -850,6 +886,51 @@ mod tests {
         assert_eq!(axis_sign(&no_motion), None);
         assert_eq!(axis_sign(&invalid_motion), None);
         assert_eq!(scroll_directions(&no_motion, &invalid_motion), None);
+    }
+
+    #[test]
+    fn workspace_scroll_maps_vertical_direction_to_navigation() {
+        let up = ScrollDirections {
+            horizontal: None,
+            vertical: Some(VerticalScrollDirection::Up),
+        };
+        let down = ScrollDirections {
+            horizontal: None,
+            vertical: Some(VerticalScrollDirection::Down),
+        };
+        assert_eq!(
+            workspace_scroll_direction(Some(PanelAction::Workspace(2)), up),
+            Some(WorkspaceScrollDirection::Previous)
+        );
+        assert_eq!(
+            workspace_scroll_direction(Some(PanelAction::Workspace(2)), down),
+            Some(WorkspaceScrollDirection::Next)
+        );
+    }
+
+    #[test]
+    fn workspace_scroll_ignores_horizontal_motion_and_other_panel_regions() {
+        let horizontal = ScrollDirections {
+            horizontal: Some(HorizontalScrollDirection::Right),
+            vertical: None,
+        };
+        let vertical = ScrollDirections {
+            horizontal: None,
+            vertical: Some(VerticalScrollDirection::Down),
+        };
+        assert_eq!(
+            workspace_scroll_direction(Some(PanelAction::Workspace(1)), horizontal),
+            None
+        );
+        assert_eq!(
+            workspace_scroll_direction(Some(PanelAction::Launcher), vertical),
+            None
+        );
+        assert_eq!(
+            workspace_scroll_direction(Some(PanelAction::Clock), vertical),
+            None
+        );
+        assert_eq!(workspace_scroll_direction(None, vertical), None);
     }
 
     #[test]
