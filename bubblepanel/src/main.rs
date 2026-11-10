@@ -5,7 +5,7 @@
 //! the surface is configured; periodic refresh and interactive modules follow
 //! in the next implementation step.
 
-use std::{convert::TryInto, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 use anyhow::{Context, Result};
 use smithay_client_toolkit::{
@@ -125,10 +125,10 @@ impl BubblePanel {
             .context("cannot create a shared-memory panel buffer")?;
 
         canvas.fill(0);
-        fill_rect(&mut canvas, width, height, 0, 0, width, height, 0xFF1B202B);
-        draw_brand(&mut canvas, width, height);
-        draw_workspaces(&mut canvas, width, height);
-        draw_status_and_clock(&mut canvas, width, height);
+        fill_rect(canvas, width, height, 0, 0, width, height, 0xFF1B202B);
+        draw_brand(canvas, width, height);
+        draw_workspaces(canvas, width, height);
+        draw_status_and_clock(canvas, width, height);
 
         self.layer
             .wl_surface()
