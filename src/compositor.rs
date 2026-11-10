@@ -5,42 +5,35 @@
 //! and renders committed xdg toplevel surfaces. Window management, output
 //! advertisement, pointer focus, workspaces and layer-shell are later milestones.
 
-use std::{
-    os::unix::io::OwnedFd,
-    sync::Arc,
-    time::Instant,
-};
+use std::{sync::Arc, time::Instant};
 
 use anyhow::{Context, Result};
-use bubble_ipc::{
-    ErrorCode, ErrorResponse, Request, Response, ResponseData,
-};
+use bubble_ipc::{ErrorCode, ErrorResponse, Request, Response, ResponseData};
 use smithay::{
     backend::{
         input::{InputEvent, KeyboardKeyEvent},
         renderer::{
+            Color32F, Frame, Renderer,
             element::{
-                surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
                 Kind,
+                surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
             },
             gles::GlesRenderer,
             utils::{draw_render_elements, on_commit_buffer_handler},
-            Color32F, Frame, Renderer,
         },
         winit::{self, WinitEvent},
     },
     delegate_compositor, delegate_seat, delegate_shm, delegate_xdg_shell,
-    input::{keyboard::FilterResult, Seat, SeatHandler, SeatState},
+    input::{Seat, SeatHandler, SeatState, keyboard::FilterResult},
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{
+            Client, Display, ListeningSocket,
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::{
-                wl_buffer,
-                wl_seat,
+                wl_buffer, wl_seat,
                 wl_surface::{self, WlSurface},
             },
-            Client, Display, ListeningSocket,
         },
         winit::platform::pump_events::PumpStatus,
     },
@@ -48,8 +41,8 @@ use smithay::{
     wayland::{
         buffer::BufferHandler,
         compositor::{
-            with_surface_tree_downward, CompositorClientState, CompositorHandler,
-            CompositorState, SurfaceAttributes, TraversalAction,
+            CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
+            TraversalAction, with_surface_tree_downward,
         },
         shell::xdg::{
             PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
@@ -57,7 +50,7 @@ use smithay::{
         shm::{ShmHandler, ShmState},
     },
 };
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::ipc::{CoreCommandReceiver, IpcRuntime};
 
@@ -222,7 +215,7 @@ pub fn run_winit() -> Result<()> {
             WinitEvent::Input(InputEvent::Keyboard { event }) => {
                 // Until proper pointer-based focus is available, the first
                 // mapped toplevel receives keyboard focus.
-                if let Some(surface) = state.xdg_shell_state.toplevel_surfaces().first() {
+                if let Some(surface) = state.xdg_shell_state.toplevel_surfaces().first().cloned() {
                     keyboard.set_focus(
                         &mut state,
                         Some(surface.wl_surface().clone()),
@@ -243,6 +236,7 @@ pub fn run_winit() -> Result<()> {
             | WinitEvent::Focus(_)
             | WinitEvent::Redraw
             | WinitEvent::Input(_) => {}
+            _ => {}
         });
 
         if matches!(status, PumpStatus::Exit(_)) {
