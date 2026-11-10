@@ -415,14 +415,14 @@ impl PointerHandler for BubblePanel {
         events: &[PointerEvent],
     ) {
         for event in events {
-            if event.surface != *self.layer.wl_surface() {
+            if &event.surface != self.layer.wl_surface() {
                 continue;
             }
 
-            let PointerEventKind::Press { button, .. } = event.kind else {
+            let PointerEventKind::Press { button, .. } = &event.kind else {
                 continue;
             };
-            if button != BTN_LEFT {
+            if *button != BTN_LEFT {
                 continue;
             }
 
