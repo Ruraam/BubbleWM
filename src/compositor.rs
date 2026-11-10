@@ -1649,7 +1649,10 @@ pub fn run_winit() -> Result<()> {
                             let keysym = key.modified_sym();
                             if event.state() == smithay::backend::input::KeyState::Pressed {
                                 if let Some(action) = compositor_shortcut(*modifiers, keysym) {
-                                    if suppress_shortcut_press(&mut compositor.suppressed_keys, keysym) {
+                                    if suppress_shortcut_press(
+                                        &mut compositor.suppressed_keys,
+                                        keysym,
+                                    ) {
                                         match action {
                                             CompositorShortcut::Minimize => {
                                                 compositor.minimize_focused_window();
@@ -1666,7 +1669,10 @@ pub fn run_winit() -> Result<()> {
                                 } else {
                                     FilterResult::Forward
                                 }
-                            } else if consume_shortcut_release(&mut compositor.suppressed_keys, keysym) {
+                            } else if consume_shortcut_release(
+                                &mut compositor.suppressed_keys,
+                                keysym,
+                            ) {
                                 FilterResult::Intercept(())
                             } else {
                                 FilterResult::Forward
