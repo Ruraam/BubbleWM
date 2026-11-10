@@ -138,12 +138,12 @@ where
 {
     let mut bytes = Vec::with_capacity(256);
     let mut limited = reader.take((MAX_FRAME_SIZE + 2) as u64);
-    let read = limited.read_until(b'\n', &mut bytes)?;
-    if read == 0 || bytes.last() != Some(&b'\n') {
-        return Err(ProtocolError::UnterminatedFrame);
-    }
+    let read = limited.read_until(b'\\n', &mut bytes)?;
     if bytes.len() > MAX_FRAME_SIZE + 1 {
         return Err(ProtocolError::FrameTooLarge);
+    }
+    if read == 0 || bytes.last() != Some(&b'\\n') {
+        return Err(ProtocolError::UnterminatedFrame);
     }
     bytes.pop();
     serde_json::from_slice(&bytes).map_err(ProtocolError::from)
