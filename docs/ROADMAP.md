@@ -32,8 +32,14 @@
 - [x] Transient toplevel parent tracking, relative initial placement and family stacking.
 - [x] XDG popup tracking/rendering, output-constrained placement and reposition requests.
 - [x] XDG popup keyboard/pointer grabs with serial validation.
-- [ ] Minimize behavior and compositor-provided close controls.
-- [ ] Server-side decorations and window controls.
+- [x] XDG minimize requests and minimized state for toplevels and transient descendants.
+- [x] Restore the most recently minimized window family.
+- [x] Super+H minimize, Super+Tab restore and Super+Q request-close shortcuts, with matching key-release suppression.
+- [x] XDG close event from a prototype server-side titlebar; applications remain responsible for handling the close request.
+- [x] XDG decoration negotiation, default server-side mode and honoring explicit client-side mode requests.
+- [x] Prototype 32-pixel server-side titlebar with close, maximize/restore, minimize and move interactions.
+- [ ] Window title text, icons, themed controls, borders and accessibility refinements.
+- [ ] Tiling layout policy and virtual workspace foundations.
 - [ ] Floating layout policy and virtual workspace foundations.
 - [ ] Connect workspace IPC commands to authoritative workspace state.
 - [ ] Integrate BubblePanel's IPC client for workspace state and navigation.
