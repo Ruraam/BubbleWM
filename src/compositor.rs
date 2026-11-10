@@ -26,7 +26,6 @@ use smithay::{
     delegate_compositor, delegate_seat, delegate_shm, delegate_xdg_shell,
     input::{Seat, SeatHandler, SeatState, keyboard::FilterResult},
     reexports::{
-        wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{
             Client, Display, ListeningSocket,
             backend::{ClientData, ClientId, DisconnectReason},
@@ -52,7 +51,7 @@ use smithay::{
 };
 use tracing::info;
 
-use crate::ipc::{CoreCommandReceiver, IpcRuntime};
+use crate::ipc::IpcRuntime;
 
 struct CompositorStateData {
     compositor_state: CompositorState,
@@ -188,8 +187,8 @@ pub fn run_winit() -> Result<()> {
         .map(|name| name.to_string_lossy().into_owned())
         .context("Wayland listener did not provide a display name")?;
 
-    let (mut backend, mut winit_loop) =
-        winit::init::<GlesRenderer>().context("cannot initialize the Winit/EGL backend")?;
+    let (mut backend, mut winit_loop) = winit::init::<GlesRenderer>()
+        .map_err(|error| anyhow::anyhow!("cannot initialize the Winit/EGL backend: {error}"))?;
 
     // The socket is advertised before starting the IPC endpoint. If IPC setup
     // fails, dropping the listener closes the Wayland socket as startup unwinds.
