@@ -5,7 +5,7 @@
 //! the surface is configured; periodic refresh and interactive modules follow
 //! in the next implementation step.
 
-use std::{num::NonZeroU32, os::fd::AsRawFd};
+use std::{num::NonZeroU32, os::fd::{AsFd, AsRawFd}};
 
 use anyhow::{Context, Result};
 use smithay_client_toolkit::{
