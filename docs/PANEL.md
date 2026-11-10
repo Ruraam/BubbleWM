@@ -13,12 +13,13 @@ The first implementation lives in the `bubblepanel/` workspace member. It is int
 - Software drawing through `wl_shm` and an SCTK `SlotPool`.
 - Three visual zones: BubbleOS mark and workspace placeholders on the left, reserved center area, and status placeholders plus local-time digits on the right.
 - Graceful error messages when Wayland, shared memory or layer-shell support is unavailable.
+- Low-overhead clock refresh: the event loop polls Wayland with a one-second timeout and redraws only when the displayed minute changes.
+- Pointer enter/motion/leave tracking and left-click press/release handling. A click is confirmed only when press and release target the same panel action.
 
 ### Explicitly not implemented yet
 
-- Periodic clock refresh (the event loop polls Wayland with a one-second timeout and redraws only when the displayed minute changes).
 - Actual workspace state or task-list integration.
-- Scroll, keyboard and popup interactions. Pointer enter/motion/leave and left-click press/release tracking are implemented; a click is confirmed only when press and release target the same panel action.
+- Scroll, keyboard and popup interactions.
 - Real network, audio, Bluetooth, battery or notification modules.
 - Multi-monitor surface management.
 - User-facing panel configuration and IPC.
