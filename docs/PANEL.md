@@ -16,7 +16,7 @@ The first implementation lives in the `bubblepanel/` workspace member. It is int
 
 ### Explicitly not implemented yet
 
-- Periodic clock refresh (the time is sampled on surface configuration/redraw).
+- Periodic clock refresh (the event loop polls Wayland with a one-second timeout and redraws only when the displayed minute changes).
 - Actual workspace state or task-list integration.
 - Click, scroll, keyboard and popup interactions.
 - Real network, audio, Bluetooth, battery or notification modules.
@@ -26,11 +26,10 @@ The first implementation lives in the `bubblepanel/` workspace member. It is int
 
 ### Development order after the prototype
 
-1. Add a low-overhead event-loop timer and redraw only when the clock changes.
-2. Introduce a typed panel configuration and configurable top/bottom placement, dimensions and colors.
-3. Add protocol capability discovery and real workspace state.
-4. Add interactive module contracts and status providers.
-5. Add per-output management and hotplug handling.
-6. Connect the panel configuration to BubbleSettings.
+1. Introduce a typed panel configuration and configurable top/bottom placement, dimensions and colors.
+2. Add protocol capability discovery and real workspace state.
+3. Add interactive module contracts and status providers.
+4. Add per-output management and hotplug handling.
+5. Connect the panel configuration to BubbleSettings.
 
 The panel must remain an optional Wayland client. A missing panel or panel crash must never terminate BubbleWM or its clients.
