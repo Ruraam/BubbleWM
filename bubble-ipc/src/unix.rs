@@ -18,8 +18,8 @@ use std::{
 };
 
 use super::{
-    ErrorCode, ErrorResponse, PROTOCOL_VERSION, ProtocolError, Request, RequestEnvelope,
-    Response, ResponseEnvelope, read_frame, write_frame,
+    ErrorCode, ErrorResponse, PROTOCOL_VERSION, ProtocolError, Request, RequestEnvelope, Response,
+    ResponseEnvelope, read_frame, write_frame,
 };
 
 use std::os::fd::AsRawFd;
