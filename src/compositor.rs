@@ -19,7 +19,10 @@ use smithay::{
         KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
     },
     backend::{
-        renderer::{Color32F, Frame, Renderer, utils::draw_render_elements},
+        renderer::{
+            Color32F, Frame, Renderer,
+            utils::{draw_render_elements, on_commit_buffer_handler},
+        },
         winit::{self, WinitEvent},
     },
     delegate_compositor, delegate_output, delegate_seat, delegate_shm, delegate_xdg_shell,
@@ -429,11 +432,7 @@ pub fn run_winit() -> Result<()> {
                     pointer.frame(&mut state);
                 }
             }
-            WinitEvent::Resized { .. }
-            | WinitEvent::Focus(_)
-            | WinitEvent::Redraw
-            | WinitEvent::Input(_) => {}
-            _ => {}
+            WinitEvent::Focus(_) | WinitEvent::Redraw | WinitEvent::Input(_) => {}
         });
 
         if matches!(status, PumpStatus::Exit(_)) {
