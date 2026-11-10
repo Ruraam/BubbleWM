@@ -1608,7 +1608,7 @@ pub fn run_winit() -> Result<()> {
                                 return FilterResult::Forward;
                             }
 
-                            match key.modified_sym() {
+                            match key.modified_sym().0 {
                                 keysyms::KEY_h => {
                                     state.minimize_focused_window();
                                     FilterResult::Intercept(())
