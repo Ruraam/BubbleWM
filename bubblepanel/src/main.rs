@@ -50,10 +50,7 @@ pub struct HitRect {
 impl HitRect {
     /// Returns true when the point is inside the rectangle (right/bottom excluded).
     pub fn contains(self, x: u32, y: u32) -> bool {
-        x >= self.x
-            && y >= self.y
-            && x - self.x < self.width
-            && y - self.y < self.height
+        x >= self.x && y >= self.y && x - self.x < self.width && y - self.y < self.height
     }
 }
 
@@ -510,9 +507,13 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn hit_rect_uses_half_open_bounds() {
-        let rect = HitRect { x: 10, y: 5, width: 20, height: 10 };
+        let rect = HitRect {
+            x: 10,
+            y: 5,
+            width: 20,
+            height: 10,
+        };
         assert!(rect.contains(10, 5));
         assert!(rect.contains(29, 14));
         assert!(!rect.contains(30, 14));
@@ -532,7 +533,12 @@ mod tests {
     #[test]
     fn hit_test_ignores_zero_sized_rectangles() {
         let regions = [HitRegion {
-            bounds: HitRect { x: 0, y: 0, width: 0, height: 10 },
+            bounds: HitRect {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 10,
+            },
             action: PanelAction::Launcher,
         }];
         assert_eq!(hit_test(&regions, 0, 0), None);
