@@ -48,10 +48,18 @@ impl std::fmt::Display for ServerError {
                 write!(formatter, "XDG_RUNTIME_DIR is missing or invalid")
             }
             Self::UnsafeDirectory(path) => {
-                write!(formatter, "refusing to use an unsafe IPC directory: {}", path.display())
+                write!(
+                    formatter,
+                    "refusing to use an unsafe IPC directory: {}",
+                    path.display()
+                )
             }
             Self::SocketPathOccupied(path) => {
-                write!(formatter, "another BubbleWM IPC server owns {}", path.display())
+                write!(
+                    formatter,
+                    "another BubbleWM IPC server owns {}",
+                    path.display()
+                )
             }
         }
     }
@@ -168,10 +176,9 @@ impl UnixIpcServer {
         }
 
         let listener = UnixListener::bind(&socket_path).map_err(ServerError::Io)?;
-        if let Err(error) = fs::set_permissions(
-            &socket_path,
-            fs::Permissions::from_mode(SOCKET_MODE),
-        ) {
+        if let Err(error) =
+            fs::set_permissions(&socket_path, fs::Permissions::from_mode(SOCKET_MODE))
+        {
             let _ = fs::remove_file(&socket_path);
             return Err(ServerError::Io(error));
         }
@@ -208,11 +215,7 @@ impl UnixIpcServer {
     /// bounded read/write timeouts and exactly one request/response exchange.
     /// Per-client protocol or authentication failures close that connection
     /// without terminating the listener.
-    pub fn serve_until<F>(
-        &self,
-        shutdown: &AtomicBool,
-        handler: F,
-    ) -> Result<(), ServerError>
+    pub fn serve_until<F>(&self, shutdown: &AtomicBool, handler: F) -> Result<(), ServerError>
     where
         F: Fn(Request) -> Response,
     {
@@ -231,11 +234,7 @@ impl UnixIpcServer {
         Ok(())
     }
 
-    fn serve_connection<F>(
-        &self,
-        stream: &mut UnixStream,
-        handler: &F,
-    ) -> Result<(), ProtocolError>
+    fn serve_connection<F>(&self, stream: &mut UnixStream, handler: &F) -> Result<(), ProtocolError>
     where
         F: Fn(Request) -> Response,
     {
@@ -316,7 +315,7 @@ fn peer_has_current_uid(stream: &UnixStream) -> std::io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Request, ResponseData, PROTOCOL_VERSION};
+    use crate::{PROTOCOL_VERSION, Request, ResponseData};
     use std::{
         io::BufReader,
         os::unix::fs::PermissionsExt,
