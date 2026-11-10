@@ -1,11 +1,8 @@
 //! BubbleWM application entry point.
-//!
-//! This milestone provides configuration loading and diagnostics only.
-//! The Smithay compositor state and event loop are implemented in the next milestone.
 
 mod config;
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
@@ -21,7 +18,11 @@ fn main() -> Result<()> {
     tracing::info!("BubbleWM {}", env!("CARGO_PKG_VERSION"));
     tracing::info!("Configured backend: {}", config.core.backend);
     tracing::info!("Configured layout: {}", config.core.layout);
-    tracing::warn!("No Wayland compositor is started in milestone 0.1.0.");
 
-    Ok(())
+    match config.core.backend.as_str() {
+        "winit" => bubblewm::compositor::run_winit()
+            .context("BubbleWM Winit compositor failed"),
+        "drm" => bail!("the DRM/KMS backend is not implemented yet; use core.backend = \"winit\""),
+        backend => bail!("unsupported compositor backend: {backend}"),
+    }
 }
