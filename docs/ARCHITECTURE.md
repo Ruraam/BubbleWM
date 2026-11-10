@@ -43,9 +43,11 @@ The shared protocol lives in the `bubble-ipc` workspace crate and is consumed by
 
 The current executable starts a nested Winit/EGL backend and a Wayland server socket. It advertises the core compositor, shared-memory, seat, xdg-shell and one `wl_output` global. The virtual output follows Winit window resizes and currently advertises a 60 Hz development mode.
 
-Toplevels are wrapped as Smithay `Window` elements and mapped into a `Space<Window>`. The compositor refreshes the space, tracks output enter/leave state and renders the mapped scene. Winit absolute pointer motion, mouse buttons and scroll-axis events are routed to the surface under the pointer. Clicking a window raises and activates it, and transfers keyboard focus to its toplevel; new toplevels receive initial activation and focus.
+Each xdg toplevel has a stable managed-window entry, independent of whether its surface is currently mapped. The compositor preserves its last floating position across null-buffer unmaps and remaps, removes the entry on toplevel destruction, and restores keyboard focus and activation to the topmost remaining window. Mapped windows are represented as Smithay `Window` elements in a `Space<Window>`; the compositor refreshes output enter/leave state and renders the mapped scene.
 
-This remains a bring-up milestone, not a complete desktop. Pointer cursor rendering, touch routing, robust keyboard grabs, move/resize, decorations, workspaces, output-management protocols, multiple outputs, layer-shell and DRM/KMS are not implemented yet. BubblePanel therefore still needs a separate layer-shell-compatible compositor for visual testing.
+Winit absolute pointer motion, mouse buttons and scroll-axis events are routed to the surface under the pointer. Clicking a window raises and activates it, and transfers keyboard focus to its toplevel. XDG interactive move and resize requests are accepted only when the request serial matches an active pointer grab whose focused surface belongs to the requesting client. The compositor owns the grab while moving/resizing; resize requests respect the client's min/max size hints, send the `Resizing` state and requested size through XDG configure events, and send a final configure when the grab is released. Window geometry is refreshed on root and subsurface commits so the Smithay space uses current surface bounds.
+
+This remains a bring-up milestone, not a complete desktop. Pointer cursor rendering, touch routing, popup grabs, maximize/minimize and close controls, server-side decorations, workspaces, output-management protocols, multiple outputs, layer-shell and DRM/KMS are not implemented yet. BubblePanel therefore still needs a separate layer-shell-compatible compositor for visual testing.
 
 ## Settings-first design
 
