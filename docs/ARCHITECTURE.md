@@ -29,11 +29,12 @@ The shared protocol lives in the `bubble-ipc` workspace crate and is consumed by
 
 - Commands are deliberately narrow: capability discovery, workspace-state queries, previous/next workspace requests and activation of a workspace by index.
 - Frames are newline-delimited UTF-8 JSON, limited to 64 KiB, and must carry the supported protocol version.
-- The planned transport is a Unix-domain socket beneath the user's `XDG_RUNTIME_DIR`; no TCP listener or network-accessible endpoint is permitted.
-- The compositor will own the listening socket and remain authoritative for validation, workspace bounds and command execution.
-- The eventual server must restrict socket permissions and authenticate local peers using operating-system peer credentials (same-user policy by default).
-- Requests must be bounded and handled without blocking the compositor event loop. Unsupported versions, malformed frames and unavailable features receive structured errors.
-- The shared crate currently defines and tests the wire contract only. Socket lifecycle, peer authentication, dispatch and live workspace integration are intentionally separate follow-up steps.
+- The Linux transport binds a Unix-domain socket at `$XDG_RUNTIME_DIR/bubblewm/control.sock`; no TCP listener or network-accessible endpoint is provided.
+- The runtime directory and application subdirectory are checked without following symlinks. The application directory is restricted to mode `0700`, and the socket to `0600`.
+- The server checks Linux `SO_PEERCRED` and accepts only clients with the same effective UID by default. Stale sockets may be removed; regular files and active sockets are never replaced.
+- Frames are bounded, each connection is limited to one request/response exchange, and client reads/writes have timeouts. The accept loop must run on a dedicated worker thread, never on the compositor event loop.
+- The server transport and tests are implemented in `bubble-ipc::unix`. It is not yet started by the `bubblewm` executable: the compositor lifecycle and state-dispatch channel must be introduced before production integration.
+- Unsupported protocol versions receive structured errors. The application-level handler remains responsible for capability checks, workspace bounds and command execution.
 
 
 ## Settings-first design
