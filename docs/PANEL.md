@@ -16,7 +16,7 @@ The first implementation lives in the `bubblepanel/` workspace member. It is int
 - Low-overhead clock refresh: the event loop polls Wayland with a one-second timeout and redraws only when the displayed minute changes.
 - Pointer enter/motion/leave tracking and left-click press/release handling. A click is confirmed only when press and release target the same panel action.
 - Pointer scroll detection for vertical, horizontal and diagonal movement. Direction is resolved from high-resolution, discrete or continuous axis data.
-- Workspace scroll intent: vertical scrolling over a workspace hit region requests the previous/next workspace; horizontal scrolling and scrolling over other modules are ignored. This currently logs the request only; compositor/IPC integration is not yet available.
+- Workspace scroll intent: vertical scrolling over a workspace hit region requests the previous/next workspace; horizontal scrolling and scrolling over other modules are ignored. It currently logs the request only; the shared IPC wire contract is now defined, but no socket transport/server is connected yet.
 
 ### Explicitly not implemented yet
 
@@ -24,15 +24,16 @@ The first implementation lives in the `bubblepanel/` workspace member. It is int
 - Actual workspace switching through BubbleWM integration/IPC, plus keyboard and popup interactions. The panel currently detects and logs a workspace navigation request but does not switch workspaces.
 - Real network, audio, Bluetooth, battery or notification modules.
 - Multi-monitor surface management.
-- User-facing panel configuration and IPC.
+- User-facing panel configuration.
+- IPC socket transport, peer authentication, request dispatch and live compositor integration. The shared versioned wire protocol is implemented in the bubble-ipc crate, but it is not connected to a socket yet.
 - Blur, transparency and GPU rendering.
 
 ### Development order after the prototype
 
-1. Introduce a typed panel configuration and configurable top/bottom placement, dimensions and colors.
-2. Add protocol capability discovery and real workspace state.
-3. Add scroll/keyboard/popup interactions, then define interactive module contracts and status providers.
-4. Add per-output management and hotplug handling.
-5. Connect the panel configuration to BubbleSettings.
+1. Implement the local Unix-socket transport, peer authentication and bounded request dispatch using the shared bubble-ipc contract.
+2. Connect workspace commands to BubbleWM's authoritative workspace state and return capability/state responses.
+3. Add protocol capability discovery and real workspace state to the panel UI.
+4. Introduce typed panel configuration, configurable placement and per-output management.
+5. Add keyboard/popup interactions, module contracts and BubbleSettings integration.
 
 The panel must remain an optional Wayland client. A missing panel or panel crash must never terminate BubbleWM or its clients.
