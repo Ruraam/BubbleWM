@@ -9,10 +9,11 @@ repository = "https://github.com/Ruraam/BubbleWM"
 readme = "README.md"
 
 [workspace]
-members = ["bubblepanel"]
+members = ["bubble-ipc", "bubblepanel"]
 resolver = "3"
 
 [dependencies]
+bubble-ipc = { path = "bubble-ipc" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
