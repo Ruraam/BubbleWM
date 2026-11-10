@@ -148,7 +148,8 @@ impl CompositorHandler for BubblePanel {
         _qh: &QueueHandle<Self>,
         _surface: &wl_surface::WlSurface,
         _new_factor: i32,
-    ) {}
+    ) {
+    }
 
     fn transform_changed(
         &mut self,
@@ -156,7 +157,8 @@ impl CompositorHandler for BubblePanel {
         _qh: &QueueHandle<Self>,
         _surface: &wl_surface::WlSurface,
         _new_transform: wl_output::Transform,
-    ) {}
+    ) {
+    }
 
     fn frame(
         &mut self,
@@ -164,7 +166,8 @@ impl CompositorHandler for BubblePanel {
         _qh: &QueueHandle<Self>,
         _surface: &wl_surface::WlSurface,
         _time: u32,
-    ) {}
+    ) {
+    }
 
     fn surface_enter(
         &mut self,
@@ -172,7 +175,8 @@ impl CompositorHandler for BubblePanel {
         _qh: &QueueHandle<Self>,
         _surface: &wl_surface::WlSurface,
         _output: &wl_output::WlOutput,
-    ) {}
+    ) {
+    }
 
     fn surface_leave(
         &mut self,
@@ -180,7 +184,8 @@ impl CompositorHandler for BubblePanel {
         _qh: &QueueHandle<Self>,
         _surface: &wl_surface::WlSurface,
         _output: &wl_output::WlOutput,
-    ) {}
+    ) {
+    }
 }
 
 impl OutputHandler for BubblePanel {
@@ -193,21 +198,24 @@ impl OutputHandler for BubblePanel {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
         _output: wl_output::WlOutput,
-    ) {}
+    ) {
+    }
 
     fn update_output(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
         _output: wl_output::WlOutput,
-    ) {}
+    ) {
+    }
 
     fn output_destroyed(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
         _output: wl_output::WlOutput,
-    ) {}
+    ) {
+    }
 }
 
 impl LayerShellHandler for BubblePanel {
