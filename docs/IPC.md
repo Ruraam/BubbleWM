@@ -31,8 +31,8 @@ This is intentional. The endpoint is live and correctly reports the current feat
 
 ## Current implementation boundary
 
-The compositor is still an early nested prototype. It advertises wl_compositor, wl_shm, wl_seat, xdg-shell and one wl_output, accepts clients and renders mapped xdg toplevel windows through a Smithay Space. Its current window manager tracks toplevel map/unmap/remap/destruction and supports XDG interactive move/resize using validated pointer grabs. Basic pointer motion/button/axis routing, click-to-focus and focus restoration after unmap/destruction are implemented.
+The compositor is still an early nested prototype. It advertises wl_compositor, wl_shm, wl_seat, xdg-shell and one wl_output, accepts clients and renders mapped xdg toplevel windows through a Smithay Space. Its current window manager tracks toplevel map/unmap/remap/destruction, supports XDG interactive move/resize using validated pointer grabs, preserves floating geometry across maximize/unmaximize, tracks transient toplevel relationships and manages XDG popup placement, repositioning and grabs.
 
-These desktop operations are not exposed over IPC yet: protocol v1 still provides capability discovery and workspace requests only, and workspace requests correctly return unavailable. The compositor also does not yet implement workspace management, output-management protocols or multiple outputs, pointer cursor rendering, touch, maximize/minimize, compositor close controls, popup grabs, server-side decorations or the layer-shell server protocol.
+These desktop operations are not exposed over IPC yet: protocol v1 still provides capability discovery and workspace requests only, and workspace requests correctly return unavailable. The compositor also does not yet implement workspace management, output-management protocols or multiple outputs, pointer cursor rendering, touch, minimize, compositor-provided close controls, server-side decorations or the layer-shell server protocol.
 
 See docs/ARCHITECTURE.md and docs/ROADMAP.md for the next integration milestones.
