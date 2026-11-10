@@ -33,7 +33,9 @@ The shared protocol lives in the `bubble-ipc` workspace crate and is consumed by
 - The runtime directory and application subdirectory are checked without following symlinks. The application directory is restricted to mode `0700`, and the socket to `0600`.
 - The server checks Linux `SO_PEERCRED` and accepts only clients with the same effective UID by default. Stale sockets may be removed; regular files and active sockets are never replaced.
 - Frames are bounded, each connection is limited to one request/response exchange, and client reads/writes have timeouts. The accept loop must run on a dedicated worker thread, never on the compositor event loop.
-- The server transport and tests are implemented in `bubble-ipc::unix`. It is not yet started by the `bubblewm` executable: the compositor lifecycle and state-dispatch channel must be introduced before production integration.
+- The server transport and tests are implemented in `bubble-ipc::unix`. BubbleWM exposes an application-side bridge in `bubblewm::ipc`: a dedicated worker forwards requests through a bounded channel (64 entries) and waits up to two seconds for the compositor thread to respond.
+- The compositor thread must call `CoreCommandReceiver::dispatch_pending` from its own event loop. This keeps state access on the owner thread and prevents the IPC worker from touching Smithay state.
+- `IpcRuntime` owns worker startup/shutdown and joins the worker on explicit shutdown or drop. The bridge is tested, but the current executable does not start it because no Smithay event loop exists yet. See [IPC lifecycle](IPC.md).
 - Unsupported protocol versions receive structured errors. The application-level handler remains responsible for capability checks, workspace bounds and command execution.
 
 
