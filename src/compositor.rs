@@ -85,10 +85,12 @@ const RESIZE_EDGE_RIGHT: u32 = 8;
 struct ManagedWindow {
     window: Window,
     location: Point<i32, Logical>,
+    mapped_once: bool,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ResizeSession {
+    surface: WlSurface,
     edges: u32,
     initial_location: Point<i32, Logical>,
     initial_size: Size<i32, Logical>,
@@ -208,8 +210,14 @@ impl CompositorStateData {
             if let Some(location) = self.space.element_location(&window) {
                 self.windows[index].location = location;
                 self.space.unmap_elem(&window);
-                self.resize_session = None;
                 self.focus_topmost_window();
+            }
+            if self
+                .resize_session
+                .as_ref()
+                .is_some_and(|session| session.surface == *surface)
+            {
+                self.resize_session = None;
             }
             return;
         }
@@ -218,7 +226,9 @@ impl CompositorStateData {
 
         if self.space.element_location(&window).is_none() {
             let location = self.windows[index].location;
-            let activate = self.space.elements().next().is_none();
+            let activate =
+                !self.windows[index].mapped_once || self.space.elements().next().is_none();
+            self.windows[index].mapped_once = true;
             self.space.map_element(window.clone(), location, activate);
             if activate {
                 if let (Some(keyboard), Some(toplevel)) =
@@ -233,18 +243,11 @@ impl CompositorStateData {
             }
         }
 
-        if let Some(session) = self.resize_session.filter(|session| {
-            session
-                .initial_location
-                .x
-                .checked_add(session.initial_size.w)
-                .is_some()
-                && self
-                    .windows[index]
-                    .window
-                    .toplevel()
-                    .is_some_and(|toplevel| toplevel.wl_surface() == surface)
-        }) {
+        if let Some(session) = self
+            .resize_session
+            .clone()
+            .filter(|session| session.surface == *surface)
+        {
             let geometry = window.geometry();
             let mut location = session.initial_location;
             if session.edges & RESIZE_EDGE_LEFT != 0 {
@@ -353,6 +356,7 @@ impl CompositorStateData {
         }
 
         self.resize_session = Some(ResizeSession {
+            surface: surface.wl_surface().clone(),
             edges: edge_bits,
             initial_location,
             initial_size,
@@ -459,6 +463,7 @@ impl XdgShellHandler for CompositorStateData {
         self.windows.push(ManagedWindow {
             window,
             location,
+            mapped_once: false,
         });
 
         // The XDG role's first configure/commit cycle is managed by Smithay.
@@ -503,14 +508,8 @@ impl XdgShellHandler for CompositorStateData {
 
         if self
             .resize_session
-            .is_some_and(|session| {
-                self.windows.iter().all(|entry| {
-                    entry
-                        .window
-                        .toplevel()
-                        .is_none_or(|toplevel| toplevel.wl_surface() != &root)
-                })
-            })
+            .as_ref()
+            .is_some_and(|session| session.surface == root)
         {
             self.resize_session = None;
         }
@@ -552,6 +551,48 @@ impl SeatHandler for CompositorStateData {
 }
 
 
+
+fn calculate_resize_size(
+    initial_size: Size<i32, Logical>,
+    delta: Point<f64, Logical>,
+    edges: u32,
+    min_size: Size<i32, Logical>,
+    max_size: Size<i32, Logical>,
+) -> Size<i32, Logical> {
+    let mut width = initial_size.w as f64;
+    let mut height = initial_size.h as f64;
+
+    if edges & RESIZE_EDGE_LEFT != 0 {
+        width -= delta.x;
+    } else if edges & RESIZE_EDGE_RIGHT != 0 {
+        width += delta.x;
+    }
+    if edges & RESIZE_EDGE_TOP != 0 {
+        height -= delta.y;
+    } else if edges & RESIZE_EDGE_BOTTOM != 0 {
+        height += delta.y;
+    }
+
+    let min_width = min_size.w.max(1);
+    let min_height = min_size.h.max(1);
+    let max_width = if max_size.w <= 0 {
+        i32::MAX
+    } else {
+        max_size.w.max(min_width)
+    };
+    let max_height = if max_size.h <= 0 {
+        i32::MAX
+    } else {
+        max_size.h.max(min_height)
+    };
+
+    (
+        (width.round() as i32).clamp(min_width, max_width),
+        (height.round() as i32).clamp(min_height, max_height),
+    )
+        .into()
+}
+
 impl PointerGrab<CompositorStateData> for WindowPointerGrab {
     fn motion(
         &mut self,
@@ -580,20 +621,6 @@ impl PointerGrab<CompositorStateData> for WindowPointerGrab {
                 initial_size,
                 last_size,
             } => {
-                let mut width = initial_size.w as f64;
-                let mut height = initial_size.h as f64;
-
-                if edges & RESIZE_EDGE_LEFT != 0 {
-                    width -= delta.x;
-                } else if edges & RESIZE_EDGE_RIGHT != 0 {
-                    width += delta.x;
-                }
-                if edges & RESIZE_EDGE_TOP != 0 {
-                    height -= delta.y;
-                } else if edges & RESIZE_EDGE_BOTTOM != 0 {
-                    height += delta.y;
-                }
-
                 let (min_size, max_size) = self
                     .window
                     .wl_surface()
@@ -605,25 +632,8 @@ impl PointerGrab<CompositorStateData> for WindowPointerGrab {
                         })
                     })
                     .unwrap_or(((0, 0).into(), (0, 0).into()));
-
-                let min_width = min_size.w.max(1);
-                let min_height = min_size.h.max(1);
-                let max_width = if max_size.w <= 0 {
-                    i32::MAX
-                } else {
-                    max_size.w.max(min_width)
-                };
-                let max_height = if max_size.h <= 0 {
-                    i32::MAX
-                } else {
-                    max_size.h.max(min_height)
-                };
-
-                let next_size = (
-                    (width.round() as i32).clamp(min_width, max_width),
-                    (height.round() as i32).clamp(min_height, max_height),
-                )
-                    .into();
+                let next_size =
+                    calculate_resize_size(*initial_size, delta, *edges, min_size, max_size);
                 *last_size = next_size;
 
                 if let Some(toplevel) = self.window.toplevel() {
@@ -655,7 +665,8 @@ impl PointerGrab<CompositorStateData> for WindowPointerGrab {
     ) {
         handle.button(data, event);
         if handle.current_pressed().is_empty() {
-            if let WindowGrabKind::Resize { last_size, .. } = self.kind {
+            if let WindowGrabKind::Resize { last_size, .. } = &self.kind {
+                let last_size = *last_size;
                 if let Some(toplevel) = self.window.toplevel() {
                     toplevel.with_pending_state(|state| {
                         state.states.unset(xdg_toplevel::State::Resizing);
@@ -1087,6 +1098,42 @@ fn send_frames_surface_tree(surface: &wl_surface::WlSurface, time: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resizing_from_the_right_and_bottom_tracks_pointer_delta() {
+        let size = calculate_resize_size(
+            (800, 600).into(),
+            (40.0, 25.0).into(),
+            RESIZE_EDGE_RIGHT | RESIZE_EDGE_BOTTOM,
+            (1, 1).into(),
+            (0, 0).into(),
+        );
+        assert_eq!(size, (840, 625).into());
+    }
+
+    #[test]
+    fn resizing_from_the_left_and_top_keeps_opposite_edges_fixed() {
+        let size = calculate_resize_size(
+            (800, 600).into(),
+            (40.0, 25.0).into(),
+            RESIZE_EDGE_LEFT | RESIZE_EDGE_TOP,
+            (1, 1).into(),
+            (0, 0).into(),
+        );
+        assert_eq!(size, (760, 575).into());
+    }
+
+    #[test]
+    fn resize_respects_client_minimum_and_maximum_sizes() {
+        let size = calculate_resize_size(
+            (800, 600).into(),
+            (500.0, 500.0).into(),
+            RESIZE_EDGE_LEFT | RESIZE_EDGE_TOP,
+            (320, 240).into(),
+            (700, 500).into(),
+        );
+        assert_eq!(size, (700, 500).into());
+    }
 
     #[test]
     fn output_mode_uses_millihertz_refresh_units() {
