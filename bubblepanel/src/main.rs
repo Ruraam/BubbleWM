@@ -19,7 +19,7 @@ use smithay_client_toolkit::{
     registry_handlers,
     seat::{
         Capability, SeatHandler, SeatState,
-        pointer::{BTN_LEFT, PointerEvent, PointerEventKind, PointerHandler},
+        pointer::{AxisScroll, BTN_LEFT, PointerEvent, PointerEventKind, PointerHandler},
     },
     shell::{
         WaylandSurface,
@@ -209,6 +209,61 @@ fn main() -> Result<()> {
 
     info!("BubblePanel surface was closed by the compositor");
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HorizontalScrollDirection {
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VerticalScrollDirection {
+    Up,
+    Down,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ScrollDirections {
+    horizontal: Option<HorizontalScrollDirection>,
+    vertical: Option<VerticalScrollDirection>,
+}
+
+fn axis_sign(axis: &AxisScroll) -> Option<bool> {
+    if axis.value120 != 0 {
+        return Some(axis.value120.is_positive());
+    }
+    if axis.discrete != 0 {
+        return Some(axis.discrete.is_positive());
+    }
+    if axis.absolute.is_finite() && axis.absolute != 0.0 {
+        return Some(axis.absolute.is_sign_positive());
+    }
+    None
+}
+
+/// Converts Wayland axis data into logical directions without treating stop-only
+/// or zero-movement axis frames as scroll gestures.
+fn scroll_directions(horizontal: &AxisScroll, vertical: &AxisScroll) -> Option<ScrollDirections> {
+    let horizontal = axis_sign(horizontal).map(|positive| {
+        if positive {
+            HorizontalScrollDirection::Right
+        } else {
+            HorizontalScrollDirection::Left
+        }
+    });
+    let vertical = axis_sign(vertical).map(|positive| {
+        if positive {
+            VerticalScrollDirection::Down
+        } else {
+            VerticalScrollDirection::Up
+        }
+    });
+
+    (horizontal.is_some() || vertical.is_some()).then_some(ScrollDirections {
+        horizontal,
+        vertical,
+    })
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -483,6 +538,17 @@ impl PointerHandler for BubblePanel {
                         info!(?action, x, y, "BubblePanel left-click completed");
                     }
                 }
+                PointerEventKind::Axis { horizontal, vertical, .. } => {
+                    if let Some(directions) = scroll_directions(horizontal, vertical) {
+                        info!(
+                            ?directions,
+                            ?action,
+                            x,
+                            y,
+                            "BubblePanel pointer scroll detected"
+                        );
+                    }
+                }
                 _ => {}
             }
         }
@@ -719,6 +785,67 @@ mod tests {
             action: PanelAction::Launcher,
         }];
         assert_eq!(hit_test(&regions, 0, 0), None);
+    }
+
+    #[test]
+    fn scroll_direction_uses_high_resolution_axis_data_first() {
+        let axis = AxisScroll {
+            value120: 120,
+            discrete: -1,
+            absolute: -15.0,
+            ..AxisScroll::default()
+        };
+        assert_eq!(axis_sign(&axis), Some(true));
+    }
+
+    #[test]
+    fn scroll_direction_falls_back_to_discrete_then_absolute_data() {
+        let discrete = AxisScroll {
+            discrete: -1,
+            absolute: 10.0,
+            ..AxisScroll::default()
+        };
+        assert_eq!(axis_sign(&discrete), Some(false));
+
+        let absolute = AxisScroll {
+            absolute: 0.5,
+            ..AxisScroll::default()
+        };
+        assert_eq!(axis_sign(&absolute), Some(true));
+    }
+
+    #[test]
+    fn scroll_directions_support_vertical_horizontal_and_diagonal_motion() {
+        let horizontal = AxisScroll {
+            absolute: -1.0,
+            ..AxisScroll::default()
+        };
+        let vertical = AxisScroll {
+            value120: 120,
+            ..AxisScroll::default()
+        };
+        assert_eq!(
+            scroll_directions(&horizontal, &vertical),
+            Some(ScrollDirections {
+                horizontal: Some(HorizontalScrollDirection::Left),
+                vertical: Some(VerticalScrollDirection::Down),
+            })
+        );
+    }
+
+    #[test]
+    fn scroll_direction_ignores_zero_stop_only_and_non_finite_motion() {
+        let no_motion = AxisScroll {
+            stop: true,
+            ..AxisScroll::default()
+        };
+        let invalid_motion = AxisScroll {
+            absolute: f64::NAN,
+            ..AxisScroll::default()
+        };
+        assert_eq!(axis_sign(&no_motion), None);
+        assert_eq!(axis_sign(&invalid_motion), None);
+        assert_eq!(scroll_directions(&no_motion, &invalid_motion), None);
     }
 
     #[test]
