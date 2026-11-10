@@ -142,13 +142,23 @@ where
     T: DeserializeOwned,
 {
     let mut bytes = Vec::with_capacity(256);
-    let mut limited = (&mut *reader).take((MAX_FRAME_SIZE + 2) as u64);
-    let read = limited.read_until(b'\n', &mut bytes)?;
-    if bytes.len() > MAX_FRAME_SIZE + 1 {
-        return Err(ProtocolError::FrameTooLarge);
-    }
-    if read == 0 || bytes.last() != Some(&b'\n') {
-        return Err(ProtocolError::UnterminatedFrame);
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return Err(ProtocolError::UnterminatedFrame);
+        }
+
+        let newline = available.iter().position(|byte| *byte == b'\\n');
+        let chunk_len = newline.map_or(available.len(), |position| position + 1);
+        if bytes.len() + chunk_len > MAX_FRAME_SIZE + 1 {
+            return Err(ProtocolError::FrameTooLarge);
+        }
+
+        bytes.extend_from_slice(&available[..chunk_len]);
+        reader.consume(chunk_len);
+        if newline.is_some() {
+            break;
+        }
     }
     bytes.pop();
     serde_json::from_slice(&bytes).map_err(ProtocolError::from)
