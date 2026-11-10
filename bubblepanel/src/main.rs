@@ -5,7 +5,7 @@
 //! the surface is configured; periodic refresh and interactive modules follow
 //! in the next implementation step.
 
-use std::num::NonZeroU32;
+use std::{num::NonZeroU32, os::fd::AsRawFd};
 
 use anyhow::{Context, Result};
 use smithay_client_toolkit::{
@@ -84,13 +84,39 @@ fn main() -> Result<()> {
         height: PANEL_HEIGHT,
         first_configure: true,
         closed: false,
+        clock_minute: current_clock_minute(),
     };
 
     info!("Waiting for the compositor to configure BubblePanel");
+    let mut wayland_fd = connection.as_fd().as_raw_fd();
     while !panel.closed {
-        event_queue
-            .blocking_dispatch(&mut panel)
-            .context("Wayland event dispatch failed")?;
+        // Poll instead of blocking indefinitely so the clock can refresh without
+        // introducing a background thread or continuously requesting frames.
+        let mut descriptor = libc::pollfd {
+            fd: wayland_fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // A one-second timeout keeps the loop responsive while the clock itself
+        // is only redrawn when its displayed minute changes.
+        let ready = unsafe { libc::poll(&mut descriptor, 1, 1_000) };
+        if ready < 0 {
+            let error = std::io::Error::last_os_error();
+            if error.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error).context("cannot poll the Wayland connection");
+        }
+        if ready > 0 {
+            if descriptor.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+                anyhow::bail!("Wayland connection closed or became invalid");
+            }
+            event_queue
+                .blocking_dispatch(&mut panel)
+                .context("Wayland event dispatch failed")?;
+        } else if panel.clock_minute != current_clock_minute() {
+            panel.draw().context("cannot refresh the panel clock")?;
+        }
     }
 
     info!("BubblePanel surface was closed by the compositor");
@@ -107,6 +133,7 @@ struct BubblePanel {
     height: u32,
     first_configure: bool,
     closed: bool,
+    clock_minute: String,
 }
 
 impl BubblePanel {
@@ -137,6 +164,7 @@ impl BubblePanel {
             .attach_to(self.layer.wl_surface())
             .context("cannot attach the panel buffer")?;
         self.layer.commit();
+        self.clock_minute = current_clock_minute();
         Ok(())
     }
 }
@@ -261,6 +289,10 @@ impl ProvidesRegistryState for BubblePanel {
 }
 
 smithay_client_toolkit::delegate_dispatch2!(BubblePanel);
+
+fn current_clock_minute() -> String {
+    chrono::Local::now().format("%Y-%m-%d %H:%M").to_string()
+}
 
 fn fill_rect(
     canvas: &mut [u8],
