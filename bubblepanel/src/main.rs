@@ -81,7 +81,7 @@ pub fn hit_test(regions: &[HitRegion], x: u32, y: u32) -> Option<PanelAction> {
         .map(|region| region.action)
 }
 
-/// Describes initial clickable areas; pointer events are deliberately not wired yet.
+/// Describes the initial launcher, workspace and clock hit regions.
 pub fn interactive_regions(width: u32, height: u32) -> Vec<HitRegion> {
     let panel_height = height.min(PANEL_HEIGHT);
     let launcher_x = 8;
