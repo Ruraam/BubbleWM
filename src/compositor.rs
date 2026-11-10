@@ -37,7 +37,7 @@ use smithay::{
     },
     input::{
         Seat, SeatHandler, SeatState,
-        keyboard::{FilterResult, KeyboardHandle, keysyms},
+        keyboard::{FilterResult, KeyboardHandle, Keysym, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, CursorImageStatus, Focus, GestureHoldBeginEvent,
             GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent,
@@ -164,6 +164,27 @@ struct CompositorStateData {
     resize_session: Option<ResizeSession>,
     next_window_position: u32,
     next_minimized_order: u64,
+    suppressed_keys: Vec<Keysym>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CompositorShortcut {
+    Minimize,
+    Restore,
+    Close,
+}
+
+fn compositor_shortcut(modifiers: ModifiersState, keysym: Keysym) -> Option<CompositorShortcut> {
+    if !modifiers.logo {
+        return None;
+    }
+
+    match keysym {
+        Keysym::h => Some(CompositorShortcut::Minimize),
+        Keysym::Tab => Some(CompositorShortcut::Restore),
+        Keysym::q => Some(CompositorShortcut::Close),
+        _ => None,
+    }
 }
 
 impl CompositorStateData {
@@ -1556,6 +1577,7 @@ pub fn run_winit() -> Result<()> {
         resize_session: None,
         next_window_position: 0,
         next_minimized_order: 0,
+        suppressed_keys: Vec::new(),
     };
     state.space.map_output(&output, (0, 0));
 
@@ -1607,27 +1629,34 @@ pub fn run_winit() -> Result<()> {
                         event.state(),
                         SERIAL_COUNTER.next_serial(),
                         (event.time() / 1000) as u32,
-                        |state, modifiers, key| {
-                            if event.state() != smithay::backend::input::KeyState::Pressed
-                                || !modifiers.logo
-                            {
-                                return FilterResult::Forward;
-                            }
+                        |compositor, modifiers, key| {
+                            let keysym = key.modified_sym();
+                            if event.state() == smithay::backend::input::KeyState::Pressed {
+                                if let Some(action) = compositor_shortcut(*modifiers, keysym) {
+                                    if !compositor.suppressed_keys.contains(&keysym) {
+                                        compositor.suppressed_keys.push(keysym);
+                                    }
 
-                            match key.modified_sym().0 {
-                                keysyms::KEY_h => {
-                                    state.minimize_focused_window();
+                                    match action {
+                                        CompositorShortcut::Minimize => {
+                                            compositor.minimize_focused_window();
+                                        }
+                                        CompositorShortcut::Restore => {
+                                            compositor.restore_last_minimized_window();
+                                        }
+                                        CompositorShortcut::Close => {
+                                            compositor.close_focused_window();
+                                        }
+                                    }
                                     FilterResult::Intercept(())
+                                } else {
+                                    FilterResult::Forward
                                 }
-                                keysyms::KEY_Tab => {
-                                    state.restore_last_minimized_window();
-                                    FilterResult::Intercept(())
-                                }
-                                keysyms::KEY_q => {
-                                    state.close_focused_window();
-                                    FilterResult::Intercept(())
-                                }
-                                _ => FilterResult::Forward,
+                            } else if compositor.suppressed_keys.contains(&keysym) {
+                                compositor.suppressed_keys.retain(|key| *key != keysym);
+                                FilterResult::Intercept(())
+                            } else {
+                                FilterResult::Forward
                             }
                         },
                     );
@@ -1866,6 +1895,40 @@ fn send_frames_surface_tree(surface: &wl_surface::WlSurface, time: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compositor_shortcuts_require_the_logo_modifier() {
+        assert_eq!(
+            compositor_shortcut(ModifiersState::default(), Keysym::h),
+            None
+        );
+        assert_eq!(
+            compositor_shortcut(
+                ModifiersState {
+                    logo: true,
+                    ..ModifiersState::default()
+                },
+                Keysym::h
+            ),
+            Some(CompositorShortcut::Minimize)
+        );
+    }
+
+    #[test]
+    fn compositor_shortcuts_map_restore_and_close_keys() {
+        let modifiers = ModifiersState {
+            logo: true,
+            ..ModifiersState::default()
+        };
+        assert_eq!(
+            compositor_shortcut(modifiers, Keysym::Tab),
+            Some(CompositorShortcut::Restore)
+        );
+        assert_eq!(
+            compositor_shortcut(modifiers, Keysym::q),
+            Some(CompositorShortcut::Close)
+        );
+    }
 
     #[test]
     fn resizing_from_the_right_and_bottom_tracks_pointer_delta() {
