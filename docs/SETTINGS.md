@@ -1,6 +1,6 @@
 # BubbleSettings
 
-BubbleSettings is the graphical control center for BubbleWM. It is a separate application, not a window embedded into the compositor.
+BubbleSettings is the graphical control center for BubbleWM and its optional desktop components. It is a separate application, not a window embedded into the compositor.
 
 ## User experience
 
@@ -13,10 +13,26 @@ The application must make common changes discoverable without requiring users to
 3. **Decorations** — titlebar visibility, button layout, borders, corner radius and client/server decoration preference.
 4. **Effects** — blur, transparency, shadows, fade, zoom, slide, wobble and workspace transitions.
 5. **Workspaces** — number, names, navigation and per-workspace layout.
-6. **Input** — keyboard shortcuts, pointer options, gestures and repeat behavior.
-7. **Displays** — scale, refresh rate, arrangement and per-monitor preferences.
-8. **Performance** — quality presets, reduced motion, frame pacing and low-resource mode.
-9. **Advanced** — diagnostics, configuration location, IPC state and logs.
+6. **Panel** — enablement, Classic/Floating/Compact profiles, position, dimensions, monitors, modules, ordering, styling and interactions.
+7. **Input** — keyboard shortcuts, pointer options, gestures and repeat behavior.
+8. **Displays** — scale, refresh rate, arrangement and per-monitor preferences.
+9. **Performance** — quality presets, reduced motion, frame pacing and low-resource mode.
+10. **Advanced** — diagnostics, configuration location, IPC state and logs.
+
+## Panel settings
+
+The Panel section manages BubblePanel without requiring manual configuration editing:
+
+- Enable or disable the independent panel process.
+- Choose Classic, Floating or Compact as a starting preset.
+- Set top, bottom, left or right placement and configure dimensions, margins and spacing.
+- Select outputs and configure per-monitor behavior.
+- Add, remove, reorder and configure available modules.
+- Configure module visibility, alignment, icons, labels, tooltips and supported click/scroll actions.
+- Adjust colors, opacity, blur where supported, borders, radius, typography and separators.
+- Configure autohide, exclusive zone and reduced-motion behavior.
+- Preview changes and apply them live when safe.
+- Display clear explanations when a module requires an unavailable protocol or system service.
 
 ## Interaction requirements
 
@@ -36,23 +52,24 @@ Each setting must have:
 - A type, default and validation rule.
 - A supported-value range or enumeration.
 - A live-apply or restart-required policy.
-- A capability fallback when hardware or renderer support is missing.
+- A capability fallback when hardware or protocol support is missing.
 
-The GUI edits a candidate configuration. The compositor validates the candidate, applies it transactionally, and acknowledges success or returns a structured error. Invalid changes must never partially corrupt the active state.
+The GUI edits a candidate configuration. The owning component validates the candidate, applies it transactionally, and acknowledges success or returns a structured error. Invalid changes must never partially corrupt the active state.
 
 ## Persistence and safety
 
-- Default location: `$XDG_CONFIG_HOME/bubblewm/config.toml`, falling back to `~/.config/bubblewm/config.toml`.
+- Compositor configuration: `$XDG_CONFIG_HOME/bubblewm/config.toml`, falling back to `~/.config/bubblewm/config.toml`.
+- Panel configuration: `$XDG_CONFIG_HOME/bubblewm/panel.toml`, falling back to `~/.config/bubblewm/panel.toml`.
 - Write atomically; never truncate the active file before validation succeeds.
 - Keep a recoverable backup of the last valid configuration.
 - Version the schema and provide explicit migrations.
-- Do not require the GUI to be running for the compositor to start.
+- Do not require the GUI or panel to be running for the compositor to start.
 - Do not require manual TOML editing for normal operation.
 
 ## Implementation order
 
-1. Typed schema and validation.
+1. Typed schemas and validation.
 2. Atomic persistence, backup and migration.
 3. Versioned IPC with structured acknowledgements.
-4. Settings UI and searchable categories.
+4. Settings UI and searchable categories, including Panel.
 5. Live previews and per-setting restart indicators.
