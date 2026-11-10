@@ -538,7 +538,11 @@ impl PointerHandler for BubblePanel {
                         info!(?action, x, y, "BubblePanel left-click completed");
                     }
                 }
-                PointerEventKind::Axis { horizontal, vertical, .. } => {
+                PointerEventKind::Axis {
+                    horizontal,
+                    vertical,
+                    ..
+                } => {
                     if let Some(directions) = scroll_directions(horizontal, vertical) {
                         info!(
                             ?directions,
