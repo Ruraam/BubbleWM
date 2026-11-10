@@ -2,7 +2,7 @@
 
 A native, lightweight and customizable Wayland compositor for BubbleOS, written in Rust and built on Smithay.
 
-> **Status:** early development. This repository is being established incrementally. It is not yet a usable Wayland compositor.
+> **Status:** early development. The compositor is not yet a usable Wayland desktop. The separate BubblePanel prototype is the first runnable Wayland client component.
 
 ## Project principles
 
@@ -13,15 +13,30 @@ A native, lightweight and customizable Wayland compositor for BubbleOS, written 
 - Make visual effects optional and degrade gracefully when unsupported.
 - Prefer explicit, documented behavior over placeholder feature claims.
 
-## Current milestone: 0.1.0
+## Workspace
 
-The initial milestone establishes the project structure, configuration model, documentation and CI. A working nested compositor is the next milestone.
+- **bubblewm:** compositor foundation, configuration and future Smithay server.
+- **bubblepanel:** independent Wayland panel client using Smithay Client Toolkit.
+
+## BubblePanel prototype
+
+The first panel milestone connects to a Wayland compositor, creates a bottom `wlr-layer-shell` surface, reserves a 40-pixel exclusive zone and renders a three-zone layout with workspace/status placeholders and a seven-segment local-time clock.
+
+```sh
+cargo build -p bubblepanel
+cargo run -p bubblepanel
+```
+
+BubblePanel currently requires a compositor that supports `wlr-layer-shell`. BubbleWM does not yet implement that server protocol, so use an existing compatible Wayland compositor for this initial visual prototype. The clock is sampled when the surface is configured; periodic refresh and interactive modules are future work.
+
+See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANEL.md).
 
 ## Requirements
 
 - Rust 1.87 or newer.
 - Cargo.
-- A graphical session for future nested-backend testing.
+- A Wayland session for running BubblePanel.
+- `wlr-layer-shell` support in the compositor used to test the panel.
 - Native development libraries required by the selected Smithay backend.
 
 ## Planned subsystems
@@ -32,15 +47,13 @@ The initial milestone establishes the project structure, configuration model, do
 - **BubbleDecor:** server-side titlebars, borders and controls.
 - **BubbleFX:** animation scheduler, effects and GPU shader pipeline.
 - **BubbleColor:** wallpaper-derived palettes and contrast validation.
+- **BubblePanel:** modular panel, task list, workspace indicators and system modules.
+- **BubbleSettings:** graphical configuration for compositor and desktop components.
 - **IPC:** versioned local control interface for shell/settings integration.
 
 ## Roadmap
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Build
-
-Build instructions will be finalized alongside the first implemented Smithay backend. Do not treat this milestone as a functioning compositor.
+See [docs/ROADMAP.md](docs/ROADMAP.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/PANEL.md](docs/PANEL.md).
 
 ## License
 
