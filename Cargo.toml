@@ -1,0 +1,20 @@
+[package]
+name = "bubblewm"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+license = "GPL-3.0-or-later"
+description = "A native, lightweight and customizable Wayland compositor for BubbleOS."
+repository = "https://github.com/Ruraam/BubbleWM"
+readme = "README.md"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+smithay = { version = "0.7", default-features = false, features = ["backend_winit", "wayland_frontend", "desktop"] }
+
+[dev-dependencies]
+tempfile = "3"
