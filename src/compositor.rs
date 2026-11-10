@@ -1848,7 +1848,12 @@ pub fn run_winit() -> Result<()> {
                 SolidColorRenderElement,
             >(&mut frame, 1.0, &decorations, &[damage])
             .context("cannot render server-side decorations")?;
-            frame.finish().context("cannot finish the Winit frame")?;
+            let sync_point = frame.finish().context("cannot finish the Winit frame")?;
+            loop {
+                if sync_point.wait().is_ok() {
+                    break;
+                }
+            }
         }
 
         for surface in state.xdg_shell_state.toplevel_surfaces() {
