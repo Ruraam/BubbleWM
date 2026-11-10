@@ -20,8 +20,7 @@ fn main() -> Result<()> {
     tracing::info!("Configured layout: {}", config.core.layout);
 
     match config.core.backend.as_str() {
-        "winit" => bubblewm::compositor::run_winit()
-            .context("BubbleWM Winit compositor failed"),
+        "winit" => bubblewm::compositor::run_winit().context("BubbleWM Winit compositor failed"),
         "drm" => bail!("the DRM/KMS backend is not implemented yet; use core.backend = \"winit\""),
         backend => bail!("unsupported compositor backend: {backend}"),
     }
