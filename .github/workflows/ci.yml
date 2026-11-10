@@ -28,5 +28,5 @@ jobs:
           components: rustfmt
       - name: Format
         run: cargo fmt --all -- --check
-      - name: Test
-        run: cargo test --all-targets
+      - name: Test workspace
+        run: cargo test --workspace --all-targets
