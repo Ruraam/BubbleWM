@@ -29,6 +29,7 @@
 - Dedicated graphical settings application.
 - Searchable categories, descriptions, presets and reset controls.
 - Live previews and clear apply/restart feedback.
+- Panel settings and module-management interface.
 - The compositor remains functional without the settings app.
 
 ## 0.7.0 — BubbleColor
@@ -40,7 +41,14 @@
 - Fade, slide, zoom, shadows, transparency and blur.
 - Wobble and workspace transitions, with quality profiles.
 
-## 0.9.0 — Native backend
+## 0.9.0 — BubblePanel
+- Independent Rust Wayland panel process.
+- Layer-shell integration and capability detection.
+- Three-zone layout, clock, workspaces and system modules.
+- Multi-monitor support, profiles and validated configuration.
+- BubbleSettings integration and graceful degradation.
+
+## 0.10.0 — Native backend
 - DRM/KMS session support.
 - Multi-output and per-monitor settings.
 - Robustness, accessibility and performance testing.
