@@ -10,9 +10,18 @@ BubbleWM is a standalone Wayland compositor. BubbleOS integration must remain op
 - **BubbleDecor:** server-side titlebars, borders and window controls.
 - **BubbleFX:** effect scheduling, animation and GPU shader pipeline.
 - **BubbleColor:** wallpaper analysis, palette generation and contrast validation.
-- **Settings application:** a dedicated graphical application for discovering and editing every supported user-facing option.
+- **BubblePanel:** independent, modular Wayland panel for workspaces, task lists, launchers and system indicators.
+- **BubbleSettings:** dedicated graphical control center for discovering and editing supported user-facing options.
 - **Configuration service:** typed configuration, validation, persistence, reload and migration.
-- **IPC:** versioned local control interface for the shell, settings application and external tools.
+- **IPC:** versioned local control interfaces for the panel, settings application, shell and external tools.
+
+## Process boundaries
+
+BubbleWM, BubblePanel and BubbleSettings are separate processes. A failure or restart in BubblePanel must not terminate the compositor or disrupt client windows. BubbleWM must remain usable without either BubblePanel or BubbleSettings.
+
+BubblePanel is a Wayland client. It should use layer-shell when available for panel placement, anchors and exclusive zones, and detect optional protocols before enabling dependent features. It must not assume every Wayland compositor exposes the same protocol set.
+
+The panel owns its module lifecycle and presentation. It obtains compositor information through supported Wayland protocols and communicates with BubbleWM through a versioned local IPC interface only for BubbleWM-specific controls that are not covered by standard protocols.
 
 ## Settings-first design
 
@@ -27,6 +36,7 @@ Settings are organized by task rather than by internal Rust module:
 - Decorations: titlebar, buttons, borders, corner radius and client/server decoration preference.
 - Effects: blur, transparency, shadows, animations, wobble and workspace transitions.
 - Workspaces: count, names, navigation and layout behavior.
+- Panel: enablement, position, size, monitors, profiles, modules, styling and interactions.
 - Input: keyboard shortcuts, pointer behavior, gestures and repeat settings.
 - Displays: scale, refresh, output arrangement and per-monitor preferences.
 - Performance: effect quality, frame pacing, reduced motion and low-resource profile.
@@ -37,15 +47,16 @@ The interface should provide search, sensible presets, contextual explanations, 
 ## Configuration and reliability
 
 - Store user configuration under `$XDG_CONFIG_HOME/bubblewm/` (default: `~/.config/bubblewm/`).
-- Keep a versioned schema and migrate older configuration safely.
+- Keep compositor and panel configuration logically separate, with shared theme tokens and versioning conventions.
+- Use a versioned schema and migrate older configuration safely.
 - Preserve comments and unknown extension keys when writing configuration where practical.
 - Apply changes transactionally: validate the complete candidate before replacing the active configuration.
 - Use atomic file replacement and retain a recoverable previous configuration.
 - Never block the compositor event loop with disk I/O, image analysis or IPC work.
-- Treat IPC clients and configuration files as untrusted input.
-- Make optional effects fail safely when a renderer capability is unavailable.
+- Treat IPC clients, module output and configuration files as untrusted input.
+- Bound custom module execution time, output size and environment.
+- Make optional effects and panel modules fail safely when a protocol, renderer or hardware capability is unavailable.
 - Track damage and avoid repainting unchanged regions.
-- Keep BubbleWM usable when the settings application is not installed or running.
 
 ## Decoration negotiation
 
