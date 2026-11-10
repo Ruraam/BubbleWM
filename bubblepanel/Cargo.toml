@@ -1,0 +1,16 @@
+[package]
+name = "bubblepanel"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+license = "GPL-3.0-or-later"
+description = "A lightweight modular Wayland panel for BubbleOS."
+repository = "https://github.com/Ruraam/BubbleWM"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+smithay-client-toolkit = "0.21.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+wayland-client = "0.31.14"
