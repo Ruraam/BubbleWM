@@ -8,6 +8,9 @@ use std::io::{self, BufRead, Write};
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+#[cfg(target_os = "linux")]
+pub mod unix;
+
 /// Current IPC protocol version.
 pub const PROTOCOL_VERSION: u16 = 1;
 
@@ -64,6 +67,7 @@ pub enum ResponseData {
 pub enum ErrorCode {
     InvalidRequest,
     UnsupportedCommand,
+    UnsupportedVersion,
     Unavailable,
     Internal,
 }
