@@ -17,6 +17,10 @@ use smithay_client_toolkit::{
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
+    seat::{
+        pointer::{PointerEvent, PointerEventKind, PointerHandler, BTN_LEFT},
+        Capability, SeatHandler, SeatState,
+    },
     shell::{
         WaylandSurface,
         wlr_layer::{
@@ -31,7 +35,7 @@ use tracing_subscriber::EnvFilter;
 use wayland_client::{
     Connection, QueueHandle,
     globals::registry_queue_init,
-    protocol::{wl_output, wl_shm, wl_surface},
+    protocol::{wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
 };
 
 const PANEL_HEIGHT: u32 = 40;
@@ -158,6 +162,7 @@ fn main() -> Result<()> {
     let mut panel = BubblePanel {
         registry_state: RegistryState::new(&globals),
         output_state: OutputState::new(&globals, &queue_handle),
+        seat_state: SeatState::new(&globals, &queue_handle),
         shm,
         pool,
         layer,
@@ -166,6 +171,7 @@ fn main() -> Result<()> {
         first_configure: true,
         closed: false,
         clock_minute: current_clock_minute(),
+        pointer: None,
     };
 
     info!("Waiting for the compositor to configure BubblePanel");
@@ -207,6 +213,7 @@ fn main() -> Result<()> {
 struct BubblePanel {
     registry_state: RegistryState,
     output_state: OutputState,
+    seat_state: SeatState,
     shm: Shm,
     pool: SlotPool,
     layer: LayerSurface,
@@ -215,6 +222,7 @@ struct BubblePanel {
     first_configure: bool,
     closed: bool,
     clock_minute: String,
+    pointer: Option<wl_pointer::WlPointer>,
 }
 
 impl BubblePanel {
@@ -353,6 +361,85 @@ impl LayerShellHandler for BubblePanel {
     }
 }
 
+impl SeatHandler for BubblePanel {
+    fn seat_state(&mut self) -> &mut SeatState {
+        &mut self.seat_state
+    }
+
+    fn new_seat(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _seat: wl_seat::WlSeat) {}
+
+    fn new_capability(
+        &mut self,
+        _conn: &Connection,
+        qh: &QueueHandle<Self>,
+        seat: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
+        if capability == Capability::Pointer && self.pointer.is_none() {
+            match self.seat_state.get_pointer(qh, &seat) {
+                Ok(pointer) => {
+                    info!("Wayland pointer capability is available");
+                    self.pointer = Some(pointer);
+                }
+                Err(error) => {
+                    warn!(%error, "cannot initialize the Wayland pointer");
+                }
+            }
+        }
+    }
+
+    fn remove_capability(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _seat: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
+        if capability == Capability::Pointer {
+            if let Some(pointer) = self.pointer.take() {
+                pointer.release();
+                info!("Wayland pointer capability was removed");
+            }
+        }
+    }
+
+    fn remove_seat(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _seat: wl_seat::WlSeat) {}
+}
+
+impl PointerHandler for BubblePanel {
+    fn pointer_frame(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _pointer: &wl_pointer::WlPointer,
+        events: &[PointerEvent],
+    ) {
+        for event in events {
+            if event.surface != *self.layer.wl_surface() {
+                continue;
+            }
+
+            let PointerEventKind::Press { button, .. } = event.kind else {
+                continue;
+            };
+            if button != BTN_LEFT {
+                continue;
+            }
+
+            let Some((x, y)) =
+                pointer_position_to_coords(event.position, self.width, self.height)
+            else {
+                continue;
+            };
+
+            let regions = interactive_regions(self.width, self.height);
+            if let Some(action) = hit_test(&regions, x, y) {
+                info!(?action, x, y, "BubblePanel left-click hit a panel action");
+            }
+        }
+    }
+}
+
 impl ShmHandler for BubblePanel {
     fn shm_state(&mut self) -> &mut Shm {
         &mut self.shm
@@ -366,10 +453,31 @@ impl ProvidesRegistryState for BubblePanel {
         &mut self.registry_state
     }
 
-    registry_handlers![OutputState];
+    registry_handlers![OutputState, SeatState];
 }
 
 smithay_client_toolkit::delegate_dispatch2!(BubblePanel);
+
+/// Converts Wayland surface-local floating-point coordinates into bounded
+/// panel-local logical coordinates.
+fn pointer_position_to_coords(
+    position: (f64, f64),
+    width: u32,
+    height: u32,
+) -> Option<(u32, u32)> {
+    let (x, y) = position;
+    if !x.is_finite()
+        || !y.is_finite()
+        || x < 0.0
+        || y < 0.0
+        || x >= f64::from(width)
+        || y >= f64::from(height)
+    {
+        return None;
+    }
+
+    Some((x.floor() as u32, y.floor() as u32))
+}
 
 fn current_clock_minute() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M").to_string()
@@ -504,6 +612,30 @@ mod tests {
         let mut canvas = vec![0; 40 * 40 * 4];
         draw_digit(&mut canvas, 40, 40, 0, 99);
         assert!(canvas.iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn pointer_coordinates_are_floored_and_bounded() {
+        assert_eq!(
+            pointer_position_to_coords((12.9, 7.1), 1280, PANEL_HEIGHT),
+            Some((12, 7))
+        );
+        assert_eq!(
+            pointer_position_to_coords((1280.0, 1.0), 1280, PANEL_HEIGHT),
+            None
+        );
+        assert_eq!(
+            pointer_position_to_coords((-0.1, 1.0), 1280, PANEL_HEIGHT),
+            None
+        );
+        assert_eq!(
+            pointer_position_to_coords((f64::NAN, 1.0), 1280, PANEL_HEIGHT),
+            None
+        );
+        assert_eq!(
+            pointer_position_to_coords((1.0, f64::INFINITY), 1280, PANEL_HEIGHT),
+            None
+        );
     }
 
     #[test]
