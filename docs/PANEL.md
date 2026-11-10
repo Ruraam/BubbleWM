@@ -30,7 +30,7 @@ The first implementation lives in the bubblepanel/ workspace member. It is inten
 
 ### Development order after the prototype
 
-1. Add the missing compositor output globals and wlr-layer-shell server so BubblePanel can run directly on BubbleWM.
+1. Implement the wlr-layer-shell server so BubblePanel can run directly on BubbleWM; the initial compositor now advertises one wl_output.
 2. Implement BubbleWM workspace state and connect the existing IPC commands to that authoritative state.
 3. Implement the BubblePanel IPC client and display real workspace/capability state.
 4. Introduce typed panel configuration, configurable placement and per-output management.
