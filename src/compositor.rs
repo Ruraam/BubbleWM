@@ -617,8 +617,7 @@ impl CompositorStateData {
             return;
         };
 
-        self.space.raise_element(&window, true);
-        self.configure_toplevels();
+        self.raise_window_family(&window);
 
         if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel()) {
             keyboard.set_focus(self, Some(toplevel.wl_surface().clone()), serial);
@@ -644,6 +643,7 @@ impl CompositorHandler for CompositorStateData {
 
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
+        self.popups.commit(surface);
 
         // A subsurface commit can change the toplevel's bounding box too.
         // Walk to its root and refresh the owning Window's cached geometry.
@@ -655,6 +655,7 @@ impl CompositorHandler for CompositorStateData {
             window.on_commit();
         }
 
+        self.popups.cleanup();
         self.space.refresh();
     }
 }
@@ -687,7 +688,10 @@ impl XdgShellHandler for CompositorStateData {
             window,
             location,
             mapped_once: false,
+            restore_geometry: None,
+            parent_surface: surface.parent(),
         });
+        self.update_transient_parent(&surface);
 
         // The XDG role's first configure/commit cycle is managed by Smithay.
         // This post-commit hook maps the window only once it has a real buffer
@@ -717,6 +721,18 @@ impl XdgShellHandler for CompositorStateData {
         self.begin_resize(&surface, &seat, serial, edges);
     }
 
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        self.maximize_window(&surface);
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        self.unmaximize_window(&surface);
+    }
+
+    fn parent_changed(&mut self, surface: ToplevelSurface) {
+        self.update_transient_parent(&surface);
+    }
+
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         let root = surface.wl_surface().clone();
         if let Some(index) = self.windows.iter().position(|entry| {
@@ -741,21 +757,72 @@ impl XdgShellHandler for CompositorStateData {
         self.space.refresh();
     }
 
-    fn new_popup(&mut self, _surface: PopupSurface, _positioner: PositionerState) {
-        // Popup placement and grabs are introduced with window management.
+    fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
+        self.unconstrain_popup(&surface);
+        if let Err(error) = self.popups.track_popup(PopupKind::Xdg(surface)) {
+            info!(?error, "Unable to track xdg popup");
+        }
     }
 
-    fn grab(&mut self, _surface: PopupSurface, _seat: wl_seat::WlSeat, _serial: Serial) {
-        // Popup grabs are not available in this initial milestone.
+    fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
+        let Some(seat) = Seat::<Self>::from_resource(&seat) else {
+            return;
+        };
+        let kind = PopupKind::Xdg(surface);
+        let Some(root) = find_popup_root_surface(&kind).ok() else {
+            return;
+        };
+        let Some(window) = self.managed_window_for_surface(&root) else {
+            return;
+        };
+        if self.space.element_location(&window).is_none() {
+            return;
+        }
+
+        let Ok(mut grab) = self.popups.grab_popup(root, kind, &seat, serial) else {
+            return;
+        };
+
+        if let Some(keyboard) = seat.get_keyboard() {
+            let previous_serial = grab.previous_serial().unwrap_or(serial);
+            if keyboard.is_grabbed()
+                && !(keyboard.has_grab(serial) || keyboard.has_grab(previous_serial))
+            {
+                grab.ungrab(PopupUngrabStrategy::All);
+                return;
+            }
+            keyboard.set_focus(self, grab.current_grab(), serial);
+            keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
+        }
+
+        if let Some(pointer) = seat.get_pointer() {
+            let previous_serial = grab.previous_serial().unwrap_or_else(|| grab.serial());
+            if pointer.is_grabbed()
+                && !(pointer.has_grab(serial) || pointer.has_grab(previous_serial))
+            {
+                grab.ungrab(PopupUngrabStrategy::All);
+                return;
+            }
+            pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
+        }
     }
 
     fn reposition_request(
         &mut self,
-        _surface: PopupSurface,
-        _positioner: PositionerState,
-        _token: u32,
+        surface: PopupSurface,
+        positioner: PositionerState,
+        token: u32,
     ) {
-        // Popup repositioning is not available in this initial milestone.
+        surface.with_pending_state(|state| {
+            state.geometry = positioner.get_geometry();
+            state.positioner = positioner;
+        });
+        self.unconstrain_popup(&surface);
+        surface.send_repositioned(token);
+    }
+
+    fn popup_destroyed(&mut self, _surface: PopupSurface) {
+        self.popups.cleanup();
     }
 }
 
@@ -1076,6 +1143,7 @@ pub fn run_winit() -> Result<()> {
         output: output.clone(),
         space: Space::default(),
         windows: Vec::new(),
+        popups: PopupManager::default(),
         resize_session: None,
         next_window_position: 0,
     };
@@ -1225,6 +1293,7 @@ pub fn run_winit() -> Result<()> {
         display
             .dispatch_clients(&mut state)
             .context("Wayland client dispatch failed")?;
+        state.popups.cleanup();
         state.space.refresh();
         display
             .flush_clients()
