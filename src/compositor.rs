@@ -5,7 +5,7 @@
 //! and renders committed xdg toplevel surfaces. Window management, output
 //! advertisement, pointer focus, workspaces and layer-shell are later milestones.
 
-use std::{sync::Arc, time::Instant};
+use std::{sync::Arc, thread, time::{Duration, Instant}};
 
 use anyhow::{Context, Result};
 use bubble_ipc::{ErrorCode, ErrorResponse, Request, Response, ResponseData};
@@ -50,6 +50,8 @@ use smithay::{
     },
 };
 use tracing::info;
+
+const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
 use crate::ipc::IpcRuntime;
 
@@ -266,6 +268,7 @@ pub fn run_winit() -> Result<()> {
 
         let size = backend.window_size();
         if size.w <= 0 || size.h <= 0 {
+            thread::sleep(FRAME_INTERVAL);
             continue;
         }
         let damage = Rectangle::from_size(size);
@@ -311,6 +314,11 @@ pub fn run_winit() -> Result<()> {
         backend
             .submit(Some(&[damage]))
             .context("cannot present the Winit frame")?;
+
+        // Smithay's Winit event source is pumped with a zero timeout. A small
+        // frame interval avoids spinning at full CPU when the host backend has
+        // vsync disabled, while keeping input latency bounded.
+        thread::sleep(FRAME_INTERVAL);
     }
 
     ipc_runtime
@@ -358,4 +366,44 @@ fn send_frames_surface_tree(surface: &wl_surface::WlSurface, time: u32) {
         },
         |_, _, &()| true,
     );
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capability_query_does_not_advertise_unimplemented_workspace_control() {
+        assert_eq!(
+            handle_ipc_request(Request::GetCapabilities),
+            Response::Success {
+                data: ResponseData::Capabilities {
+                    workspace_control: false
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn workspace_requests_report_unavailable_until_workspace_state_exists() {
+        let requests = [
+            Request::GetWorkspaceState,
+            Request::WorkspacePrevious,
+            Request::WorkspaceNext,
+            Request::ActivateWorkspace { index: 0 },
+        ];
+
+        for request in requests {
+            assert_eq!(
+                handle_ipc_request(request),
+                Response::Failure {
+                    error: ErrorResponse {
+                        code: ErrorCode::Unavailable,
+                        message: "workspace management is not initialized yet".into(),
+                    }
+                }
+            );
+        }
+    }
 }
