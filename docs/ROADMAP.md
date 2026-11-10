@@ -19,25 +19,31 @@
 - Server-side decoration negotiation.
 - Titlebar, buttons, borders and focus states.
 
-## 0.5.0 — Configuration and IPC
-- TOML loading, validation and reload.
-- Versioned local IPC.
+## 0.5.0 — Configuration engine and live IPC
+- Versioned configuration schema and migrations.
+- Safe atomic persistence and rollback.
+- Validated live reload and capability reporting.
+- Per-setting restart requirements.
 
-## 0.6.0 — BubbleColor
+## 0.6.0 — BubbleSettings
+- Dedicated graphical settings application.
+- Searchable categories, descriptions, presets and reset controls.
+- Live previews and clear apply/restart feedback.
+- The compositor remains functional without the settings app.
+
+## 0.7.0 — BubbleColor
 - Wallpaper palette extraction.
-- Contrast-aware adaptive theme.
+- Contrast-aware adaptive theme and manual tuning controls.
 
-## 0.7.0 — BubbleFX
+## 0.8.0 — BubbleFX
 - Animation scheduler and easing.
-- Fade, slide, zoom, shadows and transparency.
-
-## 0.8.0 — Advanced effects
-- Blur pipeline, wobble and workspace transitions.
-- Capability detection and quality profiles.
+- Fade, slide, zoom, shadows, transparency and blur.
+- Wobble and workspace transitions, with quality profiles.
 
 ## 0.9.0 — Native backend
 - DRM/KMS session support.
-- Multi-output and robustness testing.
+- Multi-output and per-monitor settings.
+- Robustness, accessibility and performance testing.
 
 ## 1.0.0 — BubbleOS integration
 - Packaging, session integration, documentation and release hardening.
