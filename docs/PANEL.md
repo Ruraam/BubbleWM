@@ -15,11 +15,12 @@ The first implementation lives in the `bubblepanel/` workspace member. It is int
 - Graceful error messages when Wayland, shared memory or layer-shell support is unavailable.
 - Low-overhead clock refresh: the event loop polls Wayland with a one-second timeout and redraws only when the displayed minute changes.
 - Pointer enter/motion/leave tracking and left-click press/release handling. A click is confirmed only when press and release target the same panel action.
+- Pointer scroll detection for vertical, horizontal and diagonal movement. Direction is resolved from high-resolution, discrete or continuous axis data, and gestures are logged without triggering panel actions.
 
 ### Explicitly not implemented yet
 
 - Actual workspace state or task-list integration.
-- Scroll, keyboard and popup interactions.
+- Scroll-driven actions, keyboard and popup interactions. Scroll direction detection is implemented, but it does not yet switch workspaces or trigger module actions.
 - Real network, audio, Bluetooth, battery or notification modules.
 - Multi-monitor surface management.
 - User-facing panel configuration and IPC.
