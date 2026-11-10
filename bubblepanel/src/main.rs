@@ -38,6 +38,87 @@ const PANEL_HEIGHT: u32 = 40;
 const INITIAL_WIDTH: u32 = 1280;
 const MAX_BUFFER_WIDTH: u32 = 3840;
 
+/// A half-open rectangle in panel-local logical coordinates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HitRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl HitRect {
+    /// Returns true when the point is inside the rectangle (right/bottom excluded).
+    pub fn contains(self, x: u32, y: u32) -> bool {
+        x >= self.x
+            && y >= self.y
+            && x - self.x < self.width
+            && y - self.y < self.height
+    }
+}
+
+/// Actions that can be associated with panel regions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelAction {
+    Launcher,
+    Workspace(u8),
+    Clock,
+}
+
+/// Maps a panel-local rectangle to the action it will trigger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HitRegion {
+    pub bounds: HitRect,
+    pub action: PanelAction,
+}
+
+/// Returns the first region containing the supplied panel-local point.
+pub fn hit_test(regions: &[HitRegion], x: u32, y: u32) -> Option<PanelAction> {
+    regions
+        .iter()
+        .find(|region| region.bounds.contains(x, y))
+        .map(|region| region.action)
+}
+
+/// Describes initial clickable areas; pointer events are deliberately not wired yet.
+pub fn interactive_regions(width: u32, height: u32) -> Vec<HitRegion> {
+    let panel_height = height.min(PANEL_HEIGHT);
+    let launcher_x = 8;
+    let mut regions = vec![HitRegion {
+        bounds: HitRect {
+            x: launcher_x,
+            y: 8,
+            width: 32.min(width.saturating_sub(launcher_x)),
+            height: 24.min(panel_height.saturating_sub(8)),
+        },
+        action: PanelAction::Launcher,
+    }];
+
+    for index in 0..4_u8 {
+        let x = 82 + u32::from(index) * 24;
+        regions.push(HitRegion {
+            bounds: HitRect {
+                x,
+                y: 14,
+                width: 16.min(width.saturating_sub(x)),
+                height: 12.min(panel_height.saturating_sub(14)),
+            },
+            action: PanelAction::Workspace(index + 1),
+        });
+    }
+
+    regions.push(HitRegion {
+        bounds: HitRect {
+            x: width.saturating_sub(106),
+            y: 8,
+            width: 96.min(width),
+            height: 24.min(panel_height.saturating_sub(8)),
+        },
+        action: PanelAction::Clock,
+    });
+    regions
+}
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -429,6 +510,34 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn hit_rect_uses_half_open_bounds() {
+        let rect = HitRect { x: 10, y: 5, width: 20, height: 10 };
+        assert!(rect.contains(10, 5));
+        assert!(rect.contains(29, 14));
+        assert!(!rect.contains(30, 14));
+        assert!(!rect.contains(29, 15));
+        assert!(!rect.contains(9, 5));
+    }
+
+    #[test]
+    fn hit_test_returns_the_matching_panel_action() {
+        let regions = interactive_regions(1280, PANEL_HEIGHT);
+        assert_eq!(hit_test(&regions, 12, 12), Some(PanelAction::Launcher));
+        assert_eq!(hit_test(&regions, 85, 17), Some(PanelAction::Workspace(1)));
+        assert_eq!(hit_test(&regions, 1200, 20), Some(PanelAction::Clock));
+        assert_eq!(hit_test(&regions, 600, 20), None);
+    }
+
+    #[test]
+    fn hit_test_ignores_zero_sized_rectangles() {
+        let regions = [HitRegion {
+            bounds: HitRect { x: 0, y: 0, width: 0, height: 10 },
+            action: PanelAction::Launcher,
+        }];
+        assert_eq!(hit_test(&regions, 0, 0), None);
+    }
+
     fn panel_height_fits_seven_segment_clock() {
         assert!(PANEL_HEIGHT >= 32);
     }
