@@ -89,10 +89,15 @@ impl std::fmt::Display for ProtocolError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnsupportedVersion(version) => {
-                write!(formatter, "unsupported BubbleWM IPC protocol version: {version}")
+                write!(
+                    formatter,
+                    "unsupported BubbleWM IPC protocol version: {version}"
+                )
             }
             Self::FrameTooLarge => write!(formatter, "BubbleWM IPC frame exceeds the size limit"),
-            Self::UnterminatedFrame => write!(formatter, "BubbleWM IPC frame is not newline-terminated"),
+            Self::UnterminatedFrame => {
+                write!(formatter, "BubbleWM IPC frame is not newline-terminated")
+            }
             Self::Io(error) => write!(formatter, "BubbleWM IPC transport error: {error}"),
             Self::Json(error) => write!(formatter, "invalid BubbleWM IPC JSON: {error}"),
         }
