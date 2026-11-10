@@ -455,7 +455,7 @@ impl PointerHandler for BubblePanel {
                 continue;
             }
 
-            if matches!(event.kind, PointerEventKind::Leave { .. }) {
+            if matches!(&event.kind, PointerEventKind::Leave { .. }) {
                 if self.pointer_interaction.leave() {
                     info!("Pointer left BubblePanel");
                 }
