@@ -27,8 +27,8 @@ use smithay::{
     },
     delegate_compositor, delegate_output, delegate_seat, delegate_shm, delegate_xdg_shell,
     desktop::{
-        find_popup_root_surface, get_popup_toplevel_coords, PopupKeyboardGrab, PopupKind,
-        PopupManager, PopupPointerGrab, PopupUngrabStrategy, Space, Window, WindowSurfaceType,
+        PopupKeyboardGrab, PopupKind, PopupManager, PopupPointerGrab, PopupUngrabStrategy, Space,
+        Window, WindowSurfaceType, find_popup_root_surface, get_popup_toplevel_coords,
     },
     input::{
         Seat, SeatHandler, SeatState,
@@ -178,10 +178,7 @@ impl CompositorStateData {
             .map(|entry| entry.window.clone())
     }
 
-    fn managed_location_for_surface(
-        &self,
-        surface: &WlSurface,
-    ) -> Option<Point<i32, Logical>> {
+    fn managed_location_for_surface(&self, surface: &WlSurface) -> Option<Point<i32, Logical>> {
         self.windows
             .iter()
             .find(|entry| {
@@ -227,7 +224,10 @@ impl CompositorStateData {
     }
 
     fn raise_window_family(&mut self, window: &Window) {
-        let Some(root) = window.toplevel().map(|surface| surface.wl_surface().clone()) else {
+        let Some(root) = window
+            .toplevel()
+            .map(|surface| surface.wl_surface().clone())
+        else {
             return;
         };
 
@@ -251,9 +251,10 @@ impl CompositorStateData {
             .windows
             .iter()
             .filter(|entry| {
-                entry.window.toplevel().is_some_and(|surface| {
-                    family.contains(surface.wl_surface())
-                })
+                entry
+                    .window
+                    .toplevel()
+                    .is_some_and(|surface| family.contains(surface.wl_surface()))
             })
             .map(|entry| entry.window.clone())
             .collect::<Vec<_>>();
