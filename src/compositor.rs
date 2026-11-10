@@ -5,7 +5,11 @@
 //! and renders committed xdg toplevel surfaces. Window management, output
 //! advertisement, pointer focus, workspaces and layer-shell are later milestones.
 
-use std::{sync::Arc, thread, time::{Duration, Instant}};
+use std::{
+    sync::Arc,
+    thread,
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context, Result};
 use bubble_ipc::{ErrorCode, ErrorResponse, Request, Response, ResponseData};
@@ -367,7 +371,6 @@ fn send_frames_surface_tree(surface: &wl_surface::WlSurface, time: u32) {
         |_, _, &()| true,
     );
 }
-
 
 #[cfg(test)]
 mod tests {
