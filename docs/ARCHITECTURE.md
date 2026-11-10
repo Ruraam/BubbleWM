@@ -41,9 +41,11 @@ The shared protocol lives in the `bubble-ipc` workspace crate and is consumed by
 
 ## Initial compositor milestone
 
-The current executable starts a nested Winit/EGL backend and a Wayland server socket. It advertises the core compositor, shared-memory, seat and xdg-shell globals, accepts clients, and renders committed xdg toplevel surface trees. Keyboard events are forwarded using a temporary focus policy that targets the first toplevel.
+The current executable starts a nested Winit/EGL backend and a Wayland server socket. It advertises the core compositor, shared-memory, seat, xdg-shell and one `wl_output` global. The virtual output follows Winit window resizes and currently advertises a 60 Hz development mode.
 
-This is a bring-up milestone, not yet a complete desktop. Output management, pointer/touch routing, robust focus and window management, decorations, workspaces, layer-shell and DRM/KMS are not implemented yet. BubblePanel therefore still needs a separate layer-shell-compatible compositor for visual testing.
+Toplevels are wrapped as Smithay `Window` elements and mapped into a `Space<Window>`. The compositor refreshes the space, tracks output enter/leave state and renders the mapped scene. Winit absolute pointer motion, mouse buttons and scroll-axis events are routed to the surface under the pointer. Clicking a window raises and activates it, and transfers keyboard focus to its toplevel; new toplevels receive initial activation and focus.
+
+This remains a bring-up milestone, not a complete desktop. Pointer cursor rendering, touch routing, robust keyboard grabs, move/resize, decorations, workspaces, output-management protocols, multiple outputs, layer-shell and DRM/KMS are not implemented yet. BubblePanel therefore still needs a separate layer-shell-compatible compositor for visual testing.
 
 ## Settings-first design
 
