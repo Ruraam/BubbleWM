@@ -228,11 +228,13 @@ impl CompositorStateData {
 
         if self.space.element_location(&window).is_none() {
             let location = self.windows[index].location;
-            let activate = !self.windows[index].mapped_once || self.space.elements().next().is_none();
+            let activate =
+                !self.windows[index].mapped_once || self.space.elements().next().is_none();
             self.windows[index].mapped_once = true;
             self.space.map_element(window.clone(), location, activate);
             if activate {
-                if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel()) {
+                if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel())
+                {
                     keyboard.set_focus(
                         self,
                         Some(toplevel.wl_surface().clone()),
@@ -454,7 +456,11 @@ impl XdgShellHandler for CompositorStateData {
 
         // Keep a stable handle and its last position even while the client
         // temporarily unmaps the surface with a null buffer.
-        self.windows.push(ManagedWindow { window, location, mapped_once: false });
+        self.windows.push(ManagedWindow {
+            window,
+            location,
+            mapped_once: false,
+        });
 
         // The XDG role's first configure/commit cycle is managed by Smithay.
         // This post-commit hook maps the window only once it has a real buffer
@@ -496,7 +502,11 @@ impl XdgShellHandler for CompositorStateData {
             self.space.unmap_elem(&entry.window);
         }
 
-        if self.resize_session.as_ref().is_some_and(|session| session.surface == root) {
+        if self
+            .resize_session
+            .as_ref()
+            .is_some_and(|session| session.surface == root)
+        {
             self.resize_session = None;
         }
 
