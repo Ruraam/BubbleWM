@@ -21,18 +21,20 @@ use smithay::{
     backend::{
         renderer::{
             Color32F, Frame, Renderer,
+            element::{Kind, solid::{SolidColorBuffer, SolidColorRenderElement}},
             utils::{draw_render_elements, on_commit_buffer_handler, with_renderer_surface_state},
         },
         winit::{self, WinitEvent},
     },
-    delegate_compositor, delegate_output, delegate_seat, delegate_shm, delegate_xdg_shell,
+    delegate_compositor, delegate_output, delegate_seat, delegate_shm, delegate_xdg_decoration,
+    delegate_xdg_shell,
     desktop::{
         PopupKeyboardGrab, PopupKind, PopupManager, PopupPointerGrab, PopupUngrabStrategy, Space,
         Window, WindowSurfaceType, find_popup_root_surface, get_popup_toplevel_coords,
     },
     input::{
         Seat, SeatHandler, SeatState,
-        keyboard::{FilterResult, KeyboardHandle},
+        keyboard::{FilterResult, KeyboardHandle, keysyms},
         pointer::{
             AxisFrame, ButtonEvent, CursorImageStatus, Focus, GestureHoldBeginEvent,
             GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent,
@@ -43,7 +45,12 @@ use smithay::{
     },
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
-        wayland_protocols::xdg::shell::server::xdg_toplevel,
+        wayland_protocols::{
+            xdg::{
+                decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
+                shell::server::xdg_toplevel,
+            },
+        },
         wayland_server::{
             Client, Display, ListeningSocket, Resource,
             backend::{ClientData, ClientId, DisconnectReason},
@@ -67,6 +74,7 @@ use smithay::{
         shell::xdg::{
             PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
             XdgShellState,
+            decoration::{XdgDecorationHandler, XdgDecorationState},
         },
         shm::{ShmHandler, ShmState},
     },
@@ -79,6 +87,10 @@ const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const OUTPUT_REFRESH_MILLIHZ: i32 = 60_000;
 const WINDOW_CASCADE_STEP: i32 = 32;
 const WINDOW_CASCADE_COUNT: u32 = 8;
+const TITLEBAR_HEIGHT: i32 = 32;
+const DECORATION_BUTTON_SIZE: i32 = 16;
+const DECORATION_BUTTON_MARGIN: i32 = 8;
+const DECORATION_BUTTON_GAP: i32 = 6;
 const RESIZE_EDGE_TOP: u32 = 1;
 const RESIZE_EDGE_BOTTOM: u32 = 2;
 const RESIZE_EDGE_LEFT: u32 = 4;
@@ -92,10 +104,21 @@ struct RestoreGeometry {
 
 struct ManagedWindow {
     window: Window,
+    /// Position of the outer window frame, not the client surface.
     location: Point<i32, Logical>,
     mapped_once: bool,
     restore_geometry: Option<RestoreGeometry>,
     parent_surface: Option<WlSurface>,
+    minimized: bool,
+    minimized_order: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DecorationAction {
+    Close,
+    Maximize,
+    Minimize,
+    Move,
 }
 
 #[derive(Clone)]
@@ -126,6 +149,7 @@ struct WindowPointerGrab {
 struct CompositorStateData {
     compositor_state: CompositorState,
     xdg_shell_state: XdgShellState,
+    xdg_decoration_state: XdgDecorationState,
     shm_state: ShmState,
     seat_state: SeatState<Self>,
     seat: Seat<Self>,
@@ -138,6 +162,7 @@ struct CompositorStateData {
     popups: PopupManager,
     resize_session: Option<ResizeSession>,
     next_window_position: u32,
+    next_minimized_order: u64,
 }
 
 impl CompositorStateData {
@@ -178,6 +203,20 @@ impl CompositorStateData {
             .map(|entry| entry.window.clone())
     }
 
+    fn uses_server_decorations(window: &Window) -> bool {
+        window.toplevel().is_some_and(|surface| {
+            surface.current_state().decoration_mode == Some(DecorationMode::ServerSide)
+        })
+    }
+
+    fn content_location(&self, window: &Window, outer: Point<i32, Logical>) -> Point<i32, Logical> {
+        if Self::uses_server_decorations(window) {
+            outer + Size::from((0, TITLEBAR_HEIGHT))
+        } else {
+            outer
+        }
+    }
+
     fn managed_location_for_surface(&self, surface: &WlSurface) -> Option<Point<i32, Logical>> {
         self.windows
             .iter()
@@ -187,11 +226,7 @@ impl CompositorStateData {
                     .toplevel()
                     .is_some_and(|toplevel| toplevel.wl_surface() == surface)
             })
-            .map(|entry| {
-                self.space
-                    .element_location(&entry.window)
-                    .unwrap_or(entry.location)
-            })
+            .map(|entry| entry.location)
     }
 
     fn update_transient_parent(&mut self, surface: &ToplevelSurface) {
@@ -218,8 +253,9 @@ impl CompositorStateData {
         let location = parent_location + Size::from((WINDOW_CASCADE_STEP, WINDOW_CASCADE_STEP));
         self.windows[index].location = location;
         let window = self.windows[index].window.clone();
-        if self.space.element_location(&window).is_some() {
-            self.space.map_element(window, location, false);
+        if self.space.element_location(&window).is_some() && !self.windows[index].minimized {
+            let content_location = self.content_location(&window, location);
+            self.space.map_element(window, content_location, false);
         }
     }
 
@@ -251,10 +287,11 @@ impl CompositorStateData {
             .windows
             .iter()
             .filter(|entry| {
-                entry
-                    .window
-                    .toplevel()
-                    .is_some_and(|surface| family.contains(surface.wl_surface()))
+                !entry.minimized
+                    && entry
+                        .window
+                        .toplevel()
+                        .is_some_and(|surface| family.contains(surface.wl_surface()))
             })
             .map(|entry| entry.window.clone())
             .collect::<Vec<_>>();
@@ -263,6 +300,267 @@ impl CompositorStateData {
             self.space.raise_element(&member, member == *window);
         }
         self.configure_toplevels();
+    }
+
+    fn window_family_surfaces(&self, root: &WlSurface) -> Vec<WlSurface> {
+        let mut family = vec![root.clone()];
+        let mut index = 0;
+        while index < family.len() {
+            let parent = family[index].clone();
+            for entry in &self.windows {
+                if entry.parent_surface.as_ref() == Some(&parent) {
+                    if let Some(child) = entry.window.toplevel().map(|s| s.wl_surface().clone()) {
+                        if !family.contains(&child) {
+                            family.push(child);
+                        }
+                    }
+                }
+            }
+            index += 1;
+        }
+        family
+    }
+
+    fn minimize_window(&mut self, surface: &ToplevelSurface) {
+        let root = surface.wl_surface().clone();
+        let family = self.window_family_surfaces(&root);
+        let order = self.next_minimized_order;
+        self.next_minimized_order = self.next_minimized_order.wrapping_add(1);
+
+        let mut removed_any = false;
+        for entry in &mut self.windows {
+            let belongs_to_family = entry
+                .window
+                .toplevel()
+                .is_some_and(|toplevel| family.contains(toplevel.wl_surface()));
+            if !belongs_to_family || entry.minimized {
+                continue;
+            }
+
+            if self.space.element_location(&entry.window).is_some() {
+                self.space.unmap_elem(&entry.window);
+                removed_any = true;
+            }
+            entry.minimized = true;
+            entry.minimized_order = Some(order);
+        }
+
+        if removed_any {
+            self.focus_topmost_window();
+        }
+    }
+
+    fn minimize_focused_window(&mut self) {
+        let target = self.space.elements().last().cloned();
+        if let Some(window) = target {
+            if let Some(toplevel) = window.toplevel() {
+                self.minimize_window(&toplevel);
+            }
+        }
+    }
+
+    fn restore_last_minimized_window(&mut self) {
+        let target = self
+            .windows
+            .iter()
+            .filter(|entry| entry.minimized)
+            .max_by_key(|entry| entry.minimized_order)
+            .and_then(|entry| entry.window.toplevel().map(|s| s.wl_surface().clone()));
+
+        let Some(root) = target else {
+            return;
+        };
+        let family = self.window_family_surfaces(&root);
+        let mut restored = Vec::new();
+
+        for entry in &mut self.windows {
+            let belongs_to_family = entry
+                .window
+                .toplevel()
+                .is_some_and(|toplevel| family.contains(toplevel.wl_surface()));
+            if !belongs_to_family || !entry.minimized {
+                continue;
+            }
+            entry.minimized = false;
+            entry.minimized_order = None;
+            restored.push((entry.window.clone(), entry.location));
+        }
+
+        for (window, location) in &restored {
+            let content_location = self.content_location(window, *location);
+            self.space.map_element(window.clone(), content_location, false);
+        }
+
+        if let Some(window) = self.managed_window_for_surface(&root) {
+            self.raise_window_family(&window);
+            if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel()) {
+                keyboard.set_focus(
+                    self,
+                    Some(toplevel.wl_surface().clone()),
+                    SERIAL_COUNTER.next_serial(),
+                );
+            }
+        }
+    }
+
+    fn close_focused_window(&self) {
+        if let Some(window) = self.space.elements().last()
+            && let Some(toplevel) = window.toplevel()
+        {
+            toplevel.send_close();
+        }
+    }
+
+    fn decoration_hit_test(
+        &self,
+        location: Point<f64, Logical>,
+    ) -> Option<(Window, DecorationAction)> {
+        for window in self.space.elements().rev() {
+            if !Self::uses_server_decorations(window) {
+                continue;
+            }
+            let Some(entry) = self.windows.iter().find(|entry| entry.window == *window) else {
+                continue;
+            };
+            let width = window.geometry().size.w;
+            if width <= 0
+                || location.x < entry.location.x as f64
+                || location.x >= (entry.location.x + width) as f64
+                || location.y < entry.location.y as f64
+                || location.y >= (entry.location.y + TITLEBAR_HEIGHT) as f64
+            {
+                continue;
+            }
+
+            let close_x = entry.location.x + width - DECORATION_BUTTON_MARGIN - DECORATION_BUTTON_SIZE;
+            let maximize_x = close_x - DECORATION_BUTTON_GAP - DECORATION_BUTTON_SIZE;
+            let minimize_x = maximize_x - DECORATION_BUTTON_GAP - DECORATION_BUTTON_SIZE;
+            let button_y = entry.location.y + (TITLEBAR_HEIGHT - DECORATION_BUTTON_SIZE) / 2;
+            let in_button_y = location.y >= button_y as f64
+                && location.y < (button_y + DECORATION_BUTTON_SIZE) as f64;
+
+            let action = if in_button_y
+                && location.x >= close_x as f64
+                && location.x < (close_x + DECORATION_BUTTON_SIZE) as f64
+            {
+                DecorationAction::Close
+            } else if in_button_y
+                && location.x >= maximize_x as f64
+                && location.x < (maximize_x + DECORATION_BUTTON_SIZE) as f64
+            {
+                DecorationAction::Maximize
+            } else if in_button_y
+                && location.x >= minimize_x as f64
+                && location.x < (minimize_x + DECORATION_BUTTON_SIZE) as f64
+            {
+                DecorationAction::Minimize
+            } else {
+                DecorationAction::Move
+            };
+
+            return Some((window.clone(), action));
+        }
+        None
+    }
+
+    fn decoration_render_elements(&self) -> Vec<SolidColorRenderElement> {
+        let mut elements = Vec::new();
+        let scale = self.output.current_scale().fractional_scale();
+
+        for window in self.space.elements() {
+            if !Self::uses_server_decorations(window) {
+                continue;
+            }
+            let Some(entry) = self.windows.iter().find(|entry| entry.window == *window) else {
+                continue;
+            };
+            let width = window.geometry().size.w;
+            if width <= 0 {
+                continue;
+            }
+
+            append_solid_decoration(
+                &mut elements,
+                entry.location,
+                (width, TITLEBAR_HEIGHT).into(),
+                Color32F::new(0.12, 0.14, 0.18, 1.0),
+                scale,
+            );
+
+            let close_x = entry.location.x + width - DECORATION_BUTTON_MARGIN - DECORATION_BUTTON_SIZE;
+            let maximize_x = close_x - DECORATION_BUTTON_GAP - DECORATION_BUTTON_SIZE;
+            let minimize_x = maximize_x - DECORATION_BUTTON_GAP - DECORATION_BUTTON_SIZE;
+            let button_y = entry.location.y + (TITLEBAR_HEIGHT - DECORATION_BUTTON_SIZE) / 2;
+
+            append_solid_decoration(
+                &mut elements,
+                (minimize_x, button_y).into(),
+                (DECORATION_BUTTON_SIZE, DECORATION_BUTTON_SIZE).into(),
+                Color32F::new(0.86, 0.68, 0.24, 1.0),
+                scale,
+            );
+            append_solid_decoration(
+                &mut elements,
+                (maximize_x, button_y).into(),
+                (DECORATION_BUTTON_SIZE, DECORATION_BUTTON_SIZE).into(),
+                Color32F::new(0.24, 0.68, 0.48, 1.0),
+                scale,
+            );
+            append_solid_decoration(
+                &mut elements,
+                (close_x, button_y).into(),
+                (DECORATION_BUTTON_SIZE, DECORATION_BUTTON_SIZE).into(),
+                Color32F::new(0.82, 0.28, 0.31, 1.0),
+                scale,
+            );
+        }
+
+        elements
+    }
+
+    fn handle_decoration_action(&mut self, window: &Window, action: DecorationAction, serial: Serial) {
+        self.raise_window_family(window);
+
+        let Some(surface) = window.toplevel() else {
+            return;
+        };
+        match action {
+            DecorationAction::Close => surface.send_close(),
+            DecorationAction::Minimize => self.minimize_window(&surface),
+            DecorationAction::Maximize => {
+                if surface.current_state().states.contains(xdg_toplevel::State::Maximized) {
+                    self.unmaximize_window(&surface);
+                } else {
+                    self.maximize_window(&surface);
+                }
+            }
+            DecorationAction::Move => {
+                let Some(pointer) = self.pointer.clone() else {
+                    return;
+                };
+                let start_data = pointer.grab_start_data().unwrap_or(GrabStartData {
+                    focus: None,
+                    button: 0x110,
+                    location: self.pointer_location,
+                });
+                let Some(location) = self.windows.iter().find(|entry| entry.window == *window)
+                    .map(|entry| entry.location)
+                else {
+                    return;
+                };
+                pointer.set_grab(
+                    self,
+                    WindowPointerGrab {
+                        start_data,
+                        window: window.clone(),
+                        initial_location: location,
+                        kind: WindowGrabKind::Move,
+                    },
+                    serial,
+                    Focus::Clear,
+                );
+            }
+        }
     }
 
     fn maximize_window(&mut self, surface: &ToplevelSurface) {
@@ -293,10 +591,7 @@ impl CompositorStateData {
         if !current.states.contains(xdg_toplevel::State::Maximized) {
             if let Some(entry) = self.windows.iter_mut().find(|entry| entry.window == window) {
                 if entry.restore_geometry.is_none() {
-                    let location = self
-                        .space
-                        .element_location(&window)
-                        .unwrap_or(entry.location);
+                    let location = entry.location;
                     let size = self
                         .space
                         .element_location(&window)
@@ -307,9 +602,14 @@ impl CompositorStateData {
             }
         }
 
+        let client_height = if Self::uses_server_decorations(&window) {
+            (bounds.size.h - TITLEBAR_HEIGHT).max(1)
+        } else {
+            bounds.size.h
+        };
         surface.with_pending_state(|state| {
             state.states.set(xdg_toplevel::State::Maximized);
-            state.size = Some(bounds.size);
+            state.size = Some((bounds.size.w, client_height).into());
         });
         self.set_window_location(&window, bounds.loc, true);
 
@@ -389,7 +689,8 @@ impl CompositorStateData {
         {
             entry.location = location;
         }
-        self.space.map_element(window.clone(), location, activate);
+        let content_location = self.content_location(window, location);
+        self.space.map_element(window.clone(), content_location, activate);
     }
 
     fn focus_topmost_window(&mut self) {
@@ -860,6 +1161,27 @@ impl SeatHandler for CompositorStateData {
     fn focus_changed(&mut self, _seat: &Seat<Self>, _focused: Option<&WlSurface>) {}
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, _image: CursorImageStatus) {}
+}
+
+fn append_solid_decoration(
+    elements: &mut Vec<SolidColorRenderElement>,
+    location: Point<i32, Logical>,
+    size: Size<i32, Logical>,
+    color: Color32F,
+    scale: f64,
+) {
+    if size.w <= 0 || size.h <= 0 {
+        return;
+    }
+    let buffer = SolidColorBuffer::new(size, color);
+    let physical_location = location.to_physical_precise_round(scale);
+    elements.push(SolidColorRenderElement::from_buffer(
+        &buffer,
+        physical_location,
+        scale,
+        1.0,
+        Kind::Unspecified,
+    ));
 }
 
 fn calculate_resize_size(
