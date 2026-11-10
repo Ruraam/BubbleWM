@@ -61,40 +61,66 @@ impl Default for Config {
 
 impl Default for CoreConfig {
     fn default() -> Self {
-        Self { backend: "winit".into(), layout: "floating".into() }
+        Self {
+            backend: "winit".into(),
+            layout: "floating".into(),
+        }
     }
 }
 impl Default for EffectsConfig {
     fn default() -> Self {
         Self {
-            enabled: true, profile: "advanced".into(), blur: true,
-            transparency: true, shadows: true, wobbly: true, workspace_cube: true,
+            enabled: true,
+            profile: "advanced".into(),
+            blur: true,
+            transparency: true,
+            shadows: true,
+            wobbly: true,
+            workspace_cube: true,
         }
     }
 }
 impl Default for ThemeConfig {
     fn default() -> Self {
-        Self { source: "wallpaper".into(), automatic_contrast: true, smooth_transitions: true }
+        Self {
+            source: "wallpaper".into(),
+            automatic_contrast: true,
+            smooth_transitions: true,
+        }
     }
 }
 impl Default for DecorationConfig {
     fn default() -> Self {
-        Self { mode: "server".into(), titlebar: true, rounded_corners: true }
+        Self {
+            mode: "server".into(),
+            titlebar: true,
+            rounded_corners: true,
+        }
     }
 }
 
 impl Config {
     pub fn validate(&self) -> Result<()> {
-        anyhow::ensure!(self.core.backend == "winit" || self.core.backend == "drm",
-            "core.backend must be 'winit' or 'drm'");
-        anyhow::ensure!(self.core.layout == "floating" || self.core.layout == "tiling",
-            "core.layout must be 'floating' or 'tiling'");
-        anyhow::ensure!(["lite", "balanced", "advanced"].contains(&self.effects.profile.as_str()),
-            "effects.profile must be 'lite', 'balanced' or 'advanced'");
-        anyhow::ensure!(self.theme.source == "wallpaper" || self.theme.source == "manual",
-            "theme.source must be 'wallpaper' or 'manual'");
-        anyhow::ensure!(self.decoration.mode == "server" || self.decoration.mode == "client",
-            "decoration.mode must be 'server' or 'client'");
+        anyhow::ensure!(
+            self.core.backend == "winit" || self.core.backend == "drm",
+            "core.backend must be 'winit' or 'drm'"
+        );
+        anyhow::ensure!(
+            self.core.layout == "floating" || self.core.layout == "tiling",
+            "core.layout must be 'floating' or 'tiling'"
+        );
+        anyhow::ensure!(
+            ["lite", "balanced", "advanced"].contains(&self.effects.profile.as_str()),
+            "effects.profile must be 'lite', 'balanced' or 'advanced'"
+        );
+        anyhow::ensure!(
+            self.theme.source == "wallpaper" || self.theme.source == "manual",
+            "theme.source must be 'wallpaper' or 'manual'"
+        );
+        anyhow::ensure!(
+            self.decoration.mode == "server" || self.decoration.mode == "client",
+            "decoration.mode must be 'server' or 'client'"
+        );
         Ok(())
     }
 }
@@ -105,8 +131,8 @@ pub fn load(path: Option<&str>) -> Result<Config> {
     };
     let raw = fs::read_to_string(Path::new(path))
         .with_context(|| format!("cannot read configuration file: {path}"))?;
-    let config: Config = toml::from_str(&raw)
-        .with_context(|| format!("invalid TOML configuration: {path}"))?;
+    let config: Config =
+        toml::from_str(&raw).with_context(|| format!("invalid TOML configuration: {path}"))?;
     config.validate()?;
     Ok(config)
 }
@@ -117,13 +143,18 @@ mod tests {
 
     #[test]
     fn defaults_are_valid() {
-        Config::default().validate().expect("default config should be valid");
+        Config::default()
+            .validate()
+            .expect("default config should be valid");
     }
 
     #[test]
     fn rejects_unknown_backend() {
         let config = Config {
-            core: CoreConfig { backend: "made-up".into(), ..CoreConfig::default() },
+            core: CoreConfig {
+                backend: "made-up".into(),
+                ..CoreConfig::default()
+            },
             ..Config::default()
         };
         assert!(config.validate().is_err());
