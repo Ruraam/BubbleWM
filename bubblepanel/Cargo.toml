@@ -8,6 +8,7 @@ description = "A lightweight modular Wayland panel for BubbleOS."
 repository = "https://github.com/Ruraam/BubbleWM"
 
 [dependencies]
+bubble-ipc = { path = "../bubble-ipc" }
 libc = "0.2"
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
