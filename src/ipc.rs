@@ -16,7 +16,8 @@ use std::{
 };
 
 use bubble_ipc::{
-    ErrorCode, ErrorResponse, Request, Response, unix::{ServerError, UnixIpcServer},
+    ErrorCode, ErrorResponse, Request, Response,
+    unix::{ServerError, UnixIpcServer},
 };
 
 const COMMAND_QUEUE_CAPACITY: usize = 64;
@@ -34,7 +35,9 @@ impl std::fmt::Display for IpcRuntimeError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Server(error) => write!(formatter, "{error}"),
-            Self::ThreadSpawn(error) => write!(formatter, "cannot spawn BubbleWM IPC worker: {error}"),
+            Self::ThreadSpawn(error) => {
+                write!(formatter, "cannot spawn BubbleWM IPC worker: {error}")
+            }
             Self::WorkerPanicked => write!(formatter, "BubbleWM IPC worker panicked"),
         }
     }
@@ -118,9 +121,7 @@ impl IpcRuntime {
         Self::start_server(server)
     }
 
-    fn start_server(
-        server: UnixIpcServer,
-    ) -> Result<(Self, CoreCommandReceiver), IpcRuntimeError> {
+    fn start_server(server: UnixIpcServer) -> Result<(Self, CoreCommandReceiver), IpcRuntimeError> {
         let (sender, receiver) = mpsc::sync_channel::<CoreCommand>(COMMAND_QUEUE_CAPACITY);
         let shutdown = Arc::new(AtomicBool::new(false));
         let worker_shutdown = Arc::clone(&shutdown);
@@ -170,7 +171,11 @@ impl IpcRuntime {
     /// Requests worker shutdown and joins it. Safe to call more than once.
     pub fn shutdown(&self) -> Result<(), IpcRuntimeError> {
         self.shutdown.store(true, Ordering::Release);
-        let worker = self.worker.lock().map_err(|_| IpcRuntimeError::WorkerPanicked)?.take();
+        let worker = self
+            .worker
+            .lock()
+            .map_err(|_| IpcRuntimeError::WorkerPanicked)?
+            .take();
         if let Some(worker) = worker {
             match worker.join() {
                 Ok(Ok(())) => Ok(()),
@@ -210,10 +215,7 @@ mod tests {
         PROTOCOL_VERSION, RequestEnvelope, ResponseData, ResponseEnvelope, read_frame, write_frame,
     };
     use std::{
-        io::BufReader,
-        os::unix::fs::DirBuilderExt,
-        os::unix::net::UnixStream,
-        time::Instant,
+        io::BufReader, os::unix::fs::DirBuilderExt, os::unix::net::UnixStream, time::Instant,
     };
 
     fn private_socket_path(base: &Path) -> std::path::PathBuf {
