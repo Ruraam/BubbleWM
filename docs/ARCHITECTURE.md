@@ -23,6 +23,19 @@ BubblePanel is a Wayland client. It should use layer-shell when available for pa
 
 The panel owns its module lifecycle and presentation. It obtains compositor information through supported Wayland protocols and communicates with BubbleWM through a versioned local IPC interface only for BubbleWM-specific controls that are not covered by standard protocols.
 
+### Local IPC contract
+
+The shared protocol lives in the `bubble-ipc` workspace crate and is consumed by BubbleWM and BubblePanel. Protocol version 1 uses typed JSON request/response envelopes with a monotonically assigned request ID, explicit success/failure responses and stable error categories.
+
+- Commands are deliberately narrow: capability discovery, workspace-state queries, previous/next workspace requests and activation of a workspace by index.
+- Frames are newline-delimited UTF-8 JSON, limited to 64 KiB, and must carry the supported protocol version.
+- The planned transport is a Unix-domain socket beneath the user's `XDG_RUNTIME_DIR`; no TCP listener or network-accessible endpoint is permitted.
+- The compositor will own the listening socket and remain authoritative for validation, workspace bounds and command execution.
+- The eventual server must restrict socket permissions and authenticate local peers using operating-system peer credentials (same-user policy by default).
+- Requests must be bounded and handled without blocking the compositor event loop. Unsupported versions, malformed frames and unavailable features receive structured errors.
+- The shared crate currently defines and tests the wire contract only. Socket lifecycle, peer authentication, dispatch and live workspace integration are intentionally separate follow-up steps.
+
+
 ## Settings-first design
 
 User-facing behavior must be configurable through a clear graphical Settings application. Editing TOML by hand remains an optional advanced path, never a requirement for ordinary users.
