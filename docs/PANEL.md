@@ -25,14 +25,14 @@ The first implementation lives in the `bubblepanel/` workspace member. It is int
 - Real network, audio, Bluetooth, battery or notification modules.
 - Multi-monitor surface management.
 - User-facing panel configuration.
-- IPC socket transport, peer authentication, request dispatch and live compositor integration. The shared versioned wire protocol is implemented in the bubble-ipc crate, but it is not connected to a socket yet.
+- BubblePanel's IPC client and live workspace state integration. The shared wire protocol and Linux Unix-socket server transport are implemented and tested in bubble-ipc, but BubbleWM does not start the listener yet.
 - Blur, transparency and GPU rendering.
 
 ### Development order after the prototype
 
-1. Implement the local Unix-socket transport, peer authentication and bounded request dispatch using the shared bubble-ipc contract.
+1. Add a compositor-owned state-dispatch channel and start the IPC server on a dedicated worker thread during compositor startup/shutdown.
 2. Connect workspace commands to BubbleWM's authoritative workspace state and return capability/state responses.
-3. Add protocol capability discovery and real workspace state to the panel UI.
+3. Implement the BubblePanel IPC client, capability discovery and real workspace state.
 4. Introduce typed panel configuration, configurable placement and per-output management.
 5. Add keyboard/popup interactions, module contracts and BubbleSettings integration.
 
