@@ -28,8 +28,11 @@
 - [x] XDG interactive move requests guarded by the matching pointer-grab serial and requesting client.
 - [x] XDG interactive resize requests with client min/max size constraints and final configure on release.
 - [x] Refresh window geometry after root-surface and subsurface commits.
-- [ ] Maximize/minimize behavior and compositor-provided close controls.
-- [ ] Popup/transient surface tracking and popup grabs.
+- [x] XDG maximize/unmaximize handling with saved floating position and size restoration.
+- [x] Transient toplevel parent tracking, relative initial placement and family stacking.
+- [x] XDG popup tracking/rendering, output-constrained placement and reposition requests.
+- [x] XDG popup keyboard/pointer grabs with serial validation.
+- [ ] Minimize behavior and compositor-provided close controls.
 - [ ] Server-side decorations and window controls.
 - [ ] Floating layout policy and virtual workspace foundations.
 - [ ] Connect workspace IPC commands to authoritative workspace state.
