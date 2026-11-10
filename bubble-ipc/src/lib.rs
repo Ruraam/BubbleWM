@@ -142,7 +142,7 @@ where
     T: DeserializeOwned,
 {
     let mut bytes = Vec::with_capacity(256);
-    let mut limited = reader.take((MAX_FRAME_SIZE + 2) as u64);
+    let mut limited = (&mut *reader).take((MAX_FRAME_SIZE + 2) as u64);
     let read = limited.read_until(b'\n', &mut bytes)?;
     if bytes.len() > MAX_FRAME_SIZE + 1 {
         return Err(ProtocolError::FrameTooLarge);
