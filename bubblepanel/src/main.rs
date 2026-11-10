@@ -88,7 +88,7 @@ fn main() -> Result<()> {
     };
 
     info!("Waiting for the compositor to configure BubblePanel");
-    let mut wayland_fd = connection.as_fd().as_raw_fd();
+    let wayland_fd = connection.as_fd().as_raw_fd();
     while !panel.closed {
         // Poll instead of blocking indefinitely so the clock can refresh without
         // introducing a background thread or continuously requesting frames.
