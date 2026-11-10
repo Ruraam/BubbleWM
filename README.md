@@ -2,7 +2,7 @@
 
 A native, lightweight and customizable Wayland compositor for BubbleOS, written in Rust and built on Smithay.
 
-> **Status:** early development. BubbleWM now starts an initial nested Winit compositor with a single advertised `wl_output`, core Wayland globals, tracked xdg-toplevel lifecycle, pointer routing, interactive move/resize, maximize/restore, transient stacking and XDG popup management. It is a development milestone, not yet a complete or daily-usable desktop environment.
+> **Status:** early development. BubbleWM now starts an initial nested Winit compositor with a single advertised `wl_output`, core Wayland globals, tracked xdg-toplevel lifecycle, pointer routing, interactive move/resize, maximize/restore, minimize/restore, transient stacking, XDG popup management and a prototype XDG server-decoration path. It is a development milestone, not yet a complete or daily-usable desktop environment.
 
 ## Project principles
 
@@ -50,14 +50,19 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - XDG maximize and unmaximize requests are supported. BubbleWM saves the pre-maximized floating position and size, then restores them when the client requests unmaximize.
 - XDG transient toplevels are positioned relative to their known parent and raised with their parent window family.
 - XDG popups are tracked and rendered with their owning toplevel. Popup placement is constrained to the output, reposition requests are handled, and protocol popup grabs route keyboard and pointer focus through Smithay's popup-grab helpers.
+- XDG minimize requests unmap the window and its transient descendants. `Super+H` minimizes the focused window and `Super+Tab` restores the most recently minimized window family.
+- `Super+Q` and the server-side titlebar close control send the standard XDG close event to the client; BubbleWM does not forcibly terminate the application.
+- BubbleWM advertises XDG minimize/maximize capabilities only. Fullscreen and compositor window-menu capabilities remain unadvertised.
+- Clients negotiating XDG server-side decorations receive a prototype 32-pixel titlebar with close, maximize/restore and minimize controls. Client-side decoration requests are respected. The titlebar can also initiate an interactive move.
 - Window geometry is refreshed after root-surface and subsurface commits.
 - Frame pacing is throttled to approximately 60 updates per second in the nested development loop.
 - The IPC server starts and stops with the compositor. Capability discovery works, but workspace commands correctly return `unavailable` until workspace management exists.
 
 ### Not implemented yet
 
-- Pointer cursor rendering, touch input, keyboard shortcuts and a complete focus/grab policy.
-- Minimize, compositor-provided close controls, server-side decorations and tiling.
+- Pointer cursor rendering, touch input, and a complete focus/grab policy.
+- Polished decorations: the current server-side titlebar is a basic prototype with colored controls, not yet a themed titlebar with title text, icons, borders or full accessibility behavior.
+- Tiling and virtual workspaces.
 - Virtual workspaces and workspace switching.
 - `wlr-layer-shell`, output-management protocols, multiple outputs and native DRM/KMS.
 - BubblePanel integration and real system status modules.
