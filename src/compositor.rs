@@ -727,8 +727,7 @@ impl CompositorStateData {
             with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false);
 
         if !has_buffer {
-            if let Some(location) = self.space.element_location(&window) {
-                self.windows[index].location = location;
+            if self.space.element_location(&window).is_some() {
                 self.space.unmap_elem(&window);
                 self.focus_topmost_window();
             }
@@ -744,12 +743,13 @@ impl CompositorStateData {
 
         window.on_commit();
 
-        if self.space.element_location(&window).is_none() {
+        if self.space.element_location(&window).is_none() && !self.windows[index].minimized {
             let location = self.windows[index].location;
+            let content_location = self.content_location(&window, location);
             let activate =
                 !self.windows[index].mapped_once || self.space.elements().next().is_none();
             self.windows[index].mapped_once = true;
-            self.space.map_element(window.clone(), location, activate);
+            self.space.map_element(window.clone(), content_location, activate);
             if activate {
                 if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel())
                 {
@@ -759,6 +759,13 @@ impl CompositorStateData {
                         SERIAL_COUNTER.next_serial(),
                     );
                 }
+            }
+        } else if !self.windows[index].minimized {
+            // Decoration mode can change after the client acknowledges a
+            // configure. Keep the client surface below/without the titlebar.
+            let expected = self.content_location(&window, self.windows[index].location);
+            if self.space.element_location(&window) != Some(expected) {
+                self.space.map_element(window.clone(), expected, false);
             }
         }
 
@@ -814,7 +821,12 @@ impl CompositorStateData {
         let Some(window) = self.managed_window_for_surface(surface.wl_surface()) else {
             return;
         };
-        let Some(initial_location) = self.space.element_location(&window) else {
+        let Some(initial_location) = self
+            .windows
+            .iter()
+            .find(|entry| entry.window == window)
+            .map(|entry| entry.location)
+        else {
             return;
         };
 
@@ -859,7 +871,12 @@ impl CompositorStateData {
         let Some(window) = self.managed_window_for_surface(surface.wl_surface()) else {
             return;
         };
-        let Some(initial_location) = self.space.element_location(&window) else {
+        let Some(initial_location) = self
+            .windows
+            .iter()
+            .find(|entry| entry.window == window)
+            .map(|entry| entry.location)
+        else {
             return;
         };
 
@@ -983,6 +1000,33 @@ impl CompositorHandler for CompositorStateData {
     }
 }
 
+impl XdgDecorationHandler for CompositorStateData {
+    fn new_decoration(&mut self, toplevel: ToplevelSurface) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(DecorationMode::ServerSide);
+        });
+        toplevel.send_pending_configure();
+    }
+
+    fn request_mode(&mut self, toplevel: ToplevelSurface, mode: DecorationMode) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(mode);
+        });
+        if toplevel.is_initial_configure_sent() {
+            toplevel.send_pending_configure();
+        }
+    }
+
+    fn unset_mode(&mut self, toplevel: ToplevelSurface) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(DecorationMode::ServerSide);
+        });
+        if toplevel.is_initial_configure_sent() {
+            toplevel.send_pending_configure();
+        }
+    }
+}
+
 impl ShmHandler for CompositorStateData {
     fn shm_state(&self) -> &ShmState {
         &self.shm_state
@@ -1013,6 +1057,8 @@ impl XdgShellHandler for CompositorStateData {
             mapped_once: false,
             restore_geometry: None,
             parent_surface: surface.parent(),
+            minimized: false,
+            minimized_order: None,
         });
         self.update_transient_parent(&surface);
 
@@ -1054,6 +1100,10 @@ impl XdgShellHandler for CompositorStateData {
 
     fn parent_changed(&mut self, surface: ToplevelSurface) {
         self.update_transient_parent(&surface);
+    }
+
+    fn minimize_request(&mut self, surface: ToplevelSurface) {
+        self.minimize_window(&surface);
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
@@ -1434,6 +1484,7 @@ delegate_compositor!(CompositorStateData);
 delegate_output!(CompositorStateData);
 delegate_seat!(CompositorStateData);
 delegate_shm!(CompositorStateData);
+delegate_xdg_decoration!(CompositorStateData);
 delegate_xdg_shell!(CompositorStateData);
 
 /// Starts the initial Winit-backed Wayland compositor and owns IPC for its
@@ -1478,6 +1529,7 @@ pub fn run_winit() -> Result<()> {
     let mut state = CompositorStateData {
         compositor_state,
         xdg_shell_state: XdgShellState::new::<CompositorStateData>(&display_handle),
+        xdg_decoration_state: XdgDecorationState::new::<CompositorStateData>(&display_handle),
         shm_state,
         seat_state,
         seat,
@@ -1490,6 +1542,7 @@ pub fn run_winit() -> Result<()> {
         popups: PopupManager::default(),
         resize_session: None,
         next_window_position: 0,
+        next_minimized_order: 0,
     };
     state.space.map_output(&output, (0, 0));
 
@@ -1541,7 +1594,29 @@ pub fn run_winit() -> Result<()> {
                         event.state(),
                         SERIAL_COUNTER.next_serial(),
                         (event.time() / 1000) as u32,
-                        |_, _, _| FilterResult::Forward,
+                        |state, modifiers, key| {
+                            if event.state() != smithay::backend::input::KeyState::Pressed
+                                || !modifiers.logo
+                            {
+                                return FilterResult::Forward;
+                            }
+
+                            match key.modified_sym() {
+                                keysyms::KEY_h => {
+                                    state.minimize_focused_window();
+                                    FilterResult::Intercept(())
+                                }
+                                keysyms::KEY_Tab => {
+                                    state.restore_last_minimized_window();
+                                    FilterResult::Intercept(())
+                                }
+                                keysyms::KEY_q => {
+                                    state.close_focused_window();
+                                    FilterResult::Intercept(())
+                                }
+                                _ => FilterResult::Forward,
+                            }
+                        },
                     );
                 }
             }
@@ -1576,8 +1651,16 @@ pub fn run_winit() -> Result<()> {
                 let serial = SERIAL_COUNTER.next_serial();
                 let time = (event.time() / 1000) as u32;
 
+                let mut decoration_move = None;
                 if event.state() == ButtonState::Pressed {
-                    state.focus_window_under_pointer(serial);
+                    if let Some((window, action)) = state.decoration_hit_test(state.pointer_location) {
+                        if action == DecorationAction::Move {
+                            decoration_move = Some(window.clone());
+                        }
+                        state.handle_decoration_action(&window, action, serial);
+                    } else {
+                        state.focus_window_under_pointer(serial);
+                    }
                 }
 
                 if let Some(pointer) = state.pointer.clone() {
@@ -1591,6 +1674,36 @@ pub fn run_winit() -> Result<()> {
                         },
                     );
                     pointer.frame(&mut state);
+
+                    if let Some(window) = decoration_move {
+                        if event.state() == ButtonState::Pressed
+                            && event.button_code() == 0x110
+                        {
+                            if let Some(location) = state
+                                .windows
+                                .iter()
+                                .find(|entry| entry.window == window)
+                                .map(|entry| entry.location)
+                            {
+                                let start_data = GrabStartData {
+                                    focus: None,
+                                    button: event.button_code(),
+                                    location: state.pointer_location,
+                                };
+                                pointer.set_grab(
+                                    &mut state,
+                                    WindowPointerGrab {
+                                        start_data,
+                                        window,
+                                        initial_location: location,
+                                        kind: WindowGrabKind::Move,
+                                    },
+                                    serial,
+                                    Focus::Clear,
+                                );
+                            }
+                        }
+                    }
                 }
             }
             WinitEvent::Input(InputEvent::PointerAxis { event }) => {
@@ -1667,6 +1780,9 @@ pub fn run_winit() -> Result<()> {
                 .context("cannot clear the Winit frame")?;
             draw_render_elements(&mut frame, 1.0, &elements, &[damage])
                 .context("cannot render Wayland surfaces")?;
+            let decorations = state.decoration_render_elements();
+            draw_render_elements(&mut frame, 1.0, &decorations, &[damage])
+                .context("cannot render server-side decorations")?;
             frame.finish().context("cannot finish the Winit frame")?;
         }
 
