@@ -322,10 +322,19 @@ mod tests {
         sync::{Arc, atomic::AtomicBool},
     };
 
+    fn private_test_directory(base: &Path) -> PathBuf {
+        let path = base.join("private");
+        DirBuilder::new()
+            .mode(PRIVATE_DIR_MODE)
+            .create(&path)
+            .expect("create private test directory");
+        path
+    }
+
     #[test]
     fn binds_private_socket_and_removes_it_on_drop() {
         let directory = tempfile::tempdir().expect("temporary directory");
-        let path = directory.path().join("control.sock");
+        let path = private_test_directory(directory.path()).join("control.sock");
         {
             let server = UnixIpcServer::bind(&path).expect("bind private socket");
             let metadata = fs::symlink_metadata(&path).expect("socket metadata");
@@ -338,7 +347,7 @@ mod tests {
     #[test]
     fn refuses_to_replace_a_regular_file() {
         let directory = tempfile::tempdir().expect("temporary directory");
-        let path = directory.path().join("control.sock");
+        let path = private_test_directory(directory.path()).join("control.sock");
         fs::write(&path, "keep me").expect("create sentinel file");
         assert!(matches!(
             UnixIpcServer::bind(&path),
@@ -350,9 +359,8 @@ mod tests {
     #[test]
     fn server_authenticates_and_answers_a_versioned_request() {
         let directory = tempfile::tempdir().expect("temporary directory");
-        let server = Arc::new(
-            UnixIpcServer::bind(directory.path().join("control.sock")).expect("bind server"),
-        );
+        let socket_path = private_test_directory(directory.path()).join("control.sock");
+        let server = Arc::new(UnixIpcServer::bind(&socket_path).expect("bind server"));
         let shutdown = Arc::new(AtomicBool::new(false));
         let worker_server = Arc::clone(&server);
         let worker_shutdown = Arc::clone(&shutdown);
