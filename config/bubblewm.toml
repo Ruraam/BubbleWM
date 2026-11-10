@@ -1,0 +1,25 @@
+# BubbleWM configuration draft for milestone 0.1.0.
+# Supported keys are validated by the application.
+
+[core]
+backend = "winit"
+layout = "floating"
+
+[effects]
+enabled = true
+profile = "advanced"
+blur = true
+transparency = true
+shadows = true
+wobbly = true
+workspace_cube = true
+
+[theme]
+source = "wallpaper"
+automatic_contrast = true
+smooth_transitions = true
+
+[decoration]
+mode = "server"
+titlebar = true
+rounded_corners = true
