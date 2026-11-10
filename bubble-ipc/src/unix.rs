@@ -8,7 +8,7 @@ use std::{
     fs::{self, DirBuilder},
     io::{BufReader, ErrorKind},
     os::unix::{
-        fs::{DirBuilderExt, MetadataExt, PermissionsExt},
+        fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt},
         net::{UnixListener, UnixStream},
     },
     path::{Path, PathBuf},
