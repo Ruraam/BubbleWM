@@ -21,14 +21,14 @@ use smithay_client_toolkit::{
             LayerSurfaceConfigure,
         },
     },
-    shm::{slot::SlotPool, Shm, ShmHandler},
+    shm::{Shm, ShmHandler, slot::SlotPool},
 };
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 use wayland_client::{
+    Connection, QueueHandle,
     globals::registry_queue_init,
     protocol::{wl_output, wl_shm, wl_surface},
-    Connection, QueueHandle,
 };
 
 const PANEL_HEIGHT: u32 = 40;
@@ -37,7 +37,9 @@ const MAX_BUFFER_WIDTH: u32 = 3840;
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .init();
 
     info!("BubblePanel {}", env!("CARGO_PKG_VERSION"));
@@ -51,8 +53,8 @@ fn main() -> Result<()> {
         .context("the compositor does not expose wl_compositor")?;
     let layer_shell = LayerShell::bind(&globals, &queue_handle)
         .context("the compositor does not support wlr-layer-shell; BubblePanel cannot be placed")?;
-    let shm = Shm::bind(&globals, &queue_handle)
-        .context("the compositor does not expose wl_shm")?;
+    let shm =
+        Shm::bind(&globals, &queue_handle).context("the compositor does not expose wl_shm")?;
 
     let surface = compositor.create_surface(&queue_handle);
     let layer = layer_shell.create_layer_surface(
@@ -114,7 +116,12 @@ impl BubblePanel {
         let stride = (width * 4) as i32;
         let (buffer, canvas) = self
             .pool
-            .create_buffer(width as i32, height as i32, stride, wl_shm::Format::Argb8888)
+            .create_buffer(
+                width as i32,
+                height as i32,
+                stride,
+                wl_shm::Format::Argb8888,
+            )
             .context("cannot create a shared-memory panel buffer")?;
 
         canvas.fill(0);
@@ -141,7 +148,8 @@ impl CompositorHandler for BubblePanel {
         _qh: &QueueHandle<Self>,
         _surface: &wl_surface::WlSurface,
         _new_factor: i32,
-    ) {}
+    ) {
+    }
 
     fn transform_changed(
         &mut self,
@@ -291,9 +299,36 @@ fn draw_workspaces(canvas: &mut [u8], width: u32, height: u32) {
 fn draw_status_and_clock(canvas: &mut [u8], width: u32, height: u32) {
     let clock = chrono::Local::now().format("%H:%M").to_string();
     let origin = width.saturating_sub(106);
-    fill_rect(canvas, width, height, origin.saturating_sub(20), 17, 2, 6, 0xFF657184);
-    fill_rect(canvas, width, height, origin.saturating_sub(12), 16, 4, 8, 0xFF62D6E8);
-    fill_rect(canvas, width, height, origin.saturating_sub(5), 13, 4, 11, 0xFF62D6E8);
+    fill_rect(
+        canvas,
+        width,
+        height,
+        origin.saturating_sub(20),
+        17,
+        2,
+        6,
+        0xFF657184,
+    );
+    fill_rect(
+        canvas,
+        width,
+        height,
+        origin.saturating_sub(12),
+        16,
+        4,
+        8,
+        0xFF62D6E8,
+    );
+    fill_rect(
+        canvas,
+        width,
+        height,
+        origin.saturating_sub(5),
+        13,
+        4,
+        11,
+        0xFF62D6E8,
+    );
 
     let mut cursor = origin;
     for character in clock.chars() {
@@ -310,8 +345,8 @@ fn draw_status_and_clock(canvas: &mut [u8], width: u32, height: u32) {
 
 fn draw_digit(canvas: &mut [u8], width: u32, height: u32, x: u32, digit: u32) {
     const SEGMENTS: [u8; 10] = [
-        0b0111111, 0b0000110, 0b1011011, 0b1001111, 0b1100110,
-        0b1101101, 0b1111101, 0b0000111, 0b1111111, 0b1101111,
+        0b0111111, 0b0000110, 0b1011011, 0b1001111, 0b1100110, 0b1101101, 0b1111101, 0b0000111,
+        0b1111111, 0b1101111,
     ];
     let Some(mask) = SEGMENTS.get(digit as usize).copied() else {
         return;
