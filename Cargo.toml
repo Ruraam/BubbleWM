@@ -8,6 +8,10 @@ description = "A native, lightweight and customizable Wayland compositor for Bub
 repository = "https://github.com/Ruraam/BubbleWM"
 readme = "README.md"
 
+[workspace]
+members = ["bubblepanel"]
+resolver = "3"
+
 [dependencies]
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
