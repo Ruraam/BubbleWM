@@ -56,7 +56,8 @@ use smithay::{
         buffer::BufferHandler,
         compositor::{
             CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
-            TraversalAction, add_post_commit_hook, with_states, with_surface_tree_downward,
+            TraversalAction, add_post_commit_hook, get_parent, with_states,
+            with_surface_tree_downward,
         },
         output::OutputHandler,
         seat::WaylandFocus,
@@ -184,6 +185,12 @@ impl CompositorStateData {
     fn focus_topmost_window(&mut self) {
         let serial = SERIAL_COUNTER.next_serial();
         let target = self.space.elements().last().cloned();
+
+        if let Some(window) = target.as_ref() {
+            self.space.raise_element(window, true);
+            self.configure_toplevels();
+        }
+
         if let Some(keyboard) = self.keyboard.clone() {
             let focus = target.and_then(|window| {
                 window
@@ -428,6 +435,17 @@ impl CompositorHandler for CompositorStateData {
 
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
+
+        // A subsurface commit can change the toplevel's bounding box too.
+        // Walk to its root and refresh the owning Window's cached geometry.
+        let mut root_surface = surface.clone();
+        while let Some(parent) = get_parent(&root_surface) {
+            root_surface = parent;
+        }
+        if let Some(window) = self.managed_window_for_surface(&root_surface) {
+            window.on_commit();
+        }
+
         self.space.refresh();
     }
 }
@@ -659,6 +677,11 @@ impl PointerGrab<CompositorStateData> for WindowPointerGrab {
     ) {
         handle.button(data, event);
         if handle.current_pressed().is_empty() {
+            if !self.window.alive() {
+                handle.unset_grab(self, data, event.serial, event.time, true);
+                return;
+            }
+
             if let WindowGrabKind::Resize { last_size, .. } = &self.kind {
                 let last_size = *last_size;
                 if let Some(toplevel) = self.window.toplevel() {
@@ -1121,7 +1144,7 @@ mod tests {
     fn resize_respects_client_minimum_and_maximum_sizes() {
         let size = calculate_resize_size(
             (800, 600).into(),
-            (500.0, 500.0).into(),
+            (-500.0, -500.0).into(),
             RESIZE_EDGE_LEFT | RESIZE_EDGE_TOP,
             (320, 240).into(),
             (700, 500).into(),
