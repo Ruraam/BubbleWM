@@ -18,8 +18,8 @@ use smithay_client_toolkit::{
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
     seat::{
-        pointer::{PointerEvent, PointerEventKind, PointerHandler, BTN_LEFT},
         Capability, SeatHandler, SeatState,
+        pointer::{BTN_LEFT, PointerEvent, PointerEventKind, PointerHandler},
     },
     shell::{
         WaylandSurface,
@@ -403,7 +403,8 @@ impl SeatHandler for BubblePanel {
         }
     }
 
-    fn remove_seat(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _seat: wl_seat::WlSeat) {}
+    fn remove_seat(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _seat: wl_seat::WlSeat) {
+    }
 }
 
 impl PointerHandler for BubblePanel {
@@ -426,8 +427,7 @@ impl PointerHandler for BubblePanel {
                 continue;
             }
 
-            let Some((x, y)) =
-                pointer_position_to_coords(event.position, self.width, self.height)
+            let Some((x, y)) = pointer_position_to_coords(event.position, self.width, self.height)
             else {
                 continue;
             };
@@ -460,11 +460,7 @@ smithay_client_toolkit::delegate_dispatch2!(BubblePanel);
 
 /// Converts Wayland surface-local floating-point coordinates into bounded
 /// panel-local logical coordinates.
-fn pointer_position_to_coords(
-    position: (f64, f64),
-    width: u32,
-    height: u32,
-) -> Option<(u32, u32)> {
+fn pointer_position_to_coords(position: (f64, f64), width: u32, height: u32) -> Option<(u32, u32)> {
     let (x, y) = position;
     if !x.is_finite()
         || !y.is_finite()
