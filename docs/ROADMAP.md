@@ -22,9 +22,16 @@
 - [ ] wlr-layer-shell server support for BubblePanel.
 
 ## 0.3.0 — Window management
-- [ ] Surface lifecycle and stable window map.
-- [ ] Focus, move, resize, maximize and close.
-- [ ] Floating layout and workspace foundations.
+- [x] Stable toplevel registry and lifecycle handling for creation, map, unmap, remap and destruction.
+- [x] Preserve floating window positions across unmap/remap transitions.
+- [x] Restore keyboard focus and activation to the topmost remaining window after unmap or destruction.
+- [x] XDG interactive move requests guarded by the matching pointer-grab serial and requesting client.
+- [x] XDG interactive resize requests with client min/max size constraints and final configure on release.
+- [x] Refresh window geometry after root-surface and subsurface commits.
+- [ ] Maximize/minimize behavior and compositor-provided close controls.
+- [ ] Popup/transient surface tracking and popup grabs.
+- [ ] Server-side decorations and window controls.
+- [ ] Floating layout policy and virtual workspace foundations.
 - [ ] Connect workspace IPC commands to authoritative workspace state.
 - [ ] Integrate BubblePanel's IPC client for workspace state and navigation.
 
