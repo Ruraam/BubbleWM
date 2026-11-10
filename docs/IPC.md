@@ -13,7 +13,7 @@ The IPC worker waits up to two seconds for a response. Queue saturation, a stopp
 ## Current lifecycle
 
 1. BubbleWM loads and validates its configuration.
-2. It creates the Wayland display and core compositor, shm, seat and xdg-shell state.
+2. It creates the Wayland display, core compositor, shm, seat and xdg-shell state, then advertises the single Winit-backed wl_output.
 3. It binds a Wayland listening socket and initializes the Winit/EGL backend.
 4. It starts IpcRuntime::start_default() and retains the runtime owner for the compositor lifetime.
 5. Each Winit event-loop iteration calls CoreCommandReceiver::dispatch_pending on the compositor thread.
@@ -31,6 +31,6 @@ This is intentional. The endpoint is live and correctly reports the current feat
 
 ## Current implementation boundary
 
-The compositor is still an early nested prototype. It advertises the core wl_compositor, wl_shm, wl_seat and xdg-shell globals, accepts clients and renders xdg toplevel surfaces. It does not yet implement workspace management, output management, proper pointer focus or the layer-shell server protocol.
+The compositor is still an early nested prototype. It advertises wl_compositor, wl_shm, wl_seat, xdg-shell and one wl_output, accepts clients and renders mapped xdg toplevel windows through a Smithay Space. Basic pointer motion/button/axis routing and click-to-focus are implemented. It does not yet implement workspace management, output-management protocols or multiple outputs, pointer cursor rendering, touch, window move/resize or the layer-shell server protocol.
 
 See docs/ARCHITECTURE.md and docs/ROADMAP.md for the next integration milestones.
