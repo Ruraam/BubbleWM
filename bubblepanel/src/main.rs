@@ -148,8 +148,7 @@ impl CompositorHandler for BubblePanel {
         _qh: &QueueHandle<Self>,
         _surface: &wl_surface::WlSurface,
         _new_factor: i32,
-    ) {
-    }
+    ) {}
 
     fn transform_changed(
         &mut self,
