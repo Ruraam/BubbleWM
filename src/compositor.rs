@@ -1535,7 +1535,13 @@ pub fn run_winit() -> Result<()> {
 
     let mut state = CompositorStateData {
         compositor_state,
-        xdg_shell_state: XdgShellState::new::<CompositorStateData>(&display_handle),
+        xdg_shell_state: XdgShellState::new_with_capabilities::<CompositorStateData>(
+            &display_handle,
+            [
+                xdg_toplevel::WmCapabilities::Maximize,
+                xdg_toplevel::WmCapabilities::Minimize,
+            ],
+        ),
         _xdg_decoration_state: XdgDecorationState::new::<CompositorStateData>(&display_handle),
         shm_state,
         seat_state,
