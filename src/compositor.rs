@@ -21,7 +21,9 @@ use smithay::{
     backend::{
         renderer::{
             Color32F, Frame, Renderer,
-            utils::{draw_render_elements, on_commit_buffer_handler},
+            utils::{
+                draw_render_elements, on_commit_buffer_handler, with_renderer_surface_state,
+            },
         },
         winit::{self, WinitEvent},
     },
@@ -30,12 +32,19 @@ use smithay::{
     input::{
         Seat, SeatHandler, SeatState,
         keyboard::{FilterResult, KeyboardHandle},
-        pointer::{AxisFrame, ButtonEvent, CursorImageStatus, MotionEvent, PointerHandle},
+        pointer::{
+            AxisFrame, ButtonEvent, CursorImageStatus, Focus, GestureHoldBeginEvent,
+            GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent,
+            GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
+            GestureSwipeUpdateEvent, GrabStartData, MotionEvent, PointerGrab, PointerHandle,
+            PointerInnerHandle, RelativeMotionEvent,
+        },
     },
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
+        wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::{
-            Client, Display, ListeningSocket,
+            Client, Display, ListeningSocket, Resource,
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::{
                 wl_buffer, wl_seat,
@@ -44,16 +53,18 @@ use smithay::{
         },
         winit::platform::pump_events::PumpStatus,
     },
-    utils::{Rectangle, SERIAL_COUNTER, Serial, Transform},
+    utils::{IsAlive, Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size, Transform},
     wayland::{
         buffer::BufferHandler,
         compositor::{
             CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
-            TraversalAction, with_surface_tree_downward,
+            TraversalAction, add_post_commit_hook, with_surface_tree_downward, with_states,
         },
         output::OutputHandler,
+        seat::WaylandFocus,
         shell::xdg::{
-            PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+            PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
+            XdgShellState,
         },
         shm::{ShmHandler, ShmState},
     },
@@ -66,6 +77,39 @@ const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const OUTPUT_REFRESH_MILLIHZ: i32 = 60_000;
 const WINDOW_CASCADE_STEP: i32 = 32;
 const WINDOW_CASCADE_COUNT: u32 = 8;
+const RESIZE_EDGE_TOP: u32 = 1;
+const RESIZE_EDGE_BOTTOM: u32 = 2;
+const RESIZE_EDGE_LEFT: u32 = 4;
+const RESIZE_EDGE_RIGHT: u32 = 8;
+
+struct ManagedWindow {
+    window: Window,
+    location: Point<i32, Logical>,
+}
+
+#[derive(Clone, Copy)]
+struct ResizeSession {
+    edges: u32,
+    initial_location: Point<i32, Logical>,
+    initial_size: Size<i32, Logical>,
+    released: bool,
+}
+
+enum WindowGrabKind {
+    Move,
+    Resize {
+        edges: u32,
+        initial_size: Size<i32, Logical>,
+        last_size: Size<i32, Logical>,
+    },
+}
+
+struct WindowPointerGrab {
+    start_data: GrabStartData<CompositorStateData>,
+    window: Window,
+    initial_location: Point<i32, Logical>,
+    kind: WindowGrabKind,
+}
 
 struct CompositorStateData {
     compositor_state: CompositorState,
@@ -78,6 +122,8 @@ struct CompositorStateData {
     pointer_location: smithay::utils::Point<f64, smithay::utils::Logical>,
     output: Output,
     space: Space<Window>,
+    windows: Vec<ManagedWindow>,
+    resize_session: Option<ResizeSession>,
     next_window_position: u32,
 }
 
@@ -102,9 +148,232 @@ impl CompositorStateData {
     fn configure_toplevels(&self) {
         for window in self.space.elements() {
             if let Some(toplevel) = window.toplevel() {
-                toplevel.send_configure();
+                toplevel.send_pending_configure();
             }
         }
+    }
+
+    fn managed_window_for_surface(&self, surface: &WlSurface) -> Option<Window> {
+        self.windows
+            .iter()
+            .find(|entry| {
+                entry.window
+                    .toplevel()
+                    .is_some_and(|toplevel| toplevel.wl_surface() == surface)
+            })
+            .map(|entry| entry.window.clone())
+    }
+
+    fn set_window_location(
+        &mut self,
+        window: &Window,
+        location: Point<i32, Logical>,
+        activate: bool,
+    ) {
+        if let Some(entry) = self
+            .windows
+            .iter_mut()
+            .find(|entry| entry.window == *window)
+        {
+            entry.location = location;
+        }
+        self.space.map_element(window.clone(), location, activate);
+    }
+
+    fn focus_topmost_window(&mut self) {
+        let serial = SERIAL_COUNTER.next_serial();
+        let target = self.space.elements().last().cloned();
+        if let Some(keyboard) = self.keyboard.clone() {
+            let focus = target
+                .and_then(|window| window.toplevel().map(|toplevel| toplevel.wl_surface().clone()));
+            keyboard.set_focus(self, focus, serial);
+        }
+    }
+
+    fn handle_toplevel_commit(&mut self, surface: &WlSurface) {
+        let Some(index) = self.windows.iter().position(|entry| {
+            entry
+                .window
+                .toplevel()
+                .is_some_and(|toplevel| toplevel.wl_surface() == surface)
+        }) else {
+            return;
+        };
+
+        let window = self.windows[index].window.clone();
+        let has_buffer = with_renderer_surface_state(surface, |state| state.buffer().is_some())
+            .unwrap_or(false);
+
+        if !has_buffer {
+            if let Some(location) = self.space.element_location(&window) {
+                self.windows[index].location = location;
+                self.space.unmap_elem(&window);
+                self.resize_session = None;
+                self.focus_topmost_window();
+            }
+            return;
+        }
+
+        window.on_commit();
+
+        if self.space.element_location(&window).is_none() {
+            let location = self.windows[index].location;
+            let activate = self.space.elements().next().is_none();
+            self.space.map_element(window.clone(), location, activate);
+            if activate {
+                if let (Some(keyboard), Some(toplevel)) =
+                    (self.keyboard.clone(), window.toplevel())
+                {
+                    keyboard.set_focus(
+                        self,
+                        Some(toplevel.wl_surface().clone()),
+                        SERIAL_COUNTER.next_serial(),
+                    );
+                }
+            }
+        }
+
+        if let Some(session) = self.resize_session.filter(|session| {
+            session
+                .initial_location
+                .x
+                .checked_add(session.initial_size.w)
+                .is_some()
+                && self
+                    .windows[index]
+                    .window
+                    .toplevel()
+                    .is_some_and(|toplevel| toplevel.wl_surface() == surface)
+        }) {
+            let geometry = window.geometry();
+            let mut location = session.initial_location;
+            if session.edges & RESIZE_EDGE_LEFT != 0 {
+                location.x = session.initial_location.x
+                    + (session.initial_size.w - geometry.size.w);
+            }
+            if session.edges & RESIZE_EDGE_TOP != 0 {
+                location.y = session.initial_location.y
+                    + (session.initial_size.h - geometry.size.h);
+            }
+            self.set_window_location(&window, location, false);
+
+            let resize_finished = session.released
+                && window.toplevel().is_some_and(|toplevel| {
+                    !toplevel
+                        .current_state()
+                        .states
+                        .contains(xdg_toplevel::State::Resizing)
+                });
+            if resize_finished {
+                self.resize_session = None;
+            }
+        }
+    }
+
+    fn begin_move(
+        &mut self,
+        surface: &ToplevelSurface,
+        seat: &Seat<Self>,
+        serial: Serial,
+    ) {
+        let Some(pointer) = seat.get_pointer() else {
+            return;
+        };
+        if !pointer.has_grab(serial) {
+            return;
+        }
+
+        let Some(start_data) = pointer.grab_start_data() else {
+            return;
+        };
+        if !start_data
+            .focus
+            .as_ref()
+            .is_some_and(|(focus, _)| focus.same_client_as(&surface.wl_surface().id()))
+        {
+            return;
+        }
+
+        let Some(window) = self.managed_window_for_surface(surface.wl_surface()) else {
+            return;
+        };
+        let Some(initial_location) = self.space.element_location(&window) else {
+            return;
+        };
+
+        pointer.set_grab(
+            self,
+            WindowPointerGrab {
+                start_data,
+                window,
+                initial_location,
+                kind: WindowGrabKind::Move,
+            },
+            serial,
+            Focus::Clear,
+        );
+    }
+
+    fn begin_resize(
+        &mut self,
+        surface: &ToplevelSurface,
+        seat: &Seat<Self>,
+        serial: Serial,
+        edges: xdg_toplevel::ResizeEdge,
+    ) {
+        let Some(pointer) = seat.get_pointer() else {
+            return;
+        };
+        if !pointer.has_grab(serial) {
+            return;
+        }
+
+        let Some(start_data) = pointer.grab_start_data() else {
+            return;
+        };
+        if !start_data
+            .focus
+            .as_ref()
+            .is_some_and(|(focus, _)| focus.same_client_as(&surface.wl_surface().id()))
+        {
+            return;
+        }
+
+        let Some(window) = self.managed_window_for_surface(surface.wl_surface()) else {
+            return;
+        };
+        let Some(initial_location) = self.space.element_location(&window) else {
+            return;
+        };
+
+        let initial_size = window.geometry().size;
+        let edge_bits = edges as u32;
+        if edge_bits == 0 {
+            return;
+        }
+
+        self.resize_session = Some(ResizeSession {
+            edges: edge_bits,
+            initial_location,
+            initial_size,
+            released: false,
+        });
+
+        pointer.set_grab(
+            self,
+            WindowPointerGrab {
+                start_data,
+                window,
+                initial_location,
+                kind: WindowGrabKind::Resize {
+                    edges: edge_bits,
+                    initial_size,
+                    last_size: initial_size,
+                },
+            },
+            serial,
+            Focus::Clear,
+        );
     }
 
     fn update_output_mode(&mut self, size: smithay::utils::Size<i32, smithay::utils::Physical>) {
@@ -159,15 +428,6 @@ impl CompositorHandler for CompositorStateData {
 
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
-
-        for window in self.space.elements().cloned().collect::<Vec<_>>() {
-            let is_toplevel = window
-                .toplevel()
-                .is_some_and(|toplevel| toplevel.wl_surface() == surface);
-            if is_toplevel {
-                window.on_commit();
-            }
-        }
         self.space.refresh();
     }
 }
@@ -188,22 +448,75 @@ impl XdgShellHandler for CompositorStateData {
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         info!("New xdg_toplevel surface");
 
-        let window = Window::new_wayland_window(surface);
+        let window = Window::new_wayland_window(surface.clone());
         let cascade = self.next_window_position % WINDOW_CASCADE_COUNT;
         self.next_window_position = self.next_window_position.wrapping_add(1);
         let offset = cascade as i32 * WINDOW_CASCADE_STEP;
-        self.space
-            .map_element(window.clone(), (64 + offset, 64 + offset), true);
-        self.space.refresh();
-        self.configure_toplevels();
+        let location = (64 + offset, 64 + offset).into();
 
-        if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel()) {
-            keyboard.set_focus(
-                self,
-                Some(toplevel.wl_surface().clone()),
-                SERIAL_COUNTER.next_serial(),
-            );
+        // Keep a stable handle and its last position even while the client
+        // temporarily unmaps the surface with a null buffer.
+        self.windows.push(ManagedWindow {
+            window,
+            location,
+        });
+
+        // The XDG role's first configure/commit cycle is managed by Smithay.
+        // This post-commit hook maps the window only once it has a real buffer
+        // and handles subsequent unmap/remap transitions.
+        add_post_commit_hook(surface.wl_surface(), |state: &mut Self, _, committed| {
+            state.handle_toplevel_commit(committed);
+        });
+    }
+
+    fn move_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial) {
+        let Some(seat) = Seat::<Self>::from_resource(&seat) else {
+            return;
+        };
+        self.begin_move(&surface, &seat, serial);
+    }
+
+    fn resize_request(
+        &mut self,
+        surface: ToplevelSurface,
+        seat: wl_seat::WlSeat,
+        serial: Serial,
+        edges: xdg_toplevel::ResizeEdge,
+    ) {
+        let Some(seat) = Seat::<Self>::from_resource(&seat) else {
+            return;
+        };
+        self.begin_resize(&surface, &seat, serial, edges);
+    }
+
+    fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
+        let root = surface.wl_surface().clone();
+        if let Some(index) = self.windows.iter().position(|entry| {
+            entry
+                .window
+                .toplevel()
+                .is_some_and(|toplevel| toplevel.wl_surface() == &root)
+        }) {
+            let entry = self.windows.remove(index);
+            self.space.unmap_elem(&entry.window);
         }
+
+        if self
+            .resize_session
+            .is_some_and(|session| {
+                self.windows.iter().all(|entry| {
+                    entry
+                        .window
+                        .toplevel()
+                        .is_none_or(|toplevel| toplevel.wl_surface() != &root)
+                })
+            })
+        {
+            self.resize_session = None;
+        }
+
+        self.focus_topmost_window();
+        self.space.refresh();
     }
 
     fn new_popup(&mut self, _surface: PopupSurface, _positioner: PositionerState) {
@@ -236,6 +549,222 @@ impl SeatHandler for CompositorStateData {
     fn focus_changed(&mut self, _seat: &Seat<Self>, _focused: Option<&WlSurface>) {}
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, _image: CursorImageStatus) {}
+}
+
+
+impl PointerGrab<CompositorStateData> for WindowPointerGrab {
+    fn motion(
+        &mut self,
+        data: &mut CompositorStateData,
+        handle: &mut PointerInnerHandle<'_, CompositorStateData>,
+        _focus: Option<(WlSurface, Point<f64, Logical>)>,
+        event: &MotionEvent,
+    ) {
+        // Keep clients from receiving pointer focus while the compositor owns
+        // the interactive move/resize operation.
+        handle.motion(data, None, event);
+
+        if !self.window.alive() || data.space.element_location(&self.window).is_none() {
+            handle.unset_grab(self, data, event.serial, event.time, true);
+            return;
+        }
+
+        let delta = event.location - self.start_data.location;
+        match &mut self.kind {
+            WindowGrabKind::Move => {
+                let location = self.initial_location.to_f64() + delta;
+                data.set_window_location(&self.window, location.to_i32_round(), true);
+            }
+            WindowGrabKind::Resize {
+                edges,
+                initial_size,
+                last_size,
+            } => {
+                let mut width = initial_size.w as f64;
+                let mut height = initial_size.h as f64;
+
+                if edges & RESIZE_EDGE_LEFT != 0 {
+                    width -= delta.x;
+                } else if edges & RESIZE_EDGE_RIGHT != 0 {
+                    width += delta.x;
+                }
+                if edges & RESIZE_EDGE_TOP != 0 {
+                    height -= delta.y;
+                } else if edges & RESIZE_EDGE_BOTTOM != 0 {
+                    height += delta.y;
+                }
+
+                let (min_size, max_size) = self
+                    .window
+                    .wl_surface()
+                    .map(|surface| {
+                        with_states(&surface, |states| {
+                            let mut cached = states.cached_state.get::<SurfaceCachedState>();
+                            let current = cached.current();
+                            (current.min_size, current.max_size)
+                        })
+                    })
+                    .unwrap_or(((0, 0).into(), (0, 0).into()));
+
+                let min_width = min_size.w.max(1);
+                let min_height = min_size.h.max(1);
+                let max_width = if max_size.w <= 0 {
+                    i32::MAX
+                } else {
+                    max_size.w.max(min_width)
+                };
+                let max_height = if max_size.h <= 0 {
+                    i32::MAX
+                } else {
+                    max_size.h.max(min_height)
+                };
+
+                let next_size = (
+                    (width.round() as i32).clamp(min_width, max_width),
+                    (height.round() as i32).clamp(min_height, max_height),
+                )
+                    .into();
+                *last_size = next_size;
+
+                if let Some(toplevel) = self.window.toplevel() {
+                    toplevel.with_pending_state(|state| {
+                        state.states.set(xdg_toplevel::State::Resizing);
+                        state.size = Some(next_size);
+                    });
+                    toplevel.send_pending_configure();
+                }
+            }
+        }
+    }
+
+    fn relative_motion(
+        &mut self,
+        data: &mut CompositorStateData,
+        handle: &mut PointerInnerHandle<'_, CompositorStateData>,
+        focus: Option<(WlSurface, Point<f64, Logical>)>,
+        event: &RelativeMotionEvent,
+    ) {
+        handle.relative_motion(data, focus, event);
+    }
+
+    fn button(
+        &mut self,
+        data: &mut CompositorStateData,
+        handle: &mut PointerInnerHandle<'_, CompositorStateData>,
+        event: &ButtonEvent,
+    ) {
+        handle.button(data, event);
+        if handle.current_pressed().is_empty() {
+            if let WindowGrabKind::Resize { last_size, .. } = self.kind {
+                if let Some(toplevel) = self.window.toplevel() {
+                    toplevel.with_pending_state(|state| {
+                        state.states.unset(xdg_toplevel::State::Resizing);
+                        state.size = Some(last_size);
+                    });
+                    toplevel.send_pending_configure();
+                }
+                if let Some(session) = data.resize_session.as_mut() {
+                    session.released = true;
+                }
+            }
+            handle.unset_grab(self, data, event.serial, event.time, true);
+        }
+    }
+
+    fn axis(
+        &mut self,
+        data: &mut CompositorStateData,
+        handle: &mut PointerInnerHandle<'_, CompositorStateData>,
+        details: AxisFrame,
+    ) {
+        handle.axis(data, details);
+    }
+
+    fn frame(
+        &mut self,
+        data: &mut CompositorStateData,
+        handle: &mut PointerInnerHandle<'_, CompositorStateData>,
+    ) {
+        handle.frame(data);
+    }
+
+    fn gesture_swipe_begin(
+        &mut self,
+        data: &mut CompositorStateData,
+        handle: &mut PointerInnerHandle<'_, CompositorStateData>,
+        event: &GestureSwipeBeginEvent,
+    ) {
+        handle.gesture_swipe_begin(data, event);
+    }
+
+    fn gesture_swipe_update(
+        &mut self,
+        data: &mut CompositorStateData,
+        handle: &mut PointerInnerHandle<'_, CompositorStateData>,
+        event: &GestureSwipeUpdateEvent,
+    ) {
+        handle.gesture_swipe_update(data, event);
+    }
+
+    fn gesture_swipe_end(
+        &mut self,
+        data: &mut CompositorStateData,
+        handle: &mut PointerInnerHandle<'_, CompositorStateData>,
+        event: &GestureSwipeEndEvent,
+    ) {
+        handle.gesture_swipe_end(data, event);
+    }
+
+    fn gesture_pinch_begin(
+        &mut self,
+        data: &mut CompositorStateData,
+        handle: &mut PointerInnerHandle<'_, CompositorStateData>,
+        event: &GesturePinchBeginEvent,
+    ) {
+        handle.gesture_pinch_begin(data, event);
+    }
+
+    fn gesture_pinch_update(
+        &mut self,
+        data: &mut CompositorStateData,
+        handle: &mut PointerInnerHandle<'_, CompositorStateData>,
+        event: &GesturePinchUpdateEvent,
+    ) {
+        handle.gesture_pinch_update(data, event);
+    }
+
+    fn gesture_pinch_end(
+        &mut self,
+        data: &mut CompositorStateData,
+        handle: &mut PointerInnerHandle<'_, CompositorStateData>,
+        event: &GesturePinchEndEvent,
+    ) {
+        handle.gesture_pinch_end(data, event);
+    }
+
+    fn gesture_hold_begin(
+        &mut self,
+        data: &mut CompositorStateData,
+        handle: &mut PointerInnerHandle<'_, CompositorStateData>,
+        event: &GestureHoldBeginEvent,
+    ) {
+        handle.gesture_hold_begin(data, event);
+    }
+
+    fn gesture_hold_end(
+        &mut self,
+        data: &mut CompositorStateData,
+        handle: &mut PointerInnerHandle<'_, CompositorStateData>,
+        event: &GestureHoldEndEvent,
+    ) {
+        handle.gesture_hold_end(data, event);
+    }
+
+    fn start_data(&self) -> &GrabStartData<CompositorStateData> {
+        &self.start_data
+    }
+
+    fn unset(&mut self, _data: &mut CompositorStateData) {}
 }
 
 #[derive(Default)]
@@ -309,6 +838,8 @@ pub fn run_winit() -> Result<()> {
         pointer_location: (0.0, 0.0).into(),
         output: output.clone(),
         space: Space::default(),
+        windows: Vec::new(),
+        resize_session: None,
         next_window_position: 0,
     };
     state.space.map_output(&output, (0, 0));
