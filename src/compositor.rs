@@ -26,7 +26,10 @@ use smithay::{
         winit::{self, WinitEvent},
     },
     delegate_compositor, delegate_output, delegate_seat, delegate_shm, delegate_xdg_shell,
-    desktop::{Space, Window, WindowSurfaceType},
+    desktop::{
+        find_popup_root_surface, get_popup_toplevel_coords, PopupKeyboardGrab, PopupKind,
+        PopupManager, PopupPointerGrab, PopupUngrabStrategy, Space, Window, WindowSurfaceType,
+    },
     input::{
         Seat, SeatHandler, SeatState,
         keyboard::{FilterResult, KeyboardHandle},
@@ -81,10 +84,18 @@ const RESIZE_EDGE_BOTTOM: u32 = 2;
 const RESIZE_EDGE_LEFT: u32 = 4;
 const RESIZE_EDGE_RIGHT: u32 = 8;
 
+#[derive(Clone, Copy)]
+struct RestoreGeometry {
+    location: Point<i32, Logical>,
+    size: Option<Size<i32, Logical>>,
+}
+
 struct ManagedWindow {
     window: Window,
     location: Point<i32, Logical>,
     mapped_once: bool,
+    restore_geometry: Option<RestoreGeometry>,
+    parent_surface: Option<WlSurface>,
 }
 
 #[derive(Clone)]
@@ -124,6 +135,7 @@ struct CompositorStateData {
     output: Output,
     space: Space<Window>,
     windows: Vec<ManagedWindow>,
+    popups: PopupManager,
     resize_session: Option<ResizeSession>,
     next_window_position: u32,
 }
@@ -164,6 +176,203 @@ impl CompositorStateData {
                     .is_some_and(|toplevel| toplevel.wl_surface() == surface)
             })
             .map(|entry| entry.window.clone())
+    }
+
+    fn managed_location_for_surface(
+        &self,
+        surface: &WlSurface,
+    ) -> Option<Point<i32, Logical>> {
+        self.windows
+            .iter()
+            .find(|entry| {
+                entry
+                    .window
+                    .toplevel()
+                    .is_some_and(|toplevel| toplevel.wl_surface() == surface)
+            })
+            .map(|entry| {
+                self.space
+                    .element_location(&entry.window)
+                    .unwrap_or(entry.location)
+            })
+    }
+
+    fn update_transient_parent(&mut self, surface: &ToplevelSurface) {
+        let root = surface.wl_surface().clone();
+        let parent = surface.parent();
+        let parent_location = parent
+            .as_ref()
+            .and_then(|parent| self.managed_location_for_surface(parent));
+
+        let Some(index) = self.windows.iter().position(|entry| {
+            entry
+                .window
+                .toplevel()
+                .is_some_and(|toplevel| toplevel.wl_surface() == &root)
+        }) else {
+            return;
+        };
+
+        self.windows[index].parent_surface = parent;
+        let Some(parent_location) = parent_location else {
+            return;
+        };
+
+        let location = parent_location + (WINDOW_CASCADE_STEP, WINDOW_CASCADE_STEP);
+        self.windows[index].location = location;
+        let window = self.windows[index].window.clone();
+        if self.space.element_location(&window).is_some() {
+            self.space.map_element(window, location, false);
+        }
+    }
+
+    fn raise_window_family(&mut self, window: &Window) {
+        let Some(root) = window.toplevel().map(|surface| surface.wl_surface().clone()) else {
+            return;
+        };
+
+        let mut family = vec![root];
+        let mut index = 0;
+        while index < family.len() {
+            let parent = family[index].clone();
+            for entry in &self.windows {
+                if entry.parent_surface.as_ref() == Some(&parent) {
+                    if let Some(child) = entry.window.toplevel().map(|s| s.wl_surface().clone()) {
+                        if !family.contains(&child) {
+                            family.push(child);
+                        }
+                    }
+                }
+            }
+            index += 1;
+        }
+
+        let family_windows = self
+            .windows
+            .iter()
+            .filter(|entry| {
+                entry.window.toplevel().is_some_and(|surface| {
+                    family.contains(surface.wl_surface())
+                })
+            })
+            .map(|entry| entry.window.clone())
+            .collect::<Vec<_>>();
+
+        for member in family_windows {
+            self.space.raise_element(&member, member == *window);
+        }
+        self.configure_toplevels();
+    }
+
+    fn maximize_window(&mut self, surface: &ToplevelSurface) {
+        let current = surface.current_state();
+        if !current
+            .capabilities
+            .contains(xdg_toplevel::WmCapabilities::Maximize)
+        {
+            if surface.is_initial_configure_sent() {
+                surface.send_configure();
+            }
+            return;
+        }
+
+        let Some(window) = self.managed_window_for_surface(surface.wl_surface()) else {
+            if surface.is_initial_configure_sent() {
+                surface.send_configure();
+            }
+            return;
+        };
+        let Some(bounds) = self.space.output_geometry(&self.output) else {
+            if surface.is_initial_configure_sent() {
+                surface.send_configure();
+            }
+            return;
+        };
+
+        if !current.states.contains(xdg_toplevel::State::Maximized) {
+            if let Some(entry) = self.windows.iter_mut().find(|entry| entry.window == window) {
+                if entry.restore_geometry.is_none() {
+                    let location = self
+                        .space
+                        .element_location(&window)
+                        .unwrap_or(entry.location);
+                    let size = self
+                        .space
+                        .element_location(&window)
+                        .map(|_| window.geometry().size)
+                        .or(current.size);
+                    entry.restore_geometry = Some(RestoreGeometry { location, size });
+                }
+            }
+        }
+
+        surface.with_pending_state(|state| {
+            state.states.set(xdg_toplevel::State::Maximized);
+            state.size = Some(bounds.size);
+        });
+        self.set_window_location(&window, bounds.loc, true);
+
+        if surface.is_initial_configure_sent() {
+            surface.send_configure();
+        }
+    }
+
+    fn unmaximize_window(&mut self, surface: &ToplevelSurface) {
+        if !surface
+            .current_state()
+            .states
+            .contains(xdg_toplevel::State::Maximized)
+        {
+            return;
+        }
+
+        let Some(window) = self.managed_window_for_surface(surface.wl_surface()) else {
+            surface.with_pending_state(|state| {
+                state.states.unset(xdg_toplevel::State::Maximized);
+                state.size = None;
+            });
+            surface.send_pending_configure();
+            return;
+        };
+
+        let restore = self
+            .windows
+            .iter_mut()
+            .find(|entry| entry.window == window)
+            .and_then(|entry| entry.restore_geometry.take());
+
+        surface.with_pending_state(|state| {
+            state.states.unset(xdg_toplevel::State::Maximized);
+            state.size = restore.and_then(|geometry| geometry.size);
+        });
+
+        if let Some(restore) = restore {
+            self.set_window_location(&window, restore.location, true);
+        }
+
+        surface.send_pending_configure();
+    }
+
+    fn unconstrain_popup(&self, popup: &PopupSurface) {
+        let kind = PopupKind::Xdg(popup.clone());
+        let Ok(root) = find_popup_root_surface(&kind) else {
+            return;
+        };
+        let Some(window) = self.managed_window_for_surface(&root) else {
+            return;
+        };
+        let Some(window_geometry) = self.space.element_geometry(&window) else {
+            return;
+        };
+        let Some(mut target) = self.space.output_geometry(&self.output) else {
+            return;
+        };
+
+        target.loc -= get_popup_toplevel_coords(&kind);
+        target.loc -= window_geometry.loc;
+        popup.with_pending_state(|state| {
+            state.geometry = state.positioner.get_unconstrained_geometry(target);
+        });
     }
 
     fn set_window_location(
