@@ -1823,8 +1823,12 @@ pub fn run_winit() -> Result<()> {
             draw_render_elements(&mut frame, 1.0, &elements, &[damage])
                 .context("cannot render Wayland surfaces")?;
             let decorations = state.decoration_render_elements();
-            draw_render_elements(&mut frame, 1.0, &decorations, &[damage])
-                .context("cannot render server-side decorations")?;
+            draw_render_elements::<
+                smithay::backend::renderer::gles::GlesRenderer,
+                f64,
+                SolidColorRenderElement,
+            >(&mut frame, 1.0, &decorations, &[damage])
+            .context("cannot render server-side decorations")?;
             frame.finish().context("cannot finish the Winit frame")?;
         }
 
