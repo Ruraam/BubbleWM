@@ -150,7 +150,7 @@ struct WindowPointerGrab {
 struct CompositorStateData {
     compositor_state: CompositorState,
     xdg_shell_state: XdgShellState,
-    xdg_decoration_state: XdgDecorationState,
+    _xdg_decoration_state: XdgDecorationState,
     shm_state: ShmState,
     seat_state: SeatState<Self>,
     seat: Seat<Self>,
@@ -322,6 +322,27 @@ impl CompositorStateData {
         family
     }
 
+    fn root_surface_for_toplevel(&self, surface: &WlSurface) -> WlSurface {
+        let mut root = surface.clone();
+        loop {
+            let parent = self
+                .windows
+                .iter()
+                .find(|entry| {
+                    entry
+                        .window
+                        .toplevel()
+                        .is_some_and(|toplevel| toplevel.wl_surface() == &root)
+                })
+                .and_then(|entry| entry.parent_surface.clone());
+            let Some(parent) = parent else {
+                break;
+            };
+            root = parent;
+        }
+        root
+    }
+
     fn minimize_window(&mut self, surface: &ToplevelSurface) {
         let root = surface.wl_surface().clone();
         let family = self.window_family_surfaces(&root);
@@ -368,9 +389,10 @@ impl CompositorStateData {
             .max_by_key(|entry| entry.minimized_order)
             .and_then(|entry| entry.window.toplevel().map(|s| s.wl_surface().clone()));
 
-        let Some(root) = target else {
+        let Some(target) = target else {
             return;
         };
+        let root = self.root_surface_for_toplevel(&target);
         let family = self.window_family_surfaces(&root);
         let mut restored = Vec::new();
 
@@ -490,7 +512,8 @@ impl CompositorStateData {
                 scale,
             );
 
-            let close_x = entry.location.x + width - DECORATION_BUTTON_MARGIN - DECORATION_BUTTON_SIZE;
+            let close_x =
+                entry.location.x + width - DECORATION_BUTTON_MARGIN - DECORATION_BUTTON_SIZE;
             let maximize_x = close_x - DECORATION_BUTTON_GAP - DECORATION_BUTTON_SIZE;
             let minimize_x = maximize_x - DECORATION_BUTTON_GAP - DECORATION_BUTTON_SIZE;
             let button_y = entry.location.y + (TITLEBAR_HEIGHT - DECORATION_BUTTON_SIZE) / 2;
@@ -521,12 +544,7 @@ impl CompositorStateData {
         elements
     }
 
-    fn handle_decoration_action(
-        &mut self,
-        window: &Window,
-        action: DecorationAction,
-        serial: Serial,
-    ) {
+    fn handle_decoration_action(&mut self, window: &Window, action: DecorationAction) {
         self.raise_window_family(window);
 
         let Some(surface) = window.toplevel() else {
@@ -546,35 +564,7 @@ impl CompositorStateData {
                     self.maximize_window(&surface);
                 }
             }
-            DecorationAction::Move => {
-                let Some(pointer) = self.pointer.clone() else {
-                    return;
-                };
-                let start_data = pointer.grab_start_data().unwrap_or(GrabStartData {
-                    focus: None,
-                    button: 0x110,
-                    location: self.pointer_location,
-                });
-                let Some(location) = self
-                    .windows
-                    .iter()
-                    .find(|entry| entry.window == *window)
-                    .map(|entry| entry.location)
-                else {
-                    return;
-                };
-                pointer.set_grab(
-                    self,
-                    WindowPointerGrab {
-                        start_data,
-                        window: window.clone(),
-                        initial_location: location,
-                        kind: WindowGrabKind::Move,
-                    },
-                    serial,
-                    Focus::Clear,
-                );
-            }
+            DecorationAction::Move => {}
         }
     }
 
@@ -1546,7 +1536,7 @@ pub fn run_winit() -> Result<()> {
     let mut state = CompositorStateData {
         compositor_state,
         xdg_shell_state: XdgShellState::new::<CompositorStateData>(&display_handle),
-        xdg_decoration_state: XdgDecorationState::new::<CompositorStateData>(&display_handle),
+        _xdg_decoration_state: XdgDecorationState::new::<CompositorStateData>(&display_handle),
         shm_state,
         seat_state,
         seat,
@@ -1676,7 +1666,7 @@ pub fn run_winit() -> Result<()> {
                         if action == DecorationAction::Move {
                             decoration_move = Some(window.clone());
                         }
-                        state.handle_decoration_action(&window, action, serial);
+                        state.handle_decoration_action(&window, action);
                     } else {
                         state.focus_window_under_pointer(serial);
                     }
