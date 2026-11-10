@@ -19,14 +19,11 @@ use smithay::{
         KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
     },
     backend::{
-        renderer::{
-            Color32F, Frame, Renderer,
-            utils::draw_render_elements,
-        },
+        renderer::{Color32F, Frame, Renderer, utils::draw_render_elements},
         winit::{self, WinitEvent},
     },
-    desktop::{Space, Window, WindowSurfaceType},
     delegate_compositor, delegate_output, delegate_seat, delegate_shm, delegate_xdg_shell,
+    desktop::{Space, Window, WindowSurfaceType},
     input::{
         Seat, SeatHandler, SeatState,
         keyboard::{FilterResult, KeyboardHandle},
@@ -71,7 +68,6 @@ struct CompositorStateData {
     compositor_state: CompositorState,
     xdg_shell_state: XdgShellState,
     shm_state: ShmState,
-    output_manager_state: OutputManagerState,
     seat_state: SeatState<Self>,
     seat: Seat<Self>,
     keyboard: Option<KeyboardHandle<Self>>,
@@ -128,8 +124,8 @@ impl CompositorStateData {
         let target = self
             .space
             .element_under(self.pointer_location)
-            .map(|(window, location)| (window.clone(), location));
-        let Some((window, window_location)) = target else {
+            .map(|(window, _location)| window.clone());
+        let Some(window) = target else {
             return;
         };
 
@@ -137,14 +133,9 @@ impl CompositorStateData {
         self.configure_toplevels();
 
         if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel()) {
-            keyboard.set_focus(
-                self,
-                Some(toplevel.wl_surface().clone()),
-                serial,
-            );
+            keyboard.set_focus(self, Some(toplevel.wl_surface().clone()), serial);
         }
 
-        let _ = window_location;
     }
 }
 
@@ -269,8 +260,9 @@ delegate_xdg_shell!(CompositorStateData);
 /// Starts the initial Winit-backed Wayland compositor and owns IPC for its
 /// complete lifetime.
 pub fn run_winit() -> Result<()> {
-    let (mut backend, mut winit_loop) = winit::init::<smithay::backend::renderer::gles::GlesRenderer>()
-        .map_err(|error| anyhow!("cannot initialize the Winit/EGL backend: {error}"))?;
+    let (mut backend, mut winit_loop) =
+        winit::init::<smithay::backend::renderer::gles::GlesRenderer>()
+            .map_err(|error| anyhow!("cannot initialize the Winit/EGL backend: {error}"))?;
     let initial_size = backend.window_size();
 
     let mut display: Display<CompositorStateData> =
@@ -308,7 +300,6 @@ pub fn run_winit() -> Result<()> {
         compositor_state,
         xdg_shell_state: XdgShellState::new::<CompositorStateData>(&display_handle),
         shm_state,
-        output_manager_state: OutputManagerState::new(),
         seat_state,
         seat,
         keyboard: None,
