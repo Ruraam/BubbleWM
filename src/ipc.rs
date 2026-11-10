@@ -210,11 +210,9 @@ mod tests {
         PROTOCOL_VERSION, RequestEnvelope, ResponseData, ResponseEnvelope, read_frame, write_frame,
     };
     use std::{
-        fs,
         io::BufReader,
         os::unix::fs::DirBuilderExt,
         os::unix::net::UnixStream,
-        sync::atomic::AtomicBool,
         time::Instant,
     };
 
