@@ -9,12 +9,16 @@
 ## 0.2.0 — Nested compositor (initial bring-up complete)
 - [x] Smithay Winit/EGL development backend.
 - [x] Automatic Wayland socket creation and client acceptance.
-- [x] Core compositor, shm, seat and xdg-shell globals.
-- [x] Basic xdg-toplevel surface rendering and frame callbacks.
-- [x] Initial keyboard event forwarding with a temporary first-toplevel focus policy.
-- [x] Versioned IPC server startup, compositor-thread dispatch and orderly shutdown.
-- [ ] Output-management globals and output state.
-- [ ] Pointer/touch routing, proper focus policy and event-loop frame pacing improvements.
+- [x] Core compositor, shm, seat, xdg-shell and single wl_output global.
+- [x] One virtual output with a mode that follows Winit window resizes.
+- [x] Smithay Space<Window> with mapped xdg-toplevel windows, cascading initial placement and output enter/leave tracking.
+- [x] Basic xdg-toplevel scene rendering and frame callbacks.
+- [x] Absolute pointer motion, mouse button and scroll-axis routing to the surface under the pointer.
+- [x] Initial click-to-focus policy: raise/activate the clicked window and give its toplevel keyboard focus.
+- [x] Initial activation and keyboard focus for newly mapped toplevels.
+- [x] Bounded frame pacing, versioned IPC startup, compositor-thread dispatch and orderly shutdown.
+- [ ] Pointer cursor rendering, touch routing and robust keyboard/pointer grabs.
+- [ ] Output-management protocols, multi-output layout and hotplug handling.
 - [ ] wlr-layer-shell server support for BubblePanel.
 
 ## 0.3.0 — Window management
