@@ -2,7 +2,7 @@
 
 A native, lightweight and customizable Wayland compositor for BubbleOS, written in Rust and built on Smithay.
 
-> **Status:** early development. BubbleWM now starts an initial nested Winit compositor with core Wayland, shared-memory, seat and xdg-shell support. It is a development milestone, not yet a complete or daily-usable desktop environment.
+> **Status:** early development. BubbleWM now starts an initial nested Winit compositor with a single advertised `wl_output`, core Wayland globals, xdg-toplevel rendering, a Smithay window space, pointer routing and basic click-to-focus. It is a development milestone, not yet a complete or daily-usable desktop environment.
 
 ## Project principles
 
@@ -21,41 +21,51 @@ A native, lightweight and customizable Wayland compositor for BubbleOS, written 
 
 ## Run the nested compositor
 
-The current Winit backend opens a development window, creates a Wayland socket in XDG_RUNTIME_DIR, accepts Wayland clients, exposes the core compositor, shm, seat and xdg-shell globals, and renders committed xdg toplevel surfaces.
+The current Winit backend opens a development window, creates a Wayland socket in `XDG_RUNTIME_DIR`, accepts Wayland clients, advertises the core compositor, shm, seat, xdg-shell and one `wl_output` global, then renders mapped xdg toplevel windows through a Smithay `Space<Window>`.
 
 ```sh
 cargo run
 ```
 
-The log prints the selected WAYLAND_DISPLAY name. In another terminal, point a Wayland client at that socket:
+The log prints the selected `WAYLAND_DISPLAY` name. In another terminal, point a Wayland client at that socket:
 
 ```sh
 WAYLAND_DISPLAY=wayland-1 <your-wayland-client>
 ```
 
-Replace wayland-1 with the exact display name printed by BubbleWM. Close the Winit window to stop the nested compositor.
+Replace `wayland-1` with the exact display name printed by BubbleWM. Close the Winit window to stop the nested compositor.
 
-The Winit backend uses the host session's EGL/OpenGL environment. The native DRM/KMS backend is not implemented yet; selecting core.backend = drm exits with an explicit error.
+The Winit backend uses the host session's EGL/OpenGL environment. The native DRM/KMS backend is not implemented yet; selecting `core.backend = drm` exits with an explicit error.
 
-### Current compositor boundaries
+### Current compositor capabilities
 
 - One nested Winit window and one Wayland display socket.
-- Core wl_compositor, wl_shm, wl_seat and xdg-shell support.
-- Basic keyboard event forwarding with a temporary first-toplevel focus policy.
-- Basic xdg-toplevel surface rendering.
-- No output-management globals, pointer/touch routing, proper focus policy, move/resize, decorations, workspaces, layer-shell or multi-monitor support yet.
-- The IPC server starts and is shut down with the compositor. Capability discovery works, but workspace commands correctly return unavailable until workspace management exists.
+- Core `wl_compositor`, `wl_shm`, `wl_seat`, `xdg-shell` and `wl_output` globals.
+- One virtual output whose advertised pixel mode follows Winit window resize events. The development mode currently advertises 60 Hz.
+- A Smithay `Space<Window>` for mapped xdg toplevels, initial cascading placement, output enter/leave tracking and scene rendering.
+- Absolute pointer motion, mouse buttons and scroll-axis events are routed to the surface under the pointer.
+- A click raises and activates the clicked window and moves keyboard focus to its toplevel. New toplevels are initially activated and focused.
+- Frame pacing is throttled to approximately 60 updates per second in the nested development loop.
+- The IPC server starts and stops with the compositor. Capability discovery works, but workspace commands correctly return `unavailable` until workspace management exists.
+
+### Not implemented yet
+
+- Pointer cursor rendering, touch input, keyboard shortcuts and robust focus/grab policies.
+- Window move/resize, maximize/minimize, close controls, decorations and tiling.
+- Virtual workspaces and workspace switching.
+- `wlr-layer-shell`, output-management protocols, multiple outputs and native DRM/KMS.
+- BubblePanel integration and real system status modules.
 
 ## BubblePanel prototype
 
-The first panel milestone connects to a Wayland compositor, creates a bottom wlr-layer-shell surface, reserves a 40-pixel exclusive zone and renders a three-zone layout with workspace/status placeholders and a seven-segment local-time clock. It also detects pointer clicks and scroll gestures and refreshes the clock once per minute.
+The independent panel connects to a Wayland compositor, creates a bottom `wlr-layer-shell` surface, reserves a 40-pixel exclusive zone and renders a three-zone layout with workspace/status placeholders and a seven-segment local-time clock. It also detects pointer clicks and scroll gestures and refreshes the clock once per minute.
 
 ```sh
 cargo build -p bubblepanel
 cargo run -p bubblepanel
 ```
 
-BubblePanel currently requires a compositor that supports wlr-layer-shell. BubbleWM does not yet implement the server side of that protocol, so use another compatible Wayland compositor to test the panel for now. Real workspace state, IPC client integration and system modules remain future work.
+BubblePanel currently requires a compositor that supports `wlr-layer-shell`. BubbleWM does not yet implement the server side of that protocol, so use another compatible Wayland compositor to test the panel for now. Real workspace state, IPC client integration and system modules remain future work.
 
 See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANEL.md).
 
@@ -65,7 +75,7 @@ See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANE
 - Cargo.
 - A Wayland or X11 host session with working EGL/OpenGL drivers for the Winit development backend.
 - Native development libraries required by the selected Smithay backend.
-- A separate compositor with wlr-layer-shell to run the current BubblePanel prototype.
+- A separate compositor with `wlr-layer-shell` to run the current BubblePanel prototype.
 
 ## Planned subsystems
 
