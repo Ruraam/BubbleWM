@@ -172,6 +172,7 @@ fn main() -> Result<()> {
         closed: false,
         clock_minute: current_clock_minute(),
         pointer: None,
+        pointer_interaction: PointerInteraction::default(),
     };
 
     info!("Waiting for the compositor to configure BubblePanel");
@@ -210,6 +211,39 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct PointerInteraction {
+    hovered: Option<PanelAction>,
+    pressed: Option<PanelAction>,
+}
+
+impl PointerInteraction {
+    /// Updates the hovered action and reports whether the visible target changed.
+    fn update_hover(&mut self, action: Option<PanelAction>) -> bool {
+        if self.hovered == action {
+            return false;
+        }
+        self.hovered = action;
+        true
+    }
+
+    fn press(&mut self, action: Option<PanelAction>) {
+        self.pressed = action;
+    }
+
+    /// Completes a click only when press and release target the same panel action.
+    fn release(&mut self, action: Option<PanelAction>) -> Option<PanelAction> {
+        let pressed = self.pressed.take()?;
+        (Some(pressed) == action).then_some(pressed)
+    }
+
+    /// Clears transient pointer state when the pointer leaves the panel.
+    fn leave(&mut self) -> bool {
+        self.pressed = None;
+        self.hovered.take().is_some()
+    }
+}
+
 struct BubblePanel {
     registry_state: RegistryState,
     output_state: OutputState,
@@ -223,6 +257,7 @@ struct BubblePanel {
     closed: bool,
     clock_minute: String,
     pointer: Option<wl_pointer::WlPointer>,
+    pointer_interaction: PointerInteraction,
 }
 
 impl BubblePanel {
@@ -420,10 +455,10 @@ impl PointerHandler for BubblePanel {
                 continue;
             }
 
-            let PointerEventKind::Press { button, .. } = &event.kind else {
-                continue;
-            };
-            if *button != BTN_LEFT {
+            if matches!(event.kind, PointerEventKind::Leave { .. }) {
+                if self.pointer_interaction.leave() {
+                    info!("Pointer left BubblePanel");
+                }
                 continue;
             }
 
@@ -431,10 +466,24 @@ impl PointerHandler for BubblePanel {
             else {
                 continue;
             };
-
             let regions = interactive_regions(self.width, self.height);
-            if let Some(action) = hit_test(&regions, x, y) {
-                info!(?action, x, y, "BubblePanel left-click hit a panel action");
+            let action = hit_test(&regions, x, y);
+
+            match &event.kind {
+                PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
+                    if self.pointer_interaction.update_hover(action) {
+                        info!(?action, x, y, "BubblePanel pointer target changed");
+                    }
+                }
+                PointerEventKind::Press { button, .. } if *button == BTN_LEFT => {
+                    self.pointer_interaction.press(action);
+                }
+                PointerEventKind::Release { button, .. } if *button == BTN_LEFT => {
+                    if let Some(action) = self.pointer_interaction.release(action) {
+                        info!(?action, x, y, "BubblePanel left-click completed");
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -672,6 +721,42 @@ mod tests {
         assert_eq!(hit_test(&regions, 0, 0), None);
     }
 
+    #[test]
+    fn pointer_hover_changes_only_when_the_target_changes() {
+        let mut pointer = PointerInteraction::default();
+        assert!(pointer.update_hover(Some(PanelAction::Launcher)));
+        assert!(!pointer.update_hover(Some(PanelAction::Launcher)));
+        assert!(pointer.update_hover(Some(PanelAction::Workspace(1))));
+        assert!(pointer.update_hover(None));
+        assert!(!pointer.update_hover(None));
+    }
+
+    #[test]
+    fn pointer_click_requires_press_and_release_on_the_same_action() {
+        let mut pointer = PointerInteraction::default();
+        pointer.press(Some(PanelAction::Launcher));
+        assert_eq!(
+            pointer.release(Some(PanelAction::Launcher)),
+            Some(PanelAction::Launcher)
+        );
+
+        pointer.press(Some(PanelAction::Launcher));
+        assert_eq!(pointer.release(Some(PanelAction::Clock)), None);
+        assert_eq!(pointer.release(Some(PanelAction::Launcher)), None);
+    }
+
+    #[test]
+    fn pointer_leave_clears_hover_and_cancels_a_pending_click() {
+        let mut pointer = PointerInteraction::default();
+        pointer.update_hover(Some(PanelAction::Launcher));
+        pointer.press(Some(PanelAction::Launcher));
+
+        assert!(pointer.leave());
+        assert!(!pointer.leave());
+        assert_eq!(pointer.release(Some(PanelAction::Launcher)), None);
+    }
+
+    #[test]
     fn panel_height_fits_seven_segment_clock() {
         assert!(PANEL_HEIGHT >= 32);
     }
