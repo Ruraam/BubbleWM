@@ -1390,7 +1390,7 @@ impl CompositorHandler for CompositorStateData {
             }
         }
 
-        self.handle_layer_commit(surface);
+        self.handle_layer_commit(&root_surface);
         self.popups.cleanup();
         self.space.refresh();
     }
