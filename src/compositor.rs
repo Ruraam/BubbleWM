@@ -102,6 +102,8 @@ use smithay::{
 };
 use tracing::info;
 
+use crate::layout::{master_stack, MasterStackConfig, Rect as LayoutRect};
+
 use crate::ipc::IpcRuntime;
 
 const FRAME_INTERVAL: Duration = Duration::from_millis(16);
@@ -135,6 +137,7 @@ struct ManagedWindow {
     minimized_order: Option<u64>,
     workspace: u32,
     stacking_order: u64,
+    tiling_restore: Option<RestoreGeometry>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -197,6 +200,13 @@ struct CompositorStateData {
     active_workspace: u32,
     workspace_count: u32,
     suppressed_keys: Vec<Keysym>,
+    layout_mode: LayoutMode,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LayoutMode {
+    Floating,
+    MasterStack,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -206,6 +216,7 @@ enum CompositorShortcut {
     Close,
     WorkspacePrevious,
     WorkspaceNext,
+    ToggleLayout,
 }
 
 fn compositor_shortcut(modifiers: ModifiersState, keysym: Keysym) -> Option<CompositorShortcut> {
@@ -219,6 +230,7 @@ fn compositor_shortcut(modifiers: ModifiersState, keysym: Keysym) -> Option<Comp
         Keysym::q => Some(CompositorShortcut::Close),
         Keysym::Left => Some(CompositorShortcut::WorkspacePrevious),
         Keysym::Right => Some(CompositorShortcut::WorkspaceNext),
+        Keysym::t => Some(CompositorShortcut::ToggleLayout),
         _ => None,
     }
 }
@@ -452,6 +464,98 @@ impl CompositorStateData {
         let output_geometry = self.space.output_geometry(&self.output)?;
         let zone = layer_map_for_output(&self.output).non_exclusive_zone();
         Some(Rectangle::new(output_geometry.loc + zone.loc, zone.size))
+    }
+
+    fn arrange_tiled_windows(&mut self) {
+        if self.layout_mode != LayoutMode::MasterStack {
+            return;
+        }
+        let Some(area) = self.work_area() else {
+            return;
+        };
+
+        let mut tiled = self
+            .windows
+            .iter()
+            .filter(|entry| {
+                !entry.minimized
+                    && entry.workspace == self.active_workspace
+                    && entry.parent_surface.is_none()
+                    && self.space.element_location(&entry.window).is_some()
+                    && !entry.window.toplevel().is_some_and(|surface| {
+                        surface.current_state().states.contains(xdg_toplevel::State::Maximized)
+                    })
+            })
+            .map(|entry| (entry.stacking_order, entry.window.clone()))
+            .collect::<Vec<_>>();
+        tiled.sort_by_key(|(order, _)| std::cmp::Reverse(*order));
+
+        for (_, window) in &tiled {
+            if let Some(entry) = self.windows.iter_mut().find(|entry| entry.window == *window) {
+                if entry.tiling_restore.is_none() {
+                    entry.tiling_restore = Some(RestoreGeometry {
+                        location: entry.location,
+                        size: Some(window.geometry().size),
+                    });
+                }
+            }
+        }
+
+        let rectangles = master_stack(
+            LayoutRect::new(area.loc.x, area.loc.y, area.size.w, area.size.h),
+            tiled.len(),
+            MasterStackConfig::default(),
+        );
+
+        for ((_, window), rectangle) in tiled.into_iter().zip(rectangles) {
+            let Some(toplevel) = window.toplevel() else {
+                continue;
+            };
+            let client_height = if Self::uses_server_decorations(&window) {
+                (rectangle.height - TITLEBAR_HEIGHT).max(1)
+            } else {
+                rectangle.height.max(1)
+            };
+            let requested_size = (rectangle.width.max(1), client_height).into();
+            if toplevel.current_state().size != Some(requested_size) {
+                toplevel.with_pending_state(|state| {
+                    state.size = Some(requested_size);
+                });
+                toplevel.send_pending_configure();
+            }
+            self.set_window_location(&window, (rectangle.x, rectangle.y).into(), false);
+        }
+    }
+
+    fn toggle_layout_mode(&mut self) {
+        match self.layout_mode {
+            LayoutMode::Floating => {
+                self.layout_mode = LayoutMode::MasterStack;
+                self.arrange_tiled_windows();
+                info!("Master/Stack layout enabled");
+            }
+            LayoutMode::MasterStack => {
+                self.layout_mode = LayoutMode::Floating;
+                let restores = self
+                    .windows
+                    .iter_mut()
+                    .filter_map(|entry| {
+                        entry.tiling_restore.take().map(|restore| (entry.window.clone(), restore))
+                    })
+                    .collect::<Vec<_>>();
+                for (window, restore) in restores {
+                    if let Some(toplevel) = window.toplevel() {
+                        toplevel.with_pending_state(|state| {
+                            state.size = restore.size;
+                        });
+                        toplevel.send_pending_configure();
+                    }
+                    self.set_window_location(&window, restore.location, false);
+                }
+                info!("Floating layout enabled");
+            }
+        }
+        self.space.refresh();
     }
 
     fn configure_toplevels(&self) {
@@ -774,6 +878,7 @@ impl CompositorStateData {
             self.space.map_element(window, content_location, false);
         }
 
+        self.arrange_tiled_windows();
         self.focus_topmost_window();
         self.refresh_exclusive_layer_focus();
         self.space.refresh();
@@ -1227,6 +1332,7 @@ impl CompositorStateData {
                 self.resize_session = None;
             }
         }
+        self.arrange_tiled_windows();
     }
 
     fn begin_move(&mut self, surface: &ToplevelSurface, seat: &Seat<Self>, serial: Serial) {
@@ -1355,6 +1461,7 @@ impl CompositorStateData {
             .change_current_state(Some(mode), None, None, None);
         layer_map_for_output(&self.output).arrange();
         self.reconfigure_maximized_windows();
+        self.arrange_tiled_windows();
         self.space.refresh();
         info!(width = size.w, height = size.h, "Winit output mode changed");
     }
@@ -1571,6 +1678,7 @@ impl XdgShellHandler for CompositorStateData {
             minimized_order: None,
             workspace: self.active_workspace,
             stacking_order,
+            tiling_restore: None,
         });
         self.update_transient_parent(&surface);
 
@@ -2172,6 +2280,7 @@ pub fn run_winit() -> Result<()> {
         active_workspace: 0,
         workspace_count: WORKSPACE_COUNT,
         suppressed_keys: Vec::new(),
+        layout_mode: LayoutMode::Floating,
     };
     state.space.map_output(&output, (0, 0));
 
@@ -2259,6 +2368,9 @@ pub fn run_winit() -> Result<()> {
                                                     compositor.workspace_count,
                                                 );
                                                 let _ = compositor.activate_workspace(index);
+                                            }
+                                            CompositorShortcut::ToggleLayout => {
+                                                compositor.toggle_layout_mode();
                                             }
                                         }
                                     }
