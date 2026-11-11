@@ -14,7 +14,12 @@ pub struct Rect {
 
 impl Rect {
     pub const fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     pub const fn is_empty(self) -> bool {
@@ -33,7 +38,10 @@ pub struct MasterStackConfig {
 
 impl Default for MasterStackConfig {
     fn default() -> Self {
-        Self { master_ratio: 0.55, gap: 8 }
+        Self {
+            master_ratio: 0.55,
+            gap: 8,
+        }
     }
 }
 
@@ -67,7 +75,10 @@ pub fn master_stack(area: Rect, window_count: usize, config: MasterStackConfig) 
     } else {
         ((inner_width as f64 * ratio).round() as i32).clamp(1, inner_width - 1)
     };
-    let stack_x = area.x.saturating_add(master_width).saturating_add(horizontal_gap);
+    let stack_x = area
+        .x
+        .saturating_add(master_width)
+        .saturating_add(horizontal_gap);
     let stack_width = inner_width - master_width;
 
     let stack_count = window_count - 1;
@@ -107,7 +118,10 @@ mod tests {
 
     #[test]
     fn one_window_fills_the_work_area() {
-        assert_eq!(master_stack(AREA, 1, MasterStackConfig::default()), vec![AREA]);
+        assert_eq!(
+            master_stack(AREA, 1, MasterStackConfig::default()),
+            vec![AREA]
+        );
     }
 
     #[test]
@@ -123,7 +137,10 @@ mod tests {
         let layout = master_stack(
             Rect::new(0, 0, 1000, 504),
             4,
-            MasterStackConfig { master_ratio: 0.5, gap: 7 },
+            MasterStackConfig {
+                master_ratio: 0.5,
+                gap: 7,
+            },
         );
         assert_eq!(layout.len(), 4);
         assert_eq!(layout[1].height, 164);
@@ -140,7 +157,10 @@ mod tests {
         let layout = master_stack(
             Rect::new(0, 0, 100, 100),
             2,
-            MasterStackConfig { master_ratio: 9.0, gap: -10 },
+            MasterStackConfig {
+                master_ratio: 9.0,
+                gap: -10,
+            },
         );
         assert_eq!(layout[0].width, 80);
         assert_eq!(layout[1].x, 80);
@@ -152,7 +172,10 @@ mod tests {
         let layout = master_stack(
             Rect::new(0, 0, 100, 100),
             2,
-            MasterStackConfig { master_ratio: f64::NAN, gap: 0 },
+            MasterStackConfig {
+                master_ratio: f64::NAN,
+                gap: 0,
+            },
         );
         assert_eq!(layout[0].width, 55);
     }
@@ -168,10 +191,17 @@ mod tests {
         let layout = master_stack(
             Rect::new(0, 0, 1, 1),
             4,
-            MasterStackConfig { master_ratio: 0.5, gap: 8 },
+            MasterStackConfig {
+                master_ratio: 0.5,
+                gap: 8,
+            },
         );
         assert_eq!(layout.len(), 4);
-        assert!(layout.iter().all(|rect| rect.width >= 0 && rect.height >= 0));
+        assert!(
+            layout
+                .iter()
+                .all(|rect| rect.width >= 0 && rect.height >= 0)
+        );
         assert!(layout.iter().all(|rect| rect.x <= 1 && rect.y <= 1));
     }
 }
