@@ -416,18 +416,6 @@ impl CompositorStateData {
         }
     }
 
-    fn managed_location_for_surface(&self, surface: &WlSurface) -> Option<Point<i32, Logical>> {
-        self.windows
-            .iter()
-            .find(|entry| {
-                entry
-                    .window
-                    .toplevel()
-                    .is_some_and(|toplevel| toplevel.wl_surface() == surface)
-            })
-            .map(|entry| entry.location)
-    }
-
     fn update_transient_parent(&mut self, surface: &ToplevelSurface) {
         let root = surface.wl_surface().clone();
         let parent = surface.parent();
