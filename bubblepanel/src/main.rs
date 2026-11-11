@@ -359,9 +359,7 @@ impl WorkspaceIpcClient {
     }
 
     fn request(&mut self, request: Request) -> Result<Response> {
-        self.client
-            .request(request)
-            .map_err(|error| anyhow!(error))
+        self.client.request(request).map_err(|error| anyhow!(error))
     }
 
     fn query_status(&mut self) -> Result<WorkspaceStatus> {
