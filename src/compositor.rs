@@ -230,7 +230,7 @@ fn compositor_shortcut(modifiers: ModifiersState, keysym: Keysym) -> Option<Comp
         Keysym::q => Some(CompositorShortcut::Close),
         Keysym::Left => Some(CompositorShortcut::WorkspacePrevious),
         Keysym::Right => Some(CompositorShortcut::WorkspaceNext),
-        Keysym::t => Some(CompositorShortcut::ToggleLayout),
+        Keysym::t | Keysym::T => Some(CompositorShortcut::ToggleLayout),
         _ => None,
     }
 }
@@ -2737,6 +2737,10 @@ mod tests {
         );
         assert_eq!(
             compositor_shortcut(modifiers, Keysym::t),
+            Some(CompositorShortcut::ToggleLayout)
+        );
+        assert_eq!(
+            compositor_shortcut(modifiers, Keysym::T),
             Some(CompositorShortcut::ToggleLayout)
         );
     }
