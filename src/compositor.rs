@@ -101,6 +101,7 @@ const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const OUTPUT_REFRESH_MILLIHZ: i32 = 60_000;
 const WINDOW_CASCADE_STEP: i32 = 32;
 const WINDOW_CASCADE_COUNT: u32 = 8;
+const WORKSPACE_COUNT: u32 = 4;
 const TITLEBAR_HEIGHT: i32 = 32;
 const DECORATION_BUTTON_SIZE: i32 = 16;
 const DECORATION_BUTTON_MARGIN: i32 = 8;
@@ -125,6 +126,8 @@ struct ManagedWindow {
     parent_surface: Option<WlSurface>,
     minimized: bool,
     minimized_order: Option<u64>,
+    workspace: u32,
+    stacking_order: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -180,6 +183,9 @@ struct CompositorStateData {
     resize_session: Option<ResizeSession>,
     next_window_position: u32,
     next_minimized_order: u64,
+    next_stacking_order: u64,
+    active_workspace: u32,
+    workspace_count: u32,
     suppressed_keys: Vec<Keysym>,
 }
 
@@ -425,9 +431,17 @@ impl CompositorStateData {
     fn update_transient_parent(&mut self, surface: &ToplevelSurface) {
         let root = surface.wl_surface().clone();
         let parent = surface.parent();
-        let parent_location = parent
-            .as_ref()
-            .and_then(|parent| self.managed_location_for_surface(parent));
+        let parent_info = parent.as_ref().and_then(|parent| {
+            self.windows
+                .iter()
+                .find(|entry| {
+                    entry
+                        .window
+                        .toplevel()
+                        .is_some_and(|toplevel| toplevel.wl_surface() == parent)
+                })
+                .map(|entry| (entry.location, entry.workspace))
+        });
 
         let Some(index) = self.windows.iter().position(|entry| {
             entry
@@ -439,16 +453,29 @@ impl CompositorStateData {
         };
 
         self.windows[index].parent_surface = parent;
-        let Some(parent_location) = parent_location else {
+        let Some((parent_location, parent_workspace)) = parent_info else {
             return;
         };
 
+        self.windows[index].workspace = parent_workspace;
         let location = parent_location + Size::from((WINDOW_CASCADE_STEP, WINDOW_CASCADE_STEP));
         self.windows[index].location = location;
         let window = self.windows[index].window.clone();
-        if self.space.element_location(&window).is_some() && !self.windows[index].minimized {
-            let content_location = self.content_location(&window, location);
-            self.space.map_element(window, content_location, false);
+        if parent_workspace != self.active_workspace {
+            self.space.unmap_elem(&window);
+        } else if !self.windows[index].minimized {
+            let has_buffer = window
+                .toplevel()
+                .is_some_and(|toplevel| {
+                    with_renderer_surface_state(toplevel.wl_surface(), |state| {
+                        state.buffer().is_some()
+                    })
+                    .unwrap_or(false)
+                });
+            if has_buffer {
+                let content_location = self.content_location(&window, location);
+                self.space.map_element(window, content_location, false);
+            }
         }
     }
 
@@ -476,20 +503,38 @@ impl CompositorStateData {
             index += 1;
         }
 
-        let family_windows = self
+        let mut family_windows = self
             .windows
             .iter()
             .filter(|entry| {
                 !entry.minimized
+                    && entry.workspace == self.active_workspace
                     && entry
                         .window
                         .toplevel()
                         .is_some_and(|surface| family.contains(surface.wl_surface()))
             })
-            .map(|entry| entry.window.clone())
+            .map(|entry| (entry.stacking_order, entry.window.clone()))
             .collect::<Vec<_>>();
+        family_windows.sort_by_key(|(order, _)| *order);
 
-        for member in family_windows {
+        if let Some(position) = family_windows
+            .iter()
+            .position(|(_, member)| member == window)
+        {
+            let target = family_windows.remove(position);
+            family_windows.push(target);
+        }
+
+        for (_, member) in family_windows {
+            if let Some(entry) = self
+                .windows
+                .iter_mut()
+                .find(|entry| entry.window == member)
+            {
+                entry.stacking_order = self.next_stacking_order;
+                self.next_stacking_order = self.next_stacking_order.wrapping_add(1);
+            }
             self.space.raise_element(&member, member == *window);
         }
         self.configure_toplevels();
@@ -579,11 +624,19 @@ impl CompositorStateData {
             .iter()
             .filter(|entry| entry.minimized)
             .max_by_key(|entry| entry.minimized_order)
-            .and_then(|entry| entry.window.toplevel().map(|s| s.wl_surface().clone()));
+            .and_then(|entry| {
+                entry
+                    .window
+                    .toplevel()
+                    .map(|surface| (surface.wl_surface().clone(), entry.workspace))
+            });
 
-        let Some(target) = target else {
+        let Some((target, workspace)) = target else {
             return;
         };
+        if workspace != self.active_workspace {
+            self.activate_workspace(workspace);
+        }
         let root = self.root_surface_for_toplevel(&target);
         let family = self.window_family_surfaces(&root);
         let mut restored = Vec::new();
@@ -616,6 +669,107 @@ impl CompositorStateData {
                     SERIAL_COUNTER.next_serial(),
                 );
             }
+        }
+    }
+
+    fn activate_workspace(&mut self, index: u32) -> Result<(), Response> {
+        if index >= self.workspace_count {
+            return Err(Response::Failure {
+                error: ErrorResponse {
+                    code: ErrorCode::InvalidRequest,
+                    message: format!(
+                        "workspace index {index} is out of range (valid range: 0..{})",
+                        self.workspace_count
+                    ),
+                },
+            });
+        }
+
+        if index == self.active_workspace {
+            return Ok(());
+        }
+
+        let windows = self
+            .windows
+            .iter()
+            .map(|entry| (entry.window.clone(), entry.workspace, entry.minimized))
+            .collect::<Vec<_>>();
+        for (window, workspace, _) in &windows {
+            if *workspace != index && self.space.element_location(window).is_some() {
+                self.space.unmap_elem(window);
+            }
+        }
+
+        self.active_workspace = index;
+
+        let mut visible = self
+            .windows
+            .iter()
+            .filter(|entry| entry.workspace == index && !entry.minimized)
+            .filter_map(|entry| {
+                let has_buffer = entry.window.toplevel().is_some_and(|toplevel| {
+                    with_renderer_surface_state(toplevel.wl_surface(), |state| {
+                        state.buffer().is_some()
+                    })
+                    .unwrap_or(false)
+                });
+                has_buffer.then_some((
+                    entry.stacking_order,
+                    entry.window.clone(),
+                    entry.location,
+                ))
+            })
+            .collect::<Vec<_>>();
+        visible.sort_by_key(|(order, _, _)| *order);
+
+        for (_, window, location) in visible {
+            let content_location = self.content_location(&window, location);
+            self.space.map_element(window, content_location, false);
+        }
+
+        self.focus_topmost_window();
+        self.refresh_exclusive_layer_focus();
+        self.space.refresh();
+        Ok(())
+    }
+
+    fn handle_ipc_request(&mut self, request: Request) -> Response {
+        match request {
+            Request::GetCapabilities => Response::Success {
+                data: ResponseData::Capabilities {
+                    workspace_control: true,
+                },
+            },
+            Request::GetWorkspaceState => Response::Success {
+                data: ResponseData::WorkspaceState {
+                    active: self.active_workspace,
+                    count: self.workspace_count,
+                },
+            },
+            Request::WorkspacePrevious => {
+                let index = previous_workspace(self.active_workspace, self.workspace_count);
+                match self.activate_workspace(index) {
+                    Ok(()) => Response::Success {
+                        data: ResponseData::Acknowledged,
+                    },
+                    Err(response) => response,
+                }
+            }
+            Request::WorkspaceNext => {
+                let index = next_workspace(self.active_workspace, self.workspace_count);
+                match self.activate_workspace(index) {
+                    Ok(()) => Response::Success {
+                        data: ResponseData::Acknowledged,
+                    },
+                    Err(response) => response,
+                }
+            }
+            Request::ActivateWorkspace { index } => match self.activate_workspace(index) {
+                Ok(()) => Response::Success {
+                    data: ResponseData::Acknowledged,
+                },
+                Err(response) => response,
+            },
         }
     }
 
@@ -961,7 +1115,10 @@ impl CompositorStateData {
 
         window.on_commit();
 
-        if self.space.element_location(&window).is_none() && !self.windows[index].minimized {
+        if self.space.element_location(&window).is_none()
+            && !self.windows[index].minimized
+            && self.windows[index].workspace == self.active_workspace
+        {
             let location = self.windows[index].location;
             let content_location = self.content_location(&window, location);
             let activate =
@@ -1305,6 +1462,8 @@ impl XdgShellHandler for CompositorStateData {
 
         // Keep a stable handle and its last position even while the client
         // temporarily unmaps the surface with a null buffer.
+        let stacking_order = self.next_stacking_order;
+        self.next_stacking_order = self.next_stacking_order.wrapping_add(1);
         self.windows.push(ManagedWindow {
             window,
             location,
@@ -1313,6 +1472,8 @@ impl XdgShellHandler for CompositorStateData {
             parent_surface: surface.parent(),
             minimized: false,
             minimized_order: None,
+            workspace: self.active_workspace,
+            stacking_order,
         });
         self.update_transient_parent(&surface);
 
@@ -1901,6 +2062,9 @@ pub fn run_winit() -> Result<()> {
         resize_session: None,
         next_window_position: 0,
         next_minimized_order: 0,
+        next_stacking_order: 0,
+        active_workspace: 0,
+        workspace_count: WORKSPACE_COUNT,
         suppressed_keys: Vec::new(),
     };
     state.space.map_output(&output, (0, 0));
@@ -2103,7 +2267,7 @@ pub fn run_winit() -> Result<()> {
 
         // IPC commands are consumed on the compositor thread. No IPC worker
         // callback accesses Smithay state directly.
-        ipc_commands.dispatch_pending(handle_ipc_request);
+        ipc_commands.dispatch_pending(|request| state.handle_ipc_request(request));
 
         while let Some(stream) = wayland_listener
             .accept()
@@ -2189,23 +2353,18 @@ pub fn run_winit() -> Result<()> {
     Ok(())
 }
 
-fn handle_ipc_request(request: Request) -> Response {
-    match request {
-        Request::GetCapabilities => Response::Success {
-            data: ResponseData::Capabilities {
-                workspace_control: false,
-            },
-        },
-        Request::GetWorkspaceState
-        | Request::WorkspacePrevious
-        | Request::WorkspaceNext
-        | Request::ActivateWorkspace { .. } => Response::Failure {
-            error: ErrorResponse {
-                code: ErrorCode::Unavailable,
-                message: "workspace management is not initialized yet".into(),
-            },
-        },
+fn previous_workspace(current: u32, count: u32) -> u32 {
+    if count == 0 {
+        return 0;
     }
+    (current + count - 1) % count
+}
+
+fn next_workspace(current: u32, count: u32) -> u32 {
+    if count == 0 {
+        return 0;
+    }
+    (current + 1) % count
 }
 
 /// Sends frame callbacks to a layer surface, its popups and their subsurfaces.
@@ -2364,36 +2523,21 @@ mod tests {
     }
 
     #[test]
-    fn capability_query_does_not_advertise_unimplemented_workspace_control() {
-        assert_eq!(
-            handle_ipc_request(Request::GetCapabilities),
-            Response::Success {
-                data: ResponseData::Capabilities {
-                    workspace_control: false
-                }
-            }
-        );
+    fn workspace_navigation_wraps_in_both_directions() {
+        assert_eq!(previous_workspace(0, WORKSPACE_COUNT), WORKSPACE_COUNT - 1);
+        assert_eq!(previous_workspace(2, WORKSPACE_COUNT), 1);
+        assert_eq!(next_workspace(WORKSPACE_COUNT - 1, WORKSPACE_COUNT), 0);
+        assert_eq!(next_workspace(1, WORKSPACE_COUNT), 2);
     }
 
     #[test]
-    fn workspace_requests_report_unavailable_until_workspace_state_exists() {
-        let requests = [
-            Request::GetWorkspaceState,
-            Request::WorkspacePrevious,
-            Request::WorkspaceNext,
-            Request::ActivateWorkspace { index: 0 },
-        ];
+    fn workspace_navigation_handles_zero_count_without_panicking() {
+        assert_eq!(previous_workspace(0, 0), 0);
+        assert_eq!(next_workspace(0, 0), 0);
+    }
 
-        for request in requests {
-            assert_eq!(
-                handle_ipc_request(request),
-                Response::Failure {
-                    error: ErrorResponse {
-                        code: ErrorCode::Unavailable,
-                        message: "workspace management is not initialized yet".into(),
-                    }
-                }
-            );
-        }
+    #[test]
+    fn workspace_count_starts_with_four_workspaces() {
+        assert_eq!(WORKSPACE_COUNT, 4);
     }
 }
