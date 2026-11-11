@@ -560,6 +560,21 @@ impl CompositorStateData {
                     })
                     .collect::<Vec<_>>();
                 for (window, restore) in restores {
+                    let maximized = window.toplevel().is_some_and(|toplevel| {
+                        toplevel
+                            .current_state()
+                            .states
+                            .contains(xdg_toplevel::State::Maximized)
+                    });
+                    if maximized {
+                        if let Some(entry) =
+                            self.windows.iter_mut().find(|entry| entry.window == window)
+                        {
+                            entry.restore_geometry = Some(restore);
+                        }
+                        continue;
+                    }
+
                     if let Some(toplevel) = window.toplevel() {
                         toplevel.with_pending_state(|state| {
                             state.size = restore.size;
