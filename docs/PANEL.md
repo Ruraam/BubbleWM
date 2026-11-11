@@ -8,8 +8,9 @@ The first implementation lives in the bubblepanel/ workspace member. It is inten
 
 - Wayland connection through wayland-client.
 - Registry and compositor integration through Smithay Client Toolkit.
-- wlr-layer-shell top-layer surface anchored to the bottom edge.
+- wlr-layer-shell Top-layer surface anchored to the bottom edge.
 - A 40-pixel exclusive zone.
+- Direct compatibility with BubbleWM's nested compositor, which now implements the wlr-layer-shell server.
 - Software drawing through wl_shm and an SCTK SlotPool.
 - Three visual zones: BubbleOS mark and workspace placeholders on the left, reserved center area, and status placeholders plus local-time digits on the right.
 - Graceful error messages when Wayland, shared memory or layer-shell support is unavailable.
@@ -30,10 +31,9 @@ The first implementation lives in the bubblepanel/ workspace member. It is inten
 
 ### Development order after the prototype
 
-1. Implement the wlr-layer-shell server so BubblePanel can run directly on BubbleWM; the initial compositor now advertises one wl_output.
-2. Implement BubbleWM workspace state and connect the existing IPC commands to that authoritative state.
-3. Implement the BubblePanel IPC client and display real workspace/capability state.
-4. Introduce typed panel configuration, configurable placement and per-output management.
-5. Add keyboard/popup interactions, module contracts and BubbleSettings integration.
+1. Implement BubbleWM workspace state and connect the existing IPC commands to that authoritative state.
+2. Implement the BubblePanel IPC client and display real workspace/capability state.
+3. Introduce typed panel configuration, configurable placement and per-output management.
+4. Add keyboard/popup interactions, module contracts and BubbleSettings integration.
 
 The panel must remain an optional Wayland client. A missing panel or panel crash must never terminate BubbleWM or its clients.
