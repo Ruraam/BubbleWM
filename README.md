@@ -44,7 +44,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Core `wl_compositor`, `wl_shm`, `wl_seat`, `xdg-shell`, `xdg-activation`, `wl_data_device_manager`, primary-selection, `zwlr_layer_shell_v1` and `wl_output` globals.
 - One virtual output whose advertised pixel mode follows Winit window resize events. The development mode currently advertises 60 Hz.
 - A stable toplevel registry tracks creation, mapping, unmapping, remapping and destruction while preserving each window's last floating position.
-- A Smithay `Space<Window>` handles the active workspace's mapped xdg toplevels, initial cascading placement, output enter/leave tracking and scene rendering.
+- A Smithay `Space<Window>` handles the active workspace's mapped xdg toplevels, initial cascading placement, output enter/leave tracking and scene rendering. `Super+T` toggles the hybrid floating/Master-Stack layout; floating remains the default and previous floating geometry is restored when switching back.
 - Four virtual workspaces keep their own window membership and stacking order. Switching workspaces preserves each window's floating geometry, minimized state and transient family; previous/next navigation wraps around.
 - Absolute pointer motion, mouse buttons and scroll-axis events are routed to the surface under the pointer.
 - Standard Wayland clipboard and primary-selection protocols are available between clients; both selection foci follow the keyboard-focused client.
@@ -58,6 +58,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Maximized windows use the remaining non-exclusive work area reserved by layer surfaces, and the work area is recalculated when layer surfaces change or the output is resized.
 - XDG minimize requests unmap the window and its transient descendants. `Super+H` minimizes the focused window and `Super+Tab` restores the most recently minimized window family.
 - `Super+Left` and `Super+Right` switch to the previous and next virtual workspace, wrapping at either end.
+- Master/Stack arranges eligible top-level windows in the active workspace, respects layer-shell exclusive work areas, and leaves transient and maximized windows floating. Set `core.layout = "tiling"` in the TOML configuration to start in tiling mode.
 - `Super+Q` and the server-side titlebar close control send the standard XDG close event to the client; BubbleWM does not forcibly terminate the application.
 - BubbleWM advertises XDG minimize/maximize capabilities only. Fullscreen and compositor window-menu capabilities remain unadvertised.
 - Clients negotiating XDG server-side decorations receive a prototype 32-pixel titlebar with close, maximize/restore and minimize controls. Client-side decoration requests are respected. The titlebar can also initiate an interactive move.
@@ -70,7 +71,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 
 - Pointer cursor rendering, touch input, and a complete focus/grab policy.
 - Polished decorations: the current server-side titlebar is a basic prototype with colored controls, not yet a themed titlebar with title text, icons, borders or full accessibility behavior.
-- Tiling, workspace names, per-workspace configuration and dynamic workspace counts.
+- Workspace names, per-window floating overrides, per-workspace layout configuration and dynamic workspace counts.
 - Output-management protocols, multiple outputs and native DRM/KMS.
 - Real system status modules, task-list integration and user-facing panel configuration.
 
