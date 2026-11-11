@@ -93,6 +93,7 @@ use smithay::{
             PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
             XdgShellState,
             decoration::{XdgDecorationHandler, XdgDecorationState},
+            XdgToplevelSurfaceData,
         },
         shm::{ShmHandler, ShmState},
         xdg_activation::{
@@ -1168,6 +1169,23 @@ impl CompositorStateData {
                 titlebar_color,
                 scale,
             );
+            if let Some(title) = window
+                .toplevel()
+                .and_then(|surface| toplevel_title(&surface))
+                .or_else(|| {
+                    window
+                        .toplevel()
+                        .and_then(|surface| toplevel_app_id(&surface))
+                })
+            {
+                append_decoration_title(
+                    &mut elements,
+                    &title,
+                    entry.location,
+                    width,
+                    scale,
+                );
+            }
             if focused {
                 append_solid_decoration(
                     &mut elements,
@@ -2091,6 +2109,132 @@ impl SeatHandler for CompositorStateData {
     }
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, _image: CursorImageStatus) {}
+}
+
+fn toplevel_title(surface: &ToplevelSurface) -> Option<String> {
+    with_states(surface.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|data| data.lock().ok())
+            .and_then(|attributes| attributes.title.clone())
+    })
+}
+
+fn toplevel_app_id(surface: &ToplevelSurface) -> Option<String> {
+    with_states(surface.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|data| data.lock().ok())
+            .and_then(|attributes| attributes.app_id.clone())
+    })
+}
+
+fn append_decoration_title(
+    elements: &mut Vec<SolidColorRenderElement>,
+    title: &str,
+    window_location: Point<i32, Logical>,
+    window_width: i32,
+    scale: f64,
+) {
+    const GLYPH_WIDTH: i32 = 5;
+    const GLYPH_HEIGHT: i32 = 7;
+    const GLYPH_ADVANCE: i32 = 6;
+    const TITLE_LEFT_PADDING: i32 = 12;
+    const BUTTONS_RESERVED_WIDTH: i32 = 88;
+
+    let available_width = (window_width - TITLE_LEFT_PADDING - BUTTONS_RESERVED_WIDTH).max(0);
+    let max_chars = (available_width / GLYPH_ADVANCE) as usize;
+    let title_color = Color32F::new(0.88, 0.91, 0.96, 1.0);
+    let mut cursor_x = window_location.x + TITLE_LEFT_PADDING;
+    let cursor_y = window_location.y + (TITLEBAR_HEIGHT - GLYPH_HEIGHT) / 2;
+
+    for character in title.chars().filter(|character| !character.is_control()).take(max_chars) {
+        let rows = decoration_glyph(character);
+        for (row_index, bits) in rows.into_iter().enumerate() {
+            let mut column = 0;
+            while column < GLYPH_WIDTH {
+                if bits & (1 << (GLYPH_WIDTH - 1 - column)) == 0 {
+                    column += 1;
+                    continue;
+                }
+                let start = column;
+                while column < GLYPH_WIDTH
+                    && bits & (1 << (GLYPH_WIDTH - 1 - column)) != 0
+                {
+                    column += 1;
+                }
+                append_solid_decoration(
+                    elements,
+                    (cursor_x + start, cursor_y + row_index as i32).into(),
+                    (column - start, 1).into(),
+                    title_color,
+                    scale,
+                );
+            }
+        }
+        cursor_x += GLYPH_ADVANCE;
+    }
+}
+
+fn decoration_glyph(character: char) -> [u8; 7] {
+    match character.to_ascii_uppercase() {
+        'A' => [14, 17, 17, 31, 17, 17, 17],
+        'B' => [30, 17, 17, 30, 17, 17, 30],
+        'C' => [14, 17, 16, 16, 16, 17, 14],
+        'D' => [30, 17, 17, 17, 17, 17, 30],
+        'E' => [31, 16, 16, 30, 16, 16, 31],
+        'F' => [31, 16, 16, 30, 16, 16, 16],
+        'G' => [14, 17, 16, 23, 17, 17, 15],
+        'H' => [17, 17, 17, 31, 17, 17, 17],
+        'I' => [14, 4, 4, 4, 4, 4, 14],
+        'J' => [7, 2, 2, 2, 18, 18, 12],
+        'K' => [17, 18, 20, 24, 20, 18, 17],
+        'L' => [16, 16, 16, 16, 16, 16, 31],
+        'M' => [17, 27, 21, 21, 17, 17, 17],
+        'N' => [17, 25, 21, 19, 17, 17, 17],
+        'O' => [14, 17, 17, 17, 17, 17, 14],
+        'P' => [30, 17, 17, 30, 16, 16, 16],
+        'Q' => [14, 17, 17, 17, 21, 18, 13],
+        'R' => [30, 17, 17, 30, 20, 18, 17],
+        'S' => [15, 16, 16, 14, 1, 1, 30],
+        'T' => [31, 4, 4, 4, 4, 4, 4],
+        'U' => [17, 17, 17, 17, 17, 17, 14],
+        'V' => [17, 17, 17, 17, 17, 10, 4],
+        'W' => [17, 17, 17, 21, 21, 21, 10],
+        'X' => [17, 17, 10, 4, 10, 17, 17],
+        'Y' => [17, 17, 10, 4, 4, 4, 4],
+        'Z' => [31, 1, 2, 4, 8, 16, 31],
+        '0' => [14, 17, 19, 21, 25, 17, 14],
+        '1' => [4, 12, 4, 4, 4, 4, 14],
+        '2' => [14, 17, 1, 2, 4, 8, 31],
+        '3' => [30, 1, 1, 14, 1, 1, 30],
+        '4' => [2, 6, 10, 18, 31, 2, 2],
+        '5' => [31, 16, 16, 30, 1, 1, 30],
+        '6' => [14, 16, 16, 30, 17, 17, 14],
+        '7' => [31, 1, 2, 4, 8, 8, 8],
+        '8' => [14, 17, 17, 14, 17, 17, 14],
+        '9' => [14, 17, 17, 15, 1, 1, 14],
+        '.' => [0, 0, 0, 0, 0, 12, 12],
+        ',' => [0, 0, 0, 0, 4, 4, 8],
+        ':' => [0, 4, 4, 0, 4, 4, 0],
+        ';' => [0, 4, 4, 0, 4, 4, 8],
+        '-' => [0, 0, 0, 31, 0, 0, 0],
+        '_' => [0, 0, 0, 0, 0, 0, 31],
+        '+' => [0, 4, 4, 31, 4, 4, 0],
+        '/' => [1, 1, 2, 4, 8, 16, 16],
+        '\\' => [16, 16, 8, 4, 2, 1, 1],
+        '(' => [2, 4, 8, 8, 8, 4, 2],
+        ')' => [8, 4, 2, 2, 2, 4, 8],
+        '[' => [14, 8, 8, 8, 8, 8, 14],
+        ']' => [14, 2, 2, 2, 2, 2, 14],
+        '!' => [4, 4, 4, 4, 4, 0, 4],
+        '?' => [14, 17, 1, 2, 4, 0, 4],
+        '=' => [0, 31, 0, 31, 0, 0, 0],
+        ' ' => [0; 7],
+        _ => [14, 17, 1, 2, 4, 0, 4],
+    }
 }
 
 fn append_solid_decoration(
