@@ -126,6 +126,111 @@ fn validate_directory(path: &Path, tighten_permissions: bool) -> Result<(), Serv
     Ok(())
 }
 
+/// Errors returned by the BubbleWM IPC client.
+#[derive(Debug)]
+pub enum ClientError {
+    Server(ServerError),
+    Io(std::io::Error),
+    Protocol(ProtocolError),
+    UnsupportedResponseVersion(u16),
+    RequestIdMismatch { expected: u64, actual: u64 },
+}
+
+impl std::fmt::Display for ClientError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Server(error) => write!(formatter, "{error}"),
+            Self::Io(error) => write!(formatter, "BubbleWM IPC client I/O error: {error}"),
+            Self::Protocol(error) => write!(formatter, "{error}"),
+            Self::UnsupportedResponseVersion(version) => write!(
+                formatter,
+                "BubbleWM IPC response version {version} is not supported"
+            ),
+            Self::RequestIdMismatch { expected, actual } => write!(
+                formatter,
+                "BubbleWM IPC response ID mismatch: expected {expected}, received {actual}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ClientError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Server(error) => Some(error),
+            Self::Io(error) => Some(error),
+            Self::Protocol(error) => Some(error),
+            Self::UnsupportedResponseVersion(_) | Self::RequestIdMismatch { .. } => None,
+        }
+    }
+}
+
+/// Small request/response client for BubbleWM's authenticated local socket.
+///
+/// Each request uses one connection because the server intentionally handles
+/// exactly one bounded request per connection.
+pub struct UnixIpcClient {
+    socket_path: PathBuf,
+    next_request_id: u64,
+}
+
+impl UnixIpcClient {
+    /// Creates a client for the standard per-user BubbleWM socket.
+    pub fn connect_default() -> Result<Self, ClientError> {
+        let socket_path = default_socket_path().map_err(ClientError::Server)?;
+        Ok(Self::new(socket_path))
+    }
+
+    /// Creates a client for an explicit socket path.
+    pub fn new(socket_path: impl AsRef<Path>) -> Self {
+        Self {
+            socket_path: socket_path.as_ref().to_path_buf(),
+            next_request_id: 1,
+        }
+    }
+
+    /// Returns the socket path used by this client.
+    pub fn socket_path(&self) -> &Path {
+        &self.socket_path
+    }
+
+    /// Sends one request and validates the matching versioned response.
+    pub fn request(&mut self, request: Request) -> Result<Response, ClientError> {
+        let mut stream = UnixStream::connect(&self.socket_path).map_err(ClientError::Io)?;
+        stream
+            .set_read_timeout(Some(CLIENT_IO_TIMEOUT))
+            .map_err(ClientError::Io)?;
+        stream
+            .set_write_timeout(Some(CLIENT_IO_TIMEOUT))
+            .map_err(ClientError::Io)?;
+
+        let request_id = self.next_request_id;
+        self.next_request_id = self.next_request_id.wrapping_add(1).max(1);
+        let envelope = RequestEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            request_id,
+            request,
+        };
+        write_frame(&mut stream, &envelope).map_err(ClientError::Protocol)?;
+
+        let response: ResponseEnvelope =
+            read_frame(&mut BufReader::new(stream)).map_err(ClientError::Protocol)?;
+        if response.protocol_version != PROTOCOL_VERSION {
+            return Err(ClientError::UnsupportedResponseVersion(
+                response.protocol_version,
+            ));
+        }
+        if response.request_id != request_id {
+            return Err(ClientError::RequestIdMismatch {
+                expected: request_id,
+                actual: response.request_id,
+            });
+        }
+
+        Ok(response.response)
+    }
+}
+
 /// Owns the BubbleWM local IPC listening socket.
 ///
 /// The server handles one request per connection. Its accept loop is blocking
@@ -329,6 +434,42 @@ mod tests {
             .create(&path)
             .expect("create private test directory");
         path
+    }
+
+    #[test]
+    fn client_sends_versioned_requests_and_checks_response_ids() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let socket_path = private_test_directory(directory.path()).join("control.sock");
+        let listener = UnixListener::bind(&socket_path).expect("bind test listener");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept client");
+            let request: RequestEnvelope =
+                read_frame(&mut BufReader::new(&mut stream)).expect("read client request");
+            assert_eq!(request.protocol_version, PROTOCOL_VERSION);
+            assert_eq!(request.request_id, 1);
+            assert_eq!(request.request, Request::GetWorkspaceState);
+            write_frame(
+                &mut stream,
+                &ResponseEnvelope {
+                    protocol_version: PROTOCOL_VERSION,
+                    request_id: request.request_id,
+                    response: Response::Success {
+                        data: ResponseData::WorkspaceState { active: 2, count: 4 },
+                    },
+                },
+            )
+            .expect("write client response");
+        });
+
+        let mut client = UnixIpcClient::new(&socket_path);
+        assert_eq!(client.socket_path(), socket_path);
+        assert_eq!(
+            client.request(Request::GetWorkspaceState).expect("request succeeds"),
+            Response::Success {
+                data: ResponseData::WorkspaceState { active: 2, count: 4 }
+            }
+        );
+        server.join().expect("join test server");
     }
 
     #[test]
