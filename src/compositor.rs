@@ -634,8 +634,8 @@ impl CompositorStateData {
         let Some((target, workspace)) = target else {
             return;
         };
-        if workspace != self.active_workspace {
-            self.activate_workspace(workspace);
+        if workspace != self.active_workspace && self.activate_workspace(workspace).is_err() {
+            return;
         }
         let root = self.root_surface_for_toplevel(&target);
         let family = self.window_family_surfaces(&root);
@@ -1136,7 +1136,9 @@ impl CompositorStateData {
                     );
                 }
             }
-        } else if !self.windows[index].minimized {
+        } else if !self.windows[index].minimized
+            && self.windows[index].workspace == self.active_workspace
+        {
             // Decoration mode can change after the client acknowledges a
             // configure. Keep the client surface below/without the titlebar.
             let expected = self.content_location(&window, self.windows[index].location);
