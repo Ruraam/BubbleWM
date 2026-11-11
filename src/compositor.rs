@@ -297,7 +297,7 @@ impl CompositorStateData {
             .map(|layer| layer.wl_surface().clone())
     }
 
-    fn refresh_exclusive_layer_focus(&self) {
+    fn refresh_exclusive_layer_focus(&mut self) {
         let Some(keyboard) = self.keyboard.clone() else {
             return;
         };
