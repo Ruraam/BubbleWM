@@ -19,7 +19,7 @@
 - [x] Bounded frame pacing, versioned IPC startup, compositor-thread dispatch and orderly shutdown.
 - [ ] Pointer cursor rendering, touch routing and robust keyboard/pointer grabs.
 - [ ] Output-management protocols, multi-output layout and hotplug handling.
-- [ ] wlr-layer-shell server support for BubblePanel.
+- [x] wlr-layer-shell server support for BubblePanel, including layer arrangement, exclusive zones, rendering, input and keyboard focus.
 
 ## 0.3.0 — Window management
 - [x] Stable toplevel registry and lifecycle handling for creation, map, unmap, remap and destruction.
@@ -39,10 +39,12 @@
 - [x] XDG decoration negotiation, default server-side mode and honoring explicit client-side mode requests.
 - [x] Prototype 32-pixel server-side titlebar with close, maximize/restore, minimize and move interactions.
 - [ ] Window title text, icons, themed controls, borders and accessibility refinements.
-- [ ] Tiling layout policy and virtual workspace foundations.
-- [ ] Floating layout policy and virtual workspace foundations.
-- [ ] Connect workspace IPC commands to authoritative workspace state.
-- [ ] Integrate BubblePanel's IPC client for workspace state and navigation.
+- [x] Four virtual workspaces with per-window membership and preserved stacking order.
+- [x] Keep inactive-workspace windows unmapped while preserving client state and floating geometry.
+- [x] Inherit workspace membership across transient toplevel families and preserve minimized state across switches.
+- [x] Connect workspace IPC commands to authoritative compositor state, including bounds validation and wraparound navigation.
+- [x] Integrate BubblePanel's IPC client for capability discovery, live workspace state, click activation and scroll navigation.
+- [ ] Tiling layout policy and configurable floating/tiling behavior.
 
 ## 0.4.0 — BubbleDecor
 - [ ] Server-side decoration negotiation.
@@ -73,8 +75,9 @@
 ## 0.9.0 — BubblePanel
 - [x] Independent Rust Wayland panel process.
 - [x] Layer-shell integration and capability detection on the client side.
-- [x] Three-zone layout, placeholder workspaces, pointer hit testing and clock.
-- [ ] Real workspace state, task list and system modules.
+- [x] Three-zone layout, workspace indicators, pointer hit testing and clock.
+- [x] Live workspace state and workspace navigation through BubbleWM's authenticated IPC endpoint.
+- [ ] Task list and real system modules.
 - [ ] Multi-monitor support, profiles and validated configuration.
 - [ ] BubbleSettings integration and graceful degradation.
 
