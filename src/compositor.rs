@@ -243,9 +243,8 @@ impl CompositorStateData {
                 continue;
             };
 
-            let absolute_location = output_geometry.loc.to_f64()
-                + layer_origin.to_f64()
-                + surface_location.to_f64();
+            let absolute_location =
+                output_geometry.loc.to_f64() + layer_origin.to_f64() + surface_location.to_f64();
             return Some((layer_surface.clone(), surface, absolute_location));
         }
 
