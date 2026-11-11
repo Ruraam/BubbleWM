@@ -271,7 +271,11 @@ impl CompositorStateData {
         let Some(requesting_client) = data.client_id.as_ref() else {
             return false;
         };
-        let source_client = self.display_handle.get_client(source.id()).ok().map(|client| client.id());
+        let source_client = self
+            .display_handle
+            .get_client(source.id())
+            .ok()
+            .map(|client| client.id());
         if data.timestamp.elapsed() > Duration::from_secs(5)
             || !self.seat.owns(seat)
             || source_client.as_ref() != Some(requesting_client)
