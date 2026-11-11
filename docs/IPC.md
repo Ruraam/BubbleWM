@@ -1,6 +1,6 @@
 # BubbleWM IPC lifecycle
 
-The Linux socket transport is implemented by bubble-ipc::unix. BubbleWM's application-side bridge is exposed by bubblewm::ipc and is now owned by the Winit compositor lifecycle.
+The Linux socket transport and reusable request/response client are implemented by bubble-ipc::unix. BubbleWM's application-side bridge is exposed by bubblewm::ipc and is owned by the Winit compositor lifecycle. BubblePanel and the `bubblectl` terminal utility both use the shared client, which validates protocol versions and request IDs and opens one connection per request.
 
 ## Thread ownership
 
