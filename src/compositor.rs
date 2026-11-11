@@ -705,6 +705,7 @@ impl CompositorStateData {
             self.space.raise_element(&member, member == *window);
         }
         self.configure_toplevels();
+        self.arrange_tiled_windows();
     }
 
     fn window_family_surfaces(&self, root: &WlSurface) -> Vec<WlSurface> {
@@ -773,6 +774,7 @@ impl CompositorStateData {
 
         if removed_any {
             self.focus_topmost_window();
+            self.arrange_tiled_windows();
         }
     }
 
@@ -827,6 +829,7 @@ impl CompositorStateData {
                 .map_element(window.clone(), content_location, false);
         }
 
+        self.arrange_tiled_windows();
         if let Some(window) = self.managed_window_for_surface(&root) {
             self.raise_window_family(&window);
             if let Some(toplevel) = window.toplevel() {
@@ -1130,6 +1133,7 @@ impl CompositorStateData {
         if surface.is_initial_configure_sent() {
             surface.send_configure();
         }
+        self.arrange_tiled_windows();
     }
 
     fn unmaximize_window(&mut self, surface: &ToplevelSurface) {
@@ -1166,6 +1170,7 @@ impl CompositorStateData {
         }
 
         surface.send_pending_configure();
+        self.arrange_tiled_windows();
     }
 
     fn unconstrain_popup(&self, popup: &PopupSurface) {
@@ -1757,6 +1762,7 @@ impl XdgShellHandler for CompositorStateData {
             self.resize_session = None;
         }
 
+        self.arrange_tiled_windows();
         self.focus_topmost_window();
         self.space.refresh();
     }
