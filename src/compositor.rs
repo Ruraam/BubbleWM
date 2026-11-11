@@ -618,7 +618,33 @@ impl CompositorStateData {
     fn toggle_layout_mode(&mut self) {
         match self.layout_mode {
             LayoutMode::Floating => {
+                // A maximized xdg-toplevel is a different client state from a
+                // tiled window. Clear that state before handing the window to
+                // the tiler; otherwise it is permanently excluded from
+                // arrange_tiled_windows() and repeated Super+T transitions can
+                // leave windows stacked as full-screen maximized surfaces.
                 self.layout_mode = LayoutMode::MasterStack;
+                let maximized = self
+                    .windows
+                    .iter()
+                    .filter(|entry| {
+                        !entry.minimized
+                            && entry.workspace == self.active_workspace
+                            && entry.parent_surface.is_none()
+                            && entry.window.toplevel().is_some_and(|surface| {
+                                surface
+                                    .current_state()
+                                    .states
+                                    .contains(xdg_toplevel::State::Maximized)
+                            })
+                    })
+                    .filter_map(|entry| entry.window.toplevel())
+                    .collect::<Vec<_>>();
+
+                for surface in maximized {
+                    self.unmaximize_window(&surface);
+                }
+
                 self.arrange_tiled_windows();
                 info!("Master/Stack layout enabled");
             }
@@ -635,22 +661,19 @@ impl CompositorStateData {
                     })
                     .collect::<Vec<_>>();
                 for (window, restore) in restores {
-                    let maximized = window.toplevel().is_some_and(|toplevel| {
-                        toplevel
+                    // A layout transition must never preserve a compositor
+                    // maximized state. Clear it first, then restore the exact
+                    // pre-tiling geometry.
+                    if let Some(toplevel) = window.toplevel() {
+                        let maximized = toplevel
                             .current_state()
                             .states
-                            .contains(xdg_toplevel::State::Maximized)
-                    });
-                    if maximized {
-                        if let Some(entry) =
-                            self.windows.iter_mut().find(|entry| entry.window == window)
-                        {
-                            entry.restore_geometry = Some(restore);
+                            .contains(xdg_toplevel::State::Maximized);
+                        if maximized {
+                            toplevel.with_pending_state(|state| {
+                                state.states.unset(xdg_toplevel::State::Maximized);
+                            });
                         }
-                        continue;
-                    }
-
-                    if let Some(toplevel) = window.toplevel() {
                         toplevel.with_pending_state(|state| {
                             state.size = restore.size;
                         });
