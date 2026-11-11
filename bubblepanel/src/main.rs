@@ -6,11 +6,20 @@
 //! timeout, while interactive modules follow in a later implementation step.
 
 use std::{
+    io::BufReader,
     num::NonZeroU32,
-    os::fd::{AsFd, AsRawFd},
+    os::{
+        fd::{AsFd, AsRawFd},
+        unix::net::UnixStream,
+    },
+    time::Duration,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
+use bubble_ipc::{
+    PROTOCOL_VERSION, Request, RequestEnvelope, Response, ResponseData, ResponseEnvelope,
+    read_frame, unix::default_socket_path, write_frame,
+};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_registry,
@@ -173,7 +182,10 @@ fn main() -> Result<()> {
         clock_minute: current_clock_minute(),
         pointer: None,
         pointer_interaction: PointerInteraction::default(),
+        workspace_client: WorkspaceIpcClient::from_environment(),
+        workspace_status: WorkspaceStatus::default(),
     };
+    panel.refresh_workspace_status();
 
     info!("Waiting for the compositor to configure BubblePanel");
     let wayland_fd = connection.as_fd().as_raw_fd();
@@ -323,6 +335,104 @@ impl PointerInteraction {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WorkspaceStatus {
+    active: u32,
+    count: u32,
+    control: bool,
+}
+
+impl Default for WorkspaceStatus {
+    fn default() -> Self {
+        Self {
+            active: 0,
+            count: 4,
+            control: false,
+        }
+    }
+}
+
+struct WorkspaceIpcClient {
+    socket_path: std::path::PathBuf,
+    next_request_id: u64,
+}
+
+impl WorkspaceIpcClient {
+    fn from_environment() -> Option<Self> {
+        match default_socket_path() {
+            Ok(socket_path) => Some(Self {
+                socket_path,
+                next_request_id: 1,
+            }),
+            Err(error) => {
+                warn!(%error, "BubbleWM workspace IPC is unavailable");
+                None
+            }
+        }
+    }
+
+    fn request(&mut self, request: Request) -> Result<Response> {
+        let mut stream = UnixStream::connect(&self.socket_path)
+            .with_context(|| format!("cannot connect to {}", self.socket_path.display()))?;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .context("cannot set BubbleWM IPC read timeout")?;
+        stream
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .context("cannot set BubbleWM IPC write timeout")?;
+
+        let request_id = self.next_request_id;
+        self.next_request_id = self.next_request_id.wrapping_add(1).max(1);
+        write_frame(
+            &mut stream,
+            &RequestEnvelope {
+                protocol_version: PROTOCOL_VERSION,
+                request_id,
+                request,
+            },
+        )
+        .context("cannot send BubbleWM IPC request")?;
+
+        let response: ResponseEnvelope = read_frame(&mut BufReader::new(stream))
+            .context("cannot read BubbleWM IPC response")?;
+        if response.protocol_version != PROTOCOL_VERSION {
+            bail!(
+                "BubbleWM IPC response uses unsupported protocol version {}",
+                response.protocol_version
+            );
+        }
+        if response.request_id != request_id {
+            bail!(
+                "BubbleWM IPC response ID mismatch (expected {request_id}, got {})",
+                response.request_id
+            );
+        }
+        Ok(response.response)
+    }
+
+    fn query_status(&mut self) -> Result<WorkspaceStatus> {
+        let control = match self.request(Request::GetCapabilities)? {
+            Response::Success {
+                data: ResponseData::Capabilities { workspace_control },
+            } => workspace_control,
+            Response::Failure { error } => bail!("BubbleWM capability query failed: {}", error.message),
+            Response::Success { .. } => bail!("BubbleWM returned an invalid capability response"),
+        };
+
+        match self.request(Request::GetWorkspaceState)? {
+            Response::Success {
+                data: ResponseData::WorkspaceState { active, count },
+            } if count > 0 && active < count => Ok(WorkspaceStatus {
+                active,
+                count,
+                control,
+            }),
+            Response::Success { .. } => bail!("BubbleWM returned invalid workspace state"),
+            Response::Failure { error } => bail!("BubbleWM workspace query failed: {}", error.message),
+        }
+    }
+}
+
 struct BubblePanel {
     registry_state: RegistryState,
     output_state: OutputState,
@@ -337,9 +447,47 @@ struct BubblePanel {
     clock_minute: String,
     pointer: Option<wl_pointer::WlPointer>,
     pointer_interaction: PointerInteraction,
+    workspace_client: Option<WorkspaceIpcClient>,
+    workspace_status: WorkspaceStatus,
 }
 
 impl BubblePanel {
+    fn refresh_workspace_status(&mut self) {
+        let Some(client) = self.workspace_client.as_mut() else {
+            return;
+        };
+        match client.query_status() {
+            Ok(status) => self.workspace_status = status,
+            Err(error) => warn!(%error, "Cannot refresh BubbleWM workspace state"),
+        }
+    }
+
+    fn send_workspace_request(&mut self, request: Request) {
+        if !self.workspace_status.control {
+            info!("Workspace control is not available from this compositor");
+            return;
+        }
+
+        let result = self
+            .workspace_client
+            .as_mut()
+            .ok_or_else(|| anyhow!("BubbleWM IPC client is unavailable"))
+            .and_then(|client| client.request(request));
+
+        match result {
+            Ok(Response::Success { .. }) => {
+                self.refresh_workspace_status();
+                if let Err(error) = self.draw() {
+                    warn!(%error, "Cannot redraw BubblePanel after workspace change");
+                }
+            }
+            Ok(Response::Failure { error }) => {
+                warn!(message = %error.message, ?error.code, "BubbleWM rejected workspace request");
+            }
+            Err(error) => warn!(%error, "BubblePanel workspace request failed"),
+        }
+    }
+
     fn draw(&mut self) -> Result<()> {
         let width = self.width.clamp(1, MAX_BUFFER_WIDTH);
         let height = self.height.clamp(1, PANEL_HEIGHT);
@@ -357,7 +505,13 @@ impl BubblePanel {
         canvas.fill(0);
         fill_rect(canvas, width, height, 0, 0, width, height, 0xFF1B202B);
         draw_brand(canvas, width, height);
-        draw_workspaces(canvas, width, height);
+        draw_workspaces(
+            canvas,
+            width,
+            height,
+            self.workspace_status.active,
+            self.workspace_status.count,
+        );
         draw_status_and_clock(canvas, width, height);
 
         self.layer
@@ -559,7 +713,14 @@ impl PointerHandler for BubblePanel {
                 }
                 PointerEventKind::Release { button, .. } if *button == BTN_LEFT => {
                     if let Some(action) = self.pointer_interaction.release(action) {
-                        info!(?action, x, y, "BubblePanel left-click completed");
+                        match action {
+                            PanelAction::Workspace(index) => {
+                                self.send_workspace_request(Request::ActivateWorkspace {
+                                    index: u32::from(index.saturating_sub(1)),
+                                });
+                            }
+                            _ => info!(?action, x, y, "BubblePanel left-click completed"),
+                        }
                     }
                 }
                 PointerEventKind::Axis {
@@ -571,13 +732,11 @@ impl PointerHandler for BubblePanel {
                         if let Some(workspace_direction) =
                             workspace_scroll_direction(action, directions)
                         {
-                            info!(
-                                ?workspace_direction,
-                                ?action,
-                                x,
-                                y,
-                                "BubblePanel workspace navigation requested"
-                            );
+                            let request = match workspace_direction {
+                                WorkspaceScrollDirection::Previous => Request::WorkspacePrevious,
+                                WorkspaceScrollDirection::Next => Request::WorkspaceNext,
+                            };
+                            self.send_workspace_request(request);
                         } else {
                             info!(
                                 ?directions,
@@ -664,12 +823,26 @@ fn draw_brand(canvas: &mut [u8], width: u32, height: u32) {
     fill_rect(canvas, width, height, 54, 18, 2, 4, 0xFFE7EDF5);
 }
 
-fn draw_workspaces(canvas: &mut [u8], width: u32, height: u32) {
-    for index in 0..4 {
+fn draw_workspaces(
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    active_workspace: u32,
+    workspace_count: u32,
+) {
+    for index in 0..4_u32 {
         let x = 82 + index * 24;
-        let color = if index == 0 { 0xFF62D6E8 } else { 0xFF465060 };
+        let visible = index < workspace_count;
+        let active = visible && index == active_workspace;
+        let color = if active {
+            0xFF62D6E8
+        } else if visible {
+            0xFF465060
+        } else {
+            0xFF303744
+        };
         fill_rect(canvas, width, height, x, 14, 16, 12, color);
-        if index != 0 {
+        if !active {
             fill_rect(canvas, width, height, x + 3, 17, 10, 6, 0xFF1B202B);
         }
     }
