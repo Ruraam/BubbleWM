@@ -177,7 +177,6 @@ fn main() -> Result<()> {
         layer,
         width: INITIAL_WIDTH,
         height: PANEL_HEIGHT,
-        first_configure: true,
         closed: false,
         clock_minute: current_clock_minute(),
         pointer: None,
@@ -446,7 +445,6 @@ struct BubblePanel {
     layer: LayerSurface,
     width: u32,
     height: u32,
-    first_configure: bool,
     closed: bool,
     clock_minute: String,
     pointer: Option<wl_pointer::WlPointer>,
@@ -623,9 +621,6 @@ impl LayerShellHandler for BubblePanel {
         self.width = NonZeroU32::new(configure.new_size.0).map_or(INITIAL_WIDTH, NonZeroU32::get);
         self.height = NonZeroU32::new(configure.new_size.1).map_or(PANEL_HEIGHT, NonZeroU32::get);
 
-        if self.first_configure {
-            self.first_configure = false;
-        }
         if let Err(error) = self.draw() {
             warn!(%error, "BubblePanel rendering failed");
             self.closed = true;
