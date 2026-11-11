@@ -89,15 +89,15 @@ use smithay::{
             KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler,
             WlrLayerShellState,
         },
-        xdg_activation::{
-            XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
-        },
         shell::xdg::{
             PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
             XdgShellState,
             decoration::{XdgDecorationHandler, XdgDecorationState},
         },
         shm::{ShmHandler, ShmState},
+        xdg_activation::{
+            XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
+        },
     },
 };
 use tracing::info;
@@ -262,16 +262,22 @@ impl CompositorStateData {
         };
         if data.timestamp.elapsed() > Duration::from_secs(5)
             || !self.seat.owns(seat)
-            || self.display_handle.get_client(source.id()).ok().map(|client| client.id())
+            || self
+                .display_handle
+                .get_client(source.id())
+                .ok()
+                .map(|client| client.id())
                 != data.client_id
         {
             return false;
         }
-        self.recent_input_serials.iter().any(|(known, timestamp, surface)| {
-            known == serial
-                && surface == source
-                && timestamp.elapsed() <= Duration::from_secs(5)
-        })
+        self.recent_input_serials
+            .iter()
+            .any(|(known, timestamp, surface)| {
+                known == serial
+                    && surface == source
+                    && timestamp.elapsed() <= Duration::from_secs(5)
+            })
     }
 
     fn layer_under_pointer(
@@ -2292,7 +2298,9 @@ pub fn run_winit() -> Result<()> {
                 let serial = SERIAL_COUNTER.next_serial();
                 let time = (event.time() / 1000) as u32;
                 if event.state() == ButtonState::Pressed {
-                    let focus = state.pointer_focus(state.pointer_location).map(|(surface, _)| surface);
+                    let focus = state
+                        .pointer_focus(state.pointer_location)
+                        .map(|(surface, _)| surface);
                     state.remember_input_serial(serial, focus);
                 }
 
