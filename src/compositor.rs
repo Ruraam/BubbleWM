@@ -1,9 +1,10 @@
-//! Initial nested Smithay compositor backend.
+//! Nested Smithay compositor backend.
 //!
-//! This milestone creates a Winit window, exports the core compositor, shm,
-//! seat, xdg-shell and wl_output globals, accepts clients, keeps a Smithay
-//! desktop space, routes pointer/keyboard events, and renders mapped windows.
-//! Decorations, workspaces, layer-shell and native DRM/KMS remain future work.
+//! The Winit development backend exports the core Wayland globals, xdg-shell,
+//! server-side decorations and wlr-layer-shell. It maps and renders windows,
+//! popups and desktop layers, routes pointer/keyboard events, and accounts for
+//! layer-shell exclusive zones when positioning maximized windows. Workspaces,
+//! multiple outputs and native DRM/KMS remain future work.
 
 use std::{
     sync::Arc,
@@ -304,13 +305,23 @@ impl CompositorStateData {
             return;
         }
 
-        let focused_layer_interactivity = keyboard.current_focus().and_then(|focused| {
+        let focused_layer = keyboard.current_focus().and_then(|focused| {
             let map = layer_map_for_output(&self.output);
             map.layer_for_surface(&focused, WindowSurfaceType::ALL)
-                .map(|layer| layer.cached_state().keyboard_interactivity)
+                .map(|layer| {
+                    let interactivity = layer.cached_state().keyboard_interactivity;
+                    let has_buffer =
+                        with_renderer_surface_state(layer.wl_surface(), |state| {
+                            state.buffer().is_some()
+                        })
+                        .unwrap_or(false);
+                    (interactivity, has_buffer)
+                })
         });
 
-        if focused_layer_interactivity == Some(KeyboardInteractivity::None) {
+        if focused_layer.is_some_and(|(interactivity, has_buffer)| {
+            should_fallback_from_layer_focus(interactivity, has_buffer)
+        }) {
             self.focus_topmost_window();
         }
     }
@@ -1493,12 +1504,11 @@ impl WlrLayerShellHandler for CompositorStateData {
     }
 
     fn layer_destroyed(&mut self, surface: WlrLayerSurface) {
-        let focused = self
-            .keyboard
-            .as_ref()
-            .and_then(|keyboard| keyboard.current_focus())
-            .as_ref()
-            == Some(surface.wl_surface());
+        let focused = self.keyboard.as_ref().and_then(|keyboard| keyboard.current_focus()).is_some_and(|focused| {
+            let map = layer_map_for_output(&self.output);
+            map.layer_for_surface(&focused, WindowSurfaceType::ALL)
+                .is_some_and(|layer| layer.layer_surface() == &surface)
+        });
 
         {
             let mut map = layer_map_for_output(&self.output);
@@ -1556,6 +1566,13 @@ fn append_solid_decoration(
         1.0,
         Kind::Unspecified,
     ));
+}
+
+fn should_fallback_from_layer_focus(
+    interactivity: KeyboardInteractivity,
+    has_buffer: bool,
+) -> bool {
+    interactivity != KeyboardInteractivity::OnDemand || !has_buffer
 }
 
 fn calculate_resize_size(
@@ -2256,6 +2273,26 @@ mod tests {
             compositor_shortcut(modifiers, Keysym::q),
             Some(CompositorShortcut::Close)
         );
+    }
+
+    #[test]
+    fn layer_focus_falls_back_when_surface_cannot_receive_keyboard_input() {
+        assert!(should_fallback_from_layer_focus(
+            KeyboardInteractivity::None,
+            true
+        ));
+        assert!(should_fallback_from_layer_focus(
+            KeyboardInteractivity::Exclusive,
+            false
+        ));
+        assert!(should_fallback_from_layer_focus(
+            KeyboardInteractivity::OnDemand,
+            false
+        ));
+        assert!(!should_fallback_from_layer_focus(
+            KeyboardInteractivity::OnDemand,
+            true
+        ));
     }
 
     #[test]
