@@ -121,18 +121,18 @@ mod tests {
     #[test]
     fn stack_remainder_is_distributed_without_overlap() {
         let layout = master_stack(
-            Rect::new(0, 0, 1000, 503),
+            Rect::new(0, 0, 1000, 504),
             4,
             MasterStackConfig { master_ratio: 0.5, gap: 7 },
         );
         assert_eq!(layout.len(), 4);
-        assert_eq!(layout[1].height, 163);
+        assert_eq!(layout[1].height, 164);
         assert_eq!(layout[2].height, 163);
         assert_eq!(layout[3].height, 163);
         assert_eq!(layout[1].y, 0);
-        assert_eq!(layout[2].y, 170);
-        assert_eq!(layout[3].y, 340);
-        assert_eq!(layout[3].y + layout[3].height, 503);
+        assert_eq!(layout[2].y, 171);
+        assert_eq!(layout[3].y, 341);
+        assert_eq!(layout[3].y + layout[3].height, 504);
     }
 
     #[test]
