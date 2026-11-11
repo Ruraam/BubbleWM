@@ -194,6 +194,8 @@ enum CompositorShortcut {
     Minimize,
     Restore,
     Close,
+    WorkspacePrevious,
+    WorkspaceNext,
 }
 
 fn compositor_shortcut(modifiers: ModifiersState, keysym: Keysym) -> Option<CompositorShortcut> {
@@ -205,6 +207,8 @@ fn compositor_shortcut(modifiers: ModifiersState, keysym: Keysym) -> Option<Comp
         Keysym::h => Some(CompositorShortcut::Minimize),
         Keysym::Tab => Some(CompositorShortcut::Restore),
         Keysym::q => Some(CompositorShortcut::Close),
+        Keysym::Left => Some(CompositorShortcut::WorkspacePrevious),
+        Keysym::Right => Some(CompositorShortcut::WorkspaceNext),
         _ => None,
     }
 }
@@ -2121,6 +2125,20 @@ pub fn run_winit() -> Result<()> {
                                             CompositorShortcut::Close => {
                                                 compositor.close_focused_window();
                                             }
+                                            CompositorShortcut::WorkspacePrevious => {
+                                                let index = previous_workspace(
+                                                    compositor.active_workspace,
+                                                    compositor.workspace_count,
+                                                );
+                                                let _ = compositor.activate_workspace(index);
+                                            }
+                                            CompositorShortcut::WorkspaceNext => {
+                                                let index = next_workspace(
+                                                    compositor.active_workspace,
+                                                    compositor.workspace_count,
+                                                );
+                                                let _ = compositor.activate_workspace(index);
+                                            }
                                         }
                                     }
                                     FilterResult::Intercept(())
@@ -2428,6 +2446,14 @@ mod tests {
         assert_eq!(
             compositor_shortcut(modifiers, Keysym::q),
             Some(CompositorShortcut::Close)
+        );
+        assert_eq!(
+            compositor_shortcut(modifiers, Keysym::Left),
+            Some(CompositorShortcut::WorkspacePrevious)
+        );
+        assert_eq!(
+            compositor_shortcut(modifiers, Keysym::Right),
+            Some(CompositorShortcut::WorkspaceNext)
         );
     }
 
