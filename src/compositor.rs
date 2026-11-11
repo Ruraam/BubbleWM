@@ -85,15 +85,12 @@ use smithay::{
                 PrimarySelectionHandler, PrimarySelectionState, set_primary_focus,
             },
         },
-        shell::{
-            wlr_layer::{
-                KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler,
-                WlrLayerShellState,
-            },
-            xdg_activation::{
-                XdgActivationHandler, XdgActivationState, XdgActivationToken,
-                XdgActivationTokenData,
-            },
+        shell::wlr_layer::{
+            KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler,
+            WlrLayerShellState,
+        },
+        xdg_activation::{
+            XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
         },
         shell::xdg::{
             PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
