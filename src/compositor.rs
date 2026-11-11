@@ -2699,6 +2699,10 @@ mod tests {
             compositor_shortcut(modifiers, Keysym::Right),
             Some(CompositorShortcut::WorkspaceNext)
         );
+        assert_eq!(
+            compositor_shortcut(modifiers, Keysym::t),
+            Some(CompositorShortcut::ToggleLayout)
+        );
     }
 
     #[test]
