@@ -302,12 +302,19 @@ impl CompositorStateData {
             .map(|layer| layer.wl_surface().clone())
     }
 
+    fn set_keyboard_focus(&mut self, requested: Option<WlSurface>, serial: Serial) {
+        let focus = self.exclusive_layer_focus().or(requested);
+        if let Some(keyboard) = self.keyboard.clone() {
+            keyboard.set_focus(self, focus, serial);
+        }
+    }
+
     fn refresh_exclusive_layer_focus(&mut self) {
         let Some(keyboard) = self.keyboard.clone() else {
             return;
         };
         if let Some(surface) = self.exclusive_layer_focus() {
-            keyboard.set_focus(self, Some(surface), SERIAL_COUNTER.next_serial());
+            self.set_keyboard_focus(Some(surface), SERIAL_COUNTER.next_serial());
             return;
         }
 
@@ -642,9 +649,8 @@ impl CompositorStateData {
 
         if let Some(window) = self.managed_window_for_surface(&root) {
             self.raise_window_family(&window);
-            if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel()) {
-                keyboard.set_focus(
-                    self,
+            if let Some(toplevel) = window.toplevel() {
+                self.set_keyboard_focus(
                     Some(toplevel.wl_surface().clone()),
                     SERIAL_COUNTER.next_serial(),
                 );
@@ -1053,16 +1059,14 @@ impl CompositorStateData {
             }
         }
 
-        if let Some(keyboard) = self.keyboard.clone() {
-            let focus = exclusive_layer.or_else(|| {
-                target.and_then(|window| {
-                    window
-                        .toplevel()
-                        .map(|toplevel| toplevel.wl_surface().clone())
-                })
-            });
-            keyboard.set_focus(self, focus, serial);
-        }
+        let focus = exclusive_layer.or_else(|| {
+            target.and_then(|window| {
+                window
+                    .toplevel()
+                    .map(|toplevel| toplevel.wl_surface().clone())
+            })
+        });
+        self.set_keyboard_focus(focus, serial);
     }
 
     fn handle_toplevel_commit(&mut self, surface: &WlSurface) {
@@ -1112,10 +1116,8 @@ impl CompositorStateData {
             self.space
                 .map_element(window.clone(), content_location, activate);
             if activate {
-                if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel())
-                {
-                    keyboard.set_focus(
-                        self,
+                if let Some(toplevel) = window.toplevel() {
+                    self.set_keyboard_focus(
                         Some(toplevel.wl_surface().clone()),
                         SERIAL_COUNTER.next_serial(),
                     );
@@ -1297,9 +1299,7 @@ impl CompositorStateData {
             self.layer_under_pointer(self.pointer_location, &[Layer::Overlay, Layer::Top])
         {
             if layer.cached_state().keyboard_interactivity != KeyboardInteractivity::None {
-                if let Some(keyboard) = self.keyboard.clone() {
-                    keyboard.set_focus(self, Some(surface), serial);
-                }
+                self.set_keyboard_focus(Some(surface), serial);
             }
             return;
         }
@@ -1311,8 +1311,8 @@ impl CompositorStateData {
         if let Some(window) = target {
             self.raise_window_family(&window);
 
-            if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel()) {
-                keyboard.set_focus(self, Some(toplevel.wl_surface().clone()), serial);
+            if let Some(toplevel) = window.toplevel() {
+                self.set_keyboard_focus(Some(toplevel.wl_surface().clone()), serial);
             }
             return;
         }
@@ -1320,9 +1320,8 @@ impl CompositorStateData {
         if let Some((layer, surface, _)) =
             self.layer_under_pointer(self.pointer_location, &[Layer::Bottom, Layer::Background])
             && layer.cached_state().keyboard_interactivity != KeyboardInteractivity::None
-            && let Some(keyboard) = self.keyboard.clone()
         {
-            keyboard.set_focus(self, Some(surface), serial);
+            self.set_keyboard_focus(Some(surface), serial);
         }
     }
 }
