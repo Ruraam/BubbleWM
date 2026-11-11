@@ -393,8 +393,8 @@ impl WorkspaceIpcClient {
         )
         .context("cannot send BubbleWM IPC request")?;
 
-        let response: ResponseEnvelope = read_frame(&mut BufReader::new(stream))
-            .context("cannot read BubbleWM IPC response")?;
+        let response: ResponseEnvelope =
+            read_frame(&mut BufReader::new(stream)).context("cannot read BubbleWM IPC response")?;
         if response.protocol_version != PROTOCOL_VERSION {
             bail!(
                 "BubbleWM IPC response uses unsupported protocol version {}",
@@ -415,7 +415,9 @@ impl WorkspaceIpcClient {
             Response::Success {
                 data: ResponseData::Capabilities { workspace_control },
             } => workspace_control,
-            Response::Failure { error } => bail!("BubbleWM capability query failed: {}", error.message),
+            Response::Failure { error } => {
+                bail!("BubbleWM capability query failed: {}", error.message)
+            }
             Response::Success { .. } => bail!("BubbleWM returned an invalid capability response"),
         };
 
@@ -428,7 +430,9 @@ impl WorkspaceIpcClient {
                 control,
             }),
             Response::Success { .. } => bail!("BubbleWM returned invalid workspace state"),
-            Response::Failure { error } => bail!("BubbleWM workspace query failed: {}", error.message),
+            Response::Failure { error } => {
+                bail!("BubbleWM workspace query failed: {}", error.message)
+            }
         }
     }
 }
