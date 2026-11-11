@@ -1466,6 +1466,13 @@ impl WlrLayerShellHandler for CompositorStateData {
         self.space.refresh();
     }
 
+    fn new_popup(&mut self, _parent: DesktopLayerSurface, popup: PopupSurface) {
+        self.unconstrain_popup(&popup);
+        if let Err(error) = self.popups.track_popup(PopupKind::Xdg(popup)) {
+            tracing::warn!(?error, "Unable to track layer-shell popup");
+        }
+    }
+
     fn layer_destroyed(&mut self, surface: WlrLayerSurface) {
         let focused = self
             .keyboard
