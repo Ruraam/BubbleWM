@@ -91,9 +91,8 @@ use smithay::{
         },
         shell::xdg::{
             PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
-            XdgShellState,
+            XdgShellState, XdgToplevelSurfaceData,
             decoration::{XdgDecorationHandler, XdgDecorationState},
-            XdgToplevelSurfaceData,
         },
         shm::{ShmHandler, ShmState},
         xdg_activation::{
@@ -1187,22 +1186,12 @@ impl CompositorStateData {
                         .and_then(|surface| toplevel_app_id(&surface))
                 })
             {
-                append_decoration_title(
-                    &mut elements,
-                    &title,
-                    entry.location,
-                    width,
-                    scale,
-                );
+                append_decoration_title(&mut elements, &title, entry.location, width, scale);
             }
             if focused {
                 append_solid_decoration(
                     &mut elements,
-                    (
-                        entry.location.x,
-                        entry.location.y + TITLEBAR_HEIGHT - 2,
-                    )
-                        .into(),
+                    (entry.location.x, entry.location.y + TITLEBAR_HEIGHT - 2).into(),
                     (width, 2).into(),
                     Color32F::new(0.25, 0.62, 0.95, 1.0),
                     scale,
@@ -2163,7 +2152,11 @@ fn append_decoration_title(
     let mut cursor_x = window_location.x + TITLE_LEFT_PADDING;
     let cursor_y = window_location.y + (TITLEBAR_HEIGHT - GLYPH_HEIGHT) / 2;
 
-    for character in title.chars().filter(|character| !character.is_control()).take(max_chars) {
+    for character in title
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(max_chars)
+    {
         let rows = decoration_glyph(character);
         for (row_index, bits) in rows.into_iter().enumerate() {
             let mut column = 0;
@@ -2173,9 +2166,7 @@ fn append_decoration_title(
                     continue;
                 }
                 let start = column;
-                while column < GLYPH_WIDTH
-                    && bits & (1 << (GLYPH_WIDTH - 1 - column)) != 0
-                {
+                while column < GLYPH_WIDTH && bits & (1 << (GLYPH_WIDTH - 1 - column)) != 0 {
                     column += 1;
                 }
                 append_solid_decoration(
