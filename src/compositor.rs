@@ -468,6 +468,10 @@ impl CompositorStateData {
     }
 
     fn arrange_tiled_windows(&mut self) {
+        self.arrange_tiled_windows_excluding(None);
+    }
+
+    fn arrange_tiled_windows_excluding(&mut self, excluded: Option<&Window>) {
         if self.layout_mode != LayoutMode::MasterStack {
             return;
         }
@@ -483,6 +487,7 @@ impl CompositorStateData {
                     && entry.workspace == self.active_workspace
                     && entry.parent_surface.is_none()
                     && self.space.element_location(&entry.window).is_some()
+                    && excluded != Some(&entry.window)
                     && !entry.window.toplevel().is_some_and(|surface| {
                         surface
                             .current_state()
@@ -1133,7 +1138,7 @@ impl CompositorStateData {
         if surface.is_initial_configure_sent() {
             surface.send_configure();
         }
-        self.arrange_tiled_windows();
+        self.arrange_tiled_windows_excluding(Some(&window));
     }
 
     fn unmaximize_window(&mut self, surface: &ToplevelSurface) {
