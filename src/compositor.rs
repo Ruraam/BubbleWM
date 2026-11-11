@@ -1134,6 +1134,10 @@ impl CompositorStateData {
     fn decoration_render_elements(&self) -> Vec<SolidColorRenderElement> {
         let mut elements = Vec::new();
         let scale = self.output.current_scale().fractional_scale();
+        let focused_surface = self
+            .keyboard
+            .as_ref()
+            .and_then(|keyboard| keyboard.current_focus());
 
         for window in self.space.elements() {
             if !Self::uses_server_decorations(window) {
@@ -1146,14 +1150,37 @@ impl CompositorStateData {
             if width <= 0 {
                 continue;
             }
+            let focused = focused_surface.as_ref().is_some_and(|focused| {
+                window
+                    .toplevel()
+                    .is_some_and(|surface| surface.wl_surface() == focused)
+            });
 
+            let titlebar_color = if focused {
+                Color32F::new(0.16, 0.20, 0.29, 1.0)
+            } else {
+                Color32F::new(0.10, 0.12, 0.16, 1.0)
+            };
             append_solid_decoration(
                 &mut elements,
                 entry.location,
                 (width, TITLEBAR_HEIGHT).into(),
-                Color32F::new(0.12, 0.14, 0.18, 1.0),
+                titlebar_color,
                 scale,
             );
+            if focused {
+                append_solid_decoration(
+                    &mut elements,
+                    (
+                        entry.location.x,
+                        entry.location.y + TITLEBAR_HEIGHT - 2,
+                    )
+                        .into(),
+                    (width, 2).into(),
+                    Color32F::new(0.25, 0.62, 0.95, 1.0),
+                    scale,
+                );
+            }
 
             let close_x =
                 entry.location.x + width - DECORATION_BUTTON_MARGIN - DECORATION_BUTTON_SIZE;
