@@ -59,11 +59,7 @@ fn print_response(client: &mut UnixIpcClient, response: Response) -> Result<()> 
         } => {
             println!(
                 "Workspace control: {}",
-                if workspace_control {
-                    "enabled"
-                } else {
-                    "disabled"
-                }
+                if workspace_control { "enabled" } else { "disabled" }
             );
         }
         Response::Success {
