@@ -81,8 +81,7 @@ use smithay::{
             },
         },
         shell::wlr_layer::{
-            KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, WlrLayerShellGlobalData,
-            WlrLayerShellHandler, WlrLayerShellState, WlrLayerSurfaceUserData,
+            KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler, WlrLayerShellState,
         },
         shell::xdg::{
             PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
@@ -235,7 +234,7 @@ impl CompositorStateData {
             let Some(layer_geometry) = map.layer_geometry(layer_surface) else {
                 continue;
             };
-            let layer_origin = layer_geometry.loc - layer_surface.geometry().loc;
+            let layer_origin = layer_geometry.loc - layer_surface.bbox().loc;
             let local_location = output_location - layer_origin.to_f64();
             let Some((surface, surface_location)) =
                 layer_surface.surface_under(local_location, WindowSurfaceType::ALL)
