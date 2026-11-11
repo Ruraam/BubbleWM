@@ -464,14 +464,10 @@ impl CompositorStateData {
         if parent_workspace != self.active_workspace {
             self.space.unmap_elem(&window);
         } else if !self.windows[index].minimized {
-            let has_buffer = window
-                .toplevel()
-                .is_some_and(|toplevel| {
-                    with_renderer_surface_state(toplevel.wl_surface(), |state| {
-                        state.buffer().is_some()
-                    })
+            let has_buffer = window.toplevel().is_some_and(|toplevel| {
+                with_renderer_surface_state(toplevel.wl_surface(), |state| state.buffer().is_some())
                     .unwrap_or(false)
-                });
+            });
             if has_buffer {
                 let content_location = self.content_location(&window, location);
                 self.space.map_element(window, content_location, false);
@@ -527,11 +523,7 @@ impl CompositorStateData {
         }
 
         for (_, member) in family_windows {
-            if let Some(entry) = self
-                .windows
-                .iter_mut()
-                .find(|entry| entry.window == member)
-            {
+            if let Some(entry) = self.windows.iter_mut().find(|entry| entry.window == member) {
                 entry.stacking_order = self.next_stacking_order;
                 self.next_stacking_order = self.next_stacking_order.wrapping_add(1);
             }
@@ -713,11 +705,7 @@ impl CompositorStateData {
                     })
                     .unwrap_or(false)
                 });
-                has_buffer.then_some((
-                    entry.stacking_order,
-                    entry.window.clone(),
-                    entry.location,
-                ))
+                has_buffer.then_some((entry.stacking_order, entry.window.clone(), entry.location))
             })
             .collect::<Vec<_>>();
         visible.sort_by_key(|(order, _, _)| *order);
