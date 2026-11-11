@@ -2,7 +2,7 @@
 
 A native, lightweight and customizable Wayland compositor for BubbleOS, written in Rust and built on Smithay.
 
-> **Status:** early development. BubbleWM now starts a nested Winit compositor with a single `wl_output`, core Wayland globals, tracked xdg-toplevel lifecycle, pointer routing, interactive move/resize, maximize/restore, minimize/restore, transient stacking, XDG popup management, server-side decorations and a working `wlr-layer-shell` server for desktop panels and other shell surfaces. It remains a development milestone, not yet a complete or daily-usable desktop environment.
+> **Status:** early development. BubbleWM now starts a nested Winit compositor with a single `wl_output`, core Wayland globals, tracked xdg-toplevel lifecycle, pointer routing, interactive move/resize, maximize/restore, minimize/restore, four virtual workspaces, transient stacking, XDG popup management, server-side decorations and a working `wlr-layer-shell` server. BubblePanel can query and control workspaces through the authenticated local IPC endpoint. It remains a development milestone, not yet a complete or daily-usable desktop environment.
 
 ## Project principles
 
@@ -43,7 +43,8 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Core `wl_compositor`, `wl_shm`, `wl_seat`, `xdg-shell`, `wl_data_device_manager`, `zwlr_layer_shell_v1` and `wl_output` globals.
 - One virtual output whose advertised pixel mode follows Winit window resize events. The development mode currently advertises 60 Hz.
 - A stable toplevel registry tracks creation, mapping, unmapping, remapping and destruction while preserving each window's last floating position.
-- A Smithay `Space<Window>` handles mapped xdg toplevels, initial cascading placement, output enter/leave tracking and scene rendering.
+- A Smithay `Space<Window>` handles the active workspace's mapped xdg toplevels, initial cascading placement, output enter/leave tracking and scene rendering.
+- Four virtual workspaces keep their own window membership and stacking order. Switching workspaces preserves each window's floating geometry, minimized state and transient family; previous/next navigation wraps around.
 - Absolute pointer motion, mouse buttons and scroll-axis events are routed to the surface under the pointer.
 - Standard Wayland clipboard selection is available between clients; data-device focus follows the keyboard-focused client. Primary-selection extensions are not advertised yet.
 - A click raises and activates the clicked window and moves keyboard focus to its toplevel. Focus and activation are restored to the topmost remaining window after an unmap or destruction.
@@ -59,27 +60,26 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Clients negotiating XDG server-side decorations receive a prototype 32-pixel titlebar with close, maximize/restore and minimize controls. Client-side decoration requests are respected. The titlebar can also initiate an interactive move.
 - Window geometry is refreshed after root-surface and subsurface commits.
 - Frame pacing is throttled to approximately 60 updates per second in the nested development loop.
-- The IPC server starts and stops with the compositor. Capability discovery works, but workspace commands correctly return `unavailable` until workspace management exists.
+- The authenticated IPC server starts and stops with the compositor. It reports workspace capabilities/state and accepts previous, next and indexed workspace activation requests on the compositor thread.
 
 ### Not implemented yet
 
 - Pointer cursor rendering, touch input, and a complete focus/grab policy.
 - Polished decorations: the current server-side titlebar is a basic prototype with colored controls, not yet a themed titlebar with title text, icons, borders or full accessibility behavior.
-- Tiling and virtual workspaces.
-- Virtual workspaces and workspace switching.
+- Tiling, workspace names, per-workspace configuration and dynamic workspace counts.
 - Output-management protocols, multiple outputs and native DRM/KMS.
-- BubblePanel IPC/workspace integration and real system status modules.
+- Real system status modules, task-list integration and user-facing panel configuration.
 
 ## BubblePanel prototype
 
-The independent panel connects to BubbleWM (or another compatible Wayland compositor), creates a bottom `wlr-layer-shell` surface, reserves a 40-pixel exclusive zone and renders a three-zone layout with workspace/status placeholders and a seven-segment local-time clock. It also detects pointer clicks and scroll gestures and refreshes the clock once per minute.
+The independent panel connects to BubbleWM (or another compatible Wayland compositor), creates a bottom `wlr-layer-shell` surface, reserves a 40-pixel exclusive zone and renders a three-zone layout with live workspace indicators, status placeholders and a seven-segment local-time clock. When BubbleWM IPC is available, workspace clicks and vertical scrolling switch workspaces; the panel remains usable as a visual-only panel on other compositors.
 
 ```sh
 cargo build -p bubblepanel
 cargo run -p bubblepanel
 ```
 
-BubbleWM now implements the server side of `wlr-layer-shell`, so BubblePanel can be tested directly in the nested BubbleWM session. Real workspace state, IPC client integration and system modules remain future work.
+BubbleWM implements the server side of `wlr-layer-shell` and exposes workspace state/control over its authenticated IPC socket, so BubblePanel can be tested directly in the nested session. Real system modules and task-list integration remain future work.
 
 See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANEL.md).
 
