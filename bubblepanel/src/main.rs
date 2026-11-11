@@ -6,20 +6,12 @@
 //! timeout, while interactive modules follow in a later implementation step.
 
 use std::{
-    io::BufReader,
     num::NonZeroU32,
-    os::{
-        fd::{AsFd, AsRawFd},
-        unix::net::UnixStream,
-    },
-    time::Duration,
+    os::fd::{AsFd, AsRawFd},
 };
 
 use anyhow::{Context, Result, anyhow, bail};
-use bubble_ipc::{
-    PROTOCOL_VERSION, Request, RequestEnvelope, Response, ResponseData, ResponseEnvelope,
-    read_frame, unix::default_socket_path, write_frame,
-};
+use bubble_ipc::{Request, Response, ResponseData, unix::UnixIpcClient};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_registry,
@@ -352,17 +344,13 @@ impl Default for WorkspaceStatus {
 }
 
 struct WorkspaceIpcClient {
-    socket_path: std::path::PathBuf,
-    next_request_id: u64,
+    client: UnixIpcClient,
 }
 
 impl WorkspaceIpcClient {
     fn from_environment() -> Option<Self> {
-        match default_socket_path() {
-            Ok(socket_path) => Some(Self {
-                socket_path,
-                next_request_id: 1,
-            }),
+        match UnixIpcClient::connect_default() {
+            Ok(client) => Some(Self { client }),
             Err(error) => {
                 warn!(%error, "BubbleWM workspace IPC is unavailable");
                 None
@@ -371,42 +359,9 @@ impl WorkspaceIpcClient {
     }
 
     fn request(&mut self, request: Request) -> Result<Response> {
-        let mut stream = UnixStream::connect(&self.socket_path)
-            .with_context(|| format!("cannot connect to {}", self.socket_path.display()))?;
-        stream
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .context("cannot set BubbleWM IPC read timeout")?;
-        stream
-            .set_write_timeout(Some(Duration::from_secs(2)))
-            .context("cannot set BubbleWM IPC write timeout")?;
-
-        let request_id = self.next_request_id;
-        self.next_request_id = self.next_request_id.wrapping_add(1).max(1);
-        write_frame(
-            &mut stream,
-            &RequestEnvelope {
-                protocol_version: PROTOCOL_VERSION,
-                request_id,
-                request,
-            },
-        )
-        .context("cannot send BubbleWM IPC request")?;
-
-        let response: ResponseEnvelope =
-            read_frame(&mut BufReader::new(stream)).context("cannot read BubbleWM IPC response")?;
-        if response.protocol_version != PROTOCOL_VERSION {
-            bail!(
-                "BubbleWM IPC response uses unsupported protocol version {}",
-                response.protocol_version
-            );
-        }
-        if response.request_id != request_id {
-            bail!(
-                "BubbleWM IPC response ID mismatch (expected {request_id}, got {})",
-                response.request_id
-            );
-        }
-        Ok(response.response)
+        self.client
+            .request(request)
+            .map_err(|error| anyhow!(error))
     }
 
     fn query_status(&mut self) -> Result<WorkspaceStatus> {
