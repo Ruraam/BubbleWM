@@ -31,6 +31,7 @@ use smithay::{
         winit::{self, WinitEvent},
     },
     delegate_compositor, delegate_data_device, delegate_layer_shell, delegate_output,
+    delegate_primary_selection,
     delegate_seat, delegate_shm, delegate_xdg_decoration, delegate_xdg_shell,
     desktop::{
         LayerSurface as DesktopLayerSurface, PopupKeyboardGrab, PopupKind, PopupManager,
@@ -76,6 +77,9 @@ use smithay::{
         seat::WaylandFocus,
         selection::{
             SelectionHandler,
+            primary_selection::{
+                PrimarySelectionHandler, PrimarySelectionState, set_primary_focus,
+            },
             data_device::{
                 ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
                 set_data_device_focus,
@@ -171,6 +175,7 @@ struct CompositorStateData {
     _xdg_decoration_state: XdgDecorationState,
     shm_state: ShmState,
     data_device_state: DataDeviceState,
+    primary_selection_state: PrimarySelectionState,
     seat_state: SeatState<Self>,
     seat: Seat<Self>,
     keyboard: Option<KeyboardHandle<Self>>,
@@ -1424,6 +1429,12 @@ impl SelectionHandler for CompositorStateData {
     type SelectionUserData = ();
 }
 
+impl PrimarySelectionHandler for CompositorStateData {
+    fn primary_selection_state(&self) -> &PrimarySelectionState {
+        &self.primary_selection_state
+    }
+}
+
 impl ClientDndGrabHandler for CompositorStateData {}
 
 impl ServerDndGrabHandler for CompositorStateData {}
@@ -1695,7 +1706,8 @@ impl SeatHandler for CompositorStateData {
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
         let client = focused.and_then(|surface| self.display_handle.get_client(surface.id()).ok());
-        set_data_device_focus(&self.display_handle, seat, client);
+        set_data_device_focus(&self.display_handle, seat, client.clone());
+        set_primary_focus(&self.display_handle, seat, client);
     }
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, _image: CursorImageStatus) {}
@@ -1980,6 +1992,7 @@ delegate_output!(CompositorStateData);
 delegate_seat!(CompositorStateData);
 delegate_shm!(CompositorStateData);
 delegate_data_device!(CompositorStateData);
+delegate_primary_selection!(CompositorStateData);
 delegate_xdg_decoration!(CompositorStateData);
 delegate_xdg_shell!(CompositorStateData);
 
@@ -2001,6 +2014,8 @@ pub fn run_winit() -> Result<()> {
     let layer_shell_state = WlrLayerShellState::new::<CompositorStateData>(&display_handle);
     let shm_state = ShmState::new::<CompositorStateData>(&display_handle, vec![]);
     let data_device_state = DataDeviceState::new::<CompositorStateData>(&display_handle);
+    let primary_selection_state =
+        PrimarySelectionState::new::<CompositorStateData>(&display_handle);
     let mut seat_state = SeatState::new();
     let seat = seat_state.new_wl_seat(&display_handle, "bubblewm");
 
@@ -2040,6 +2055,7 @@ pub fn run_winit() -> Result<()> {
         _xdg_decoration_state: XdgDecorationState::new::<CompositorStateData>(&display_handle),
         shm_state,
         data_device_state,
+        primary_selection_state,
         seat_state,
         seat,
         keyboard: None,
