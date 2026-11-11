@@ -44,7 +44,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Core `wl_compositor`, `wl_shm`, `wl_seat`, `xdg-shell`, `xdg-activation`, `wl_data_device_manager`, primary-selection, `zwlr_layer_shell_v1` and `wl_output` globals.
 - One virtual output whose advertised pixel mode follows Winit window resize events. The development mode currently advertises 60 Hz.
 - A stable toplevel registry tracks creation, mapping, unmapping, remapping and destruction while preserving each window's last floating position.
-- A Smithay `Space<Window>` handles the active workspace's mapped xdg toplevels, initial cascading placement, output enter/leave tracking and scene rendering. `Super+T` toggles the hybrid floating/Master-Stack layout; floating remains the default and previous floating geometry is restored when switching back.
+- A Smithay `Space<Window>` handles the active workspace's mapped xdg toplevels, initial cascading placement, output enter/leave tracking and scene rendering. `Super+T` toggles the hybrid floating/Master-Stack layout; floating remains the default and previous floating geometry is restored when switching back. In Master/Stack mode, `Super+F` toggles the topmost eligible top-level window between automatic tiling and a floating override, restoring its pre-tiling geometry when it becomes floating.
 - Four virtual workspaces keep their own window membership and stacking order. Switching workspaces preserves each window's floating geometry, minimized state and transient family; previous/next navigation wraps around.
 - Absolute pointer motion, mouse buttons and scroll-axis events are routed to the surface under the pointer.
 - Standard Wayland clipboard and primary-selection protocols are available between clients; both selection foci follow the keyboard-focused client.
@@ -71,7 +71,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 
 - Pointer cursor rendering, touch input, and a complete focus/grab policy.
 - Polished decorations: the current server-side titlebar is a basic prototype with colored controls, not yet a themed titlebar with title text, icons, borders or full accessibility behavior.
-- Workspace names, per-window floating overrides, per-workspace layout configuration and dynamic workspace counts.
+- Workspace names, per-workspace layout configuration and dynamic workspace counts.
 - Output-management protocols, multiple outputs and native DRM/KMS.
 - Real system status modules, task-list integration and user-facing panel configuration.
 
