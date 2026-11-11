@@ -454,7 +454,10 @@ mod tests {
                     protocol_version: PROTOCOL_VERSION,
                     request_id: request.request_id,
                     response: Response::Success {
-                        data: ResponseData::WorkspaceState { active: 2, count: 4 },
+                        data: ResponseData::WorkspaceState {
+                            active: 2,
+                            count: 4,
+                        },
                     },
                 },
             )
@@ -464,9 +467,14 @@ mod tests {
         let mut client = UnixIpcClient::new(&socket_path);
         assert_eq!(client.socket_path(), socket_path);
         assert_eq!(
-            client.request(Request::GetWorkspaceState).expect("request succeeds"),
+            client
+                .request(Request::GetWorkspaceState)
+                .expect("request succeeds"),
             Response::Success {
-                data: ResponseData::WorkspaceState { active: 2, count: 4 }
+                data: ResponseData::WorkspaceState {
+                    active: 2,
+                    count: 4
+                }
             }
         );
         server.join().expect("join test server");
