@@ -138,6 +138,15 @@ struct ManagedWindow {
     workspace: u32,
     stacking_order: u64,
     tiling_restore: Option<RestoreGeometry>,
+    layout_override: WindowLayoutOverride,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum WindowLayoutOverride {
+    #[default]
+    Automatic,
+    Floating,
+    Tiled,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -217,6 +226,7 @@ enum CompositorShortcut {
     WorkspacePrevious,
     WorkspaceNext,
     ToggleLayout,
+    ToggleWindowLayout,
 }
 
 fn compositor_shortcut(modifiers: ModifiersState, keysym: Keysym) -> Option<CompositorShortcut> {
@@ -231,6 +241,7 @@ fn compositor_shortcut(modifiers: ModifiersState, keysym: Keysym) -> Option<Comp
         Keysym::Left => Some(CompositorShortcut::WorkspacePrevious),
         Keysym::Right => Some(CompositorShortcut::WorkspaceNext),
         Keysym::t | Keysym::T => Some(CompositorShortcut::ToggleLayout),
+        Keysym::f | Keysym::F => Some(CompositorShortcut::ToggleWindowLayout),
         _ => None,
     }
 }
@@ -488,6 +499,7 @@ impl CompositorStateData {
                     && entry.parent_surface.is_none()
                     && self.space.element_location(&entry.window).is_some()
                     && excluded != Some(&entry.window)
+                    && entry.layout_override != WindowLayoutOverride::Floating
                     && !entry.window.toplevel().is_some_and(|surface| {
                         surface
                             .current_state()
@@ -538,6 +550,62 @@ impl CompositorStateData {
             }
             self.set_window_location(&window, (rectangle.x, rectangle.y).into(), false);
         }
+    }
+
+    fn toggle_focused_window_layout(&mut self) {
+        if self.layout_mode != LayoutMode::MasterStack {
+            return;
+        }
+
+        let Some(window) = self.space.elements().last().cloned() else {
+            return;
+        };
+        let Some(toplevel) = window.toplevel() else {
+            return;
+        };
+        if toplevel
+            .current_state()
+            .states
+            .contains(xdg_toplevel::State::Maximized)
+        {
+            return;
+        }
+
+        let Some(index) = self.windows.iter().position(|entry| {
+            entry.window == window
+                && entry.workspace == self.active_workspace
+                && !entry.minimized
+                && entry.parent_surface.is_none()
+        }) else {
+            return;
+        };
+
+        let currently_tiled = self.windows[index].tiling_restore.is_some()
+            && self.windows[index].layout_override != WindowLayoutOverride::Floating;
+
+        if currently_tiled {
+            let restore = self.windows[index].tiling_restore.take();
+            self.windows[index].layout_override = WindowLayoutOverride::Floating;
+            if let Some(restore) = restore {
+                toplevel.with_pending_state(|state| {
+                    state.size = restore.size;
+                });
+                toplevel.send_pending_configure();
+                self.set_window_location(&window, restore.location, false);
+            }
+            info!("Focused window switched to floating mode");
+        } else {
+            self.windows[index].layout_override = WindowLayoutOverride::Tiled;
+            self.windows[index].tiling_restore = Some(RestoreGeometry {
+                location: self.windows[index].location,
+                size: Some(window.geometry().size),
+            });
+            self.arrange_tiled_windows();
+            info!("Focused window switched to tiled mode");
+        }
+
+        self.arrange_tiled_windows();
+        self.space.refresh();
     }
 
     fn toggle_layout_mode(&mut self) {
@@ -1715,6 +1783,7 @@ impl XdgShellHandler for CompositorStateData {
             workspace: self.active_workspace,
             stacking_order,
             tiling_restore: None,
+            layout_override: WindowLayoutOverride::Automatic,
         });
         self.update_transient_parent(&surface);
 
@@ -2413,6 +2482,9 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
                                             CompositorShortcut::ToggleLayout => {
                                                 compositor.toggle_layout_mode();
                                             }
+                                            CompositorShortcut::ToggleWindowLayout => {
+                                                compositor.toggle_focused_window_layout();
+                                            }
                                         }
                                     }
                                     FilterResult::Intercept(())
@@ -2742,6 +2814,14 @@ mod tests {
         assert_eq!(
             compositor_shortcut(modifiers, Keysym::T),
             Some(CompositorShortcut::ToggleLayout)
+        );
+        assert_eq!(
+            compositor_shortcut(modifiers, Keysym::f),
+            Some(CompositorShortcut::ToggleWindowLayout)
+        );
+        assert_eq!(
+            compositor_shortcut(modifiers, Keysym::F),
+            Some(CompositorShortcut::ToggleWindowLayout)
         );
     }
 
