@@ -638,7 +638,7 @@ impl CompositorStateData {
                                     .contains(xdg_toplevel::State::Maximized)
                             })
                     })
-                    .filter_map(|entry| entry.window.toplevel())
+                    .filter_map(|entry| entry.window.toplevel().cloned())
                     .collect::<Vec<_>>();
 
                 for surface in maximized {
