@@ -208,7 +208,7 @@ struct CompositorStateData {
     next_stacking_order: u64,
     active_workspace: u32,
     workspace_count: u32,
-    suppressed_keys: Vec<Keysym>,
+    suppressed_keys: Vec<u32>,
     layout_mode: LayoutMode,
 }
 
@@ -246,19 +246,19 @@ fn compositor_shortcut(modifiers: ModifiersState, keysym: Keysym) -> Option<Comp
     }
 }
 
-fn suppress_shortcut_press(suppressed: &mut Vec<Keysym>, keysym: Keysym) -> bool {
-    if suppressed.contains(&keysym) {
+fn suppress_shortcut_press(suppressed: &mut Vec<u32>, key_code: u32) -> bool {
+    if suppressed.contains(&key_code) {
         return false;
     }
-    suppressed.push(keysym);
+    suppressed.push(key_code);
     true
 }
 
-fn consume_shortcut_release(suppressed: &mut Vec<Keysym>, keysym: Keysym) -> bool {
-    if !suppressed.contains(&keysym) {
+fn consume_shortcut_release(suppressed: &mut Vec<u32>, key_code: u32) -> bool {
+    if !suppressed.contains(&key_code) {
         return false;
     }
-    suppressed.retain(|key| *key != keysym);
+    suppressed.retain(|key| *key != key_code);
     true
 }
 
@@ -557,7 +557,17 @@ impl CompositorStateData {
             return;
         }
 
-        let Some(window) = self.space.elements().last().cloned() else {
+        // Resolve the actual keyboard-focused toplevel. Space element order is
+        // stacking order, which can differ from keyboard focus after floating,
+        // workspace changes, or client-side activation requests.
+        let Some(focused_surface) = self
+            .keyboard
+            .as_ref()
+            .and_then(|keyboard| keyboard.current_focus())
+        else {
+            return;
+        };
+        let Some(window) = self.managed_window_for_surface(&focused_surface) else {
             return;
         };
         let Some(toplevel) = window.toplevel() else {
@@ -596,11 +606,8 @@ impl CompositorStateData {
             info!("Focused window switched to floating mode");
         } else {
             self.windows[index].layout_override = WindowLayoutOverride::Tiled;
-            self.windows[index].tiling_restore = Some(RestoreGeometry {
-                location: self.windows[index].location,
-                size: Some(window.geometry().size),
-            });
-            self.arrange_tiled_windows();
+            // The arranger captures the floating geometry exactly once before
+            // applying the new tiled rectangle.
             info!("Focused window switched to tiled mode");
         }
 
@@ -2435,6 +2442,7 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
             WinitEvent::CloseRequested => running = false,
             WinitEvent::Resized { size, .. } => state.update_output_mode(size),
             WinitEvent::Input(InputEvent::Keyboard { event }) => {
+                let key_code = event.key_code();
                 if let Some(keyboard) = state.keyboard.clone() {
                     let serial = SERIAL_COUNTER.next_serial();
                     if event.state() == smithay::backend::input::KeyState::Pressed {
@@ -2453,7 +2461,7 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
                                 if let Some(action) = compositor_shortcut(*modifiers, keysym) {
                                     if suppress_shortcut_press(
                                         &mut compositor.suppressed_keys,
-                                        keysym,
+                                        key_code,
                                     ) {
                                         match action {
                                             CompositorShortcut::Minimize => {
@@ -2493,7 +2501,7 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
                                 }
                             } else if consume_shortcut_release(
                                 &mut compositor.suppressed_keys,
-                                keysym,
+                                key_code,
                             ) {
                                 FilterResult::Intercept(())
                             } else {
@@ -2777,12 +2785,13 @@ mod tests {
     #[test]
     fn held_shortcut_repeats_do_not_repeat_compositor_actions() {
         let mut suppressed = Vec::new();
-        assert!(suppress_shortcut_press(&mut suppressed, Keysym::Tab));
-        assert!(!suppress_shortcut_press(&mut suppressed, Keysym::Tab));
-        assert_eq!(suppressed, vec![Keysym::Tab]);
-        assert!(consume_shortcut_release(&mut suppressed, Keysym::Tab));
+        const TAB_KEY_CODE: u32 = 15;
+        assert!(suppress_shortcut_press(&mut suppressed, TAB_KEY_CODE));
+        assert!(!suppress_shortcut_press(&mut suppressed, TAB_KEY_CODE));
+        assert_eq!(suppressed, vec![TAB_KEY_CODE]);
+        assert!(consume_shortcut_release(&mut suppressed, TAB_KEY_CODE));
         assert!(suppressed.is_empty());
-        assert!(suppress_shortcut_press(&mut suppressed, Keysym::Tab));
+        assert!(suppress_shortcut_press(&mut suppressed, TAB_KEY_CODE));
     }
 
     #[test]
