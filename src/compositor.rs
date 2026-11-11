@@ -2166,7 +2166,7 @@ pub fn run_winit() -> Result<()> {
             send_frames_surface_tree(surface.wl_surface(), frame_time);
         }
         for surface in state.layer_shell_state.layer_surfaces() {
-            send_frames_surface_tree(surface.wl_surface(), frame_time);
+            send_frames_layer_surface_tree(surface.wl_surface(), frame_time);
         }
 
         backend
@@ -2203,6 +2203,14 @@ fn handle_ipc_request(request: Request) -> Response {
             },
         },
     }
+}
+
+/// Sends frame callbacks to a layer surface, its popups and their subsurfaces.
+fn send_frames_layer_surface_tree(surface: &wl_surface::WlSurface, time: u32) {
+    for (popup, _) in PopupManager::popups_for_surface(surface) {
+        send_frames_surface_tree(popup.wl_surface(), time);
+    }
+    send_frames_surface_tree(surface, time);
 }
 
 /// Sends frame callbacks to every surface in a tree after the nested frame.
