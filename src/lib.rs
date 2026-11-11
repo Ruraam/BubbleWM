@@ -2,3 +2,4 @@
 
 pub mod compositor;
 pub mod ipc;
+pub mod layout;
