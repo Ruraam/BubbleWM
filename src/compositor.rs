@@ -235,7 +235,8 @@ impl CompositorStateData {
             let Some(layer_geometry) = map.layer_geometry(layer_surface) else {
                 continue;
             };
-            let local_location = output_location - layer_geometry.loc.to_f64();
+            let layer_origin = layer_geometry.loc - layer_surface.geometry().loc;
+            let local_location = output_location - layer_origin.to_f64();
             let Some((surface, surface_location)) =
                 layer_surface.surface_under(local_location, WindowSurfaceType::ALL)
             else {
@@ -243,7 +244,7 @@ impl CompositorStateData {
             };
 
             let absolute_location = output_geometry.loc.to_f64()
-                + layer_geometry.loc.to_f64()
+                + layer_origin.to_f64()
                 + surface_location.to_f64();
             return Some((layer_surface.clone(), surface, absolute_location));
         }
@@ -2144,11 +2145,12 @@ pub fn run_winit() -> Result<()> {
             }
         }
 
+        let frame_time = start_time.elapsed().as_millis() as u32;
         for surface in state.xdg_shell_state.toplevel_surfaces() {
-            send_frames_surface_tree(
-                surface.wl_surface(),
-                start_time.elapsed().as_millis() as u32,
-            );
+            send_frames_surface_tree(surface.wl_surface(), frame_time);
+        }
+        for surface in state.layer_shell_state.layer_surfaces() {
+            send_frames_surface_tree(surface.wl_surface(), frame_time);
         }
 
         backend
