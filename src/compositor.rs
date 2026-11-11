@@ -30,7 +30,7 @@ use smithay::{
         winit::{self, WinitEvent},
     },
     delegate_compositor, delegate_data_device, delegate_output, delegate_seat, delegate_shm,
-    delegate_xdg_decoration, delegate_xdg_shell,
+    delegate_xdg_decoration, delegate_xdg_shell, delegate_layer_shell,
     desktop::{
         LayerSurface as DesktopLayerSurface, PopupKeyboardGrab, PopupKind, PopupManager,
         PopupPointerGrab, PopupUngrabStrategy, Space, Window, WindowSurfaceType,
@@ -54,8 +54,7 @@ use smithay::{
             shell::server::xdg_toplevel,
         },
         wayland_server::{
-            Client, DataInit, Dispatch, Display, DisplayHandle, GlobalDispatch, ListeningSocket,
-            New, Resource,
+            Client, Display, DisplayHandle, ListeningSocket, Resource,
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::{
                 wl_buffer, wl_seat,
@@ -66,7 +65,6 @@ use smithay::{
     },
     utils::{IsAlive, Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size, Transform},
     wayland::{
-        Dispatch2, GlobalData, GlobalDispatch2,
         buffer::BufferHandler,
         compositor::{
             CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
@@ -318,11 +316,15 @@ impl CompositorStateData {
     }
 
     fn reconfigure_maximized_windows(&mut self) {
-        let maximized = self
+        let windows = self
             .windows
             .iter()
-            .filter_map(|entry| {
-                entry.window.toplevel().filter(|surface| {
+            .map(|entry| entry.window.clone())
+            .collect::<Vec<_>>();
+        let maximized = windows
+            .iter()
+            .filter_map(|window| {
+                window.toplevel().filter(|surface| {
                     surface
                         .current_state()
                         .states
@@ -1483,7 +1485,7 @@ impl WlrLayerShellHandler for CompositorStateData {
         self.space.refresh();
     }
 
-    fn new_popup(&mut self, _parent: DesktopLayerSurface, popup: PopupSurface) {
+    fn new_popup(&mut self, _parent: WlrLayerSurface, popup: PopupSurface) {
         self.unconstrain_popup(&popup);
         if let Err(error) = self.popups.track_popup(PopupKind::Xdg(popup)) {
             tracing::warn!(?error, "Unable to track layer-shell popup");
@@ -1500,11 +1502,11 @@ impl WlrLayerShellHandler for CompositorStateData {
 
         {
             let mut map = layer_map_for_output(&self.output);
-            if let Some(layer) = map
+            let layer = map
                 .layers()
                 .find(|layer| layer.layer_surface() == &surface)
-                .cloned()
-            {
+                .cloned();
+            if let Some(layer) = layer {
                 map.unmap_layer(&layer);
             }
             map.cleanup();
@@ -1810,62 +1812,7 @@ delegate_data_device!(CompositorStateData);
 delegate_xdg_decoration!(CompositorStateData);
 delegate_xdg_shell!(CompositorStateData);
 
-type LayerShellGlobal = smithay::reexports::wayland_protocols_wlr::layer_shell::v1::server::zwlr_layer_shell_v1::ZwlrLayerShellV1;
-type LayerShellSurface = smithay::reexports::wayland_protocols_wlr::layer_shell::v1::server::zwlr_layer_surface_v1::ZwlrLayerSurfaceV1;
-
-impl Dispatch<LayerShellGlobal, GlobalData> for CompositorStateData {
-    fn request(
-        state: &mut Self,
-        client: &Client,
-        resource: &LayerShellGlobal,
-        request: <LayerShellGlobal as Resource>::Request,
-        data: &GlobalData,
-        dhandle: &DisplayHandle,
-        data_init: &mut DataInit<'_, Self>,
-    ) {
-        Dispatch2::request(data, state, client, resource, request, dhandle, data_init);
-    }
-}
-
-impl Dispatch<LayerShellSurface, WlrLayerSurfaceUserData> for CompositorStateData {
-    fn request(
-        state: &mut Self,
-        client: &Client,
-        resource: &LayerShellSurface,
-        request: <LayerShellSurface as Resource>::Request,
-        data: &WlrLayerSurfaceUserData,
-        dhandle: &DisplayHandle,
-        data_init: &mut DataInit<'_, Self>,
-    ) {
-        Dispatch2::request(data, state, client, resource, request, dhandle, data_init);
-    }
-
-    fn destroyed(
-        state: &mut Self,
-        client: ClientId,
-        resource: &LayerShellSurface,
-        data: &WlrLayerSurfaceUserData,
-    ) {
-        Dispatch2::destroyed(data, state, client, resource);
-    }
-}
-
-impl GlobalDispatch<LayerShellGlobal, WlrLayerShellGlobalData> for CompositorStateData {
-    fn bind(
-        state: &mut Self,
-        dhandle: &DisplayHandle,
-        client: &Client,
-        resource: New<LayerShellGlobal>,
-        data: &WlrLayerShellGlobalData,
-        data_init: &mut DataInit<'_, Self>,
-    ) {
-        GlobalDispatch2::bind(data, state, dhandle, client, resource, data_init);
-    }
-
-    fn can_view(client: Client, data: &WlrLayerShellGlobalData) -> bool {
-        GlobalDispatch2::can_view(data, &client)
-    }
-}
+delegate_layer_shell!(CompositorStateData);
 
 /// Starts the initial Winit-backed Wayland compositor and owns IPC for its
 /// complete lifetime.
