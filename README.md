@@ -2,7 +2,7 @@
 
 A native, lightweight and customizable Wayland compositor for BubbleOS, written in Rust and built on Smithay.
 
-> **Status:** early development. BubbleWM now starts an initial nested Winit compositor with a single advertised `wl_output`, core Wayland globals, tracked xdg-toplevel lifecycle, pointer routing, interactive move/resize, maximize/restore, minimize/restore, transient stacking, XDG popup management and a prototype XDG server-decoration path. It is a development milestone, not yet a complete or daily-usable desktop environment.
+> **Status:** early development. BubbleWM now starts a nested Winit compositor with a single `wl_output`, core Wayland globals, tracked xdg-toplevel lifecycle, pointer routing, interactive move/resize, maximize/restore, minimize/restore, transient stacking, XDG popup management, server-side decorations and a working `wlr-layer-shell` server for desktop panels and other shell surfaces. It remains a development milestone, not yet a complete or daily-usable desktop environment.
 
 ## Project principles
 
@@ -21,7 +21,7 @@ A native, lightweight and customizable Wayland compositor for BubbleOS, written 
 
 ## Run the nested compositor
 
-The current Winit backend opens a development window, creates a Wayland socket in `XDG_RUNTIME_DIR`, accepts Wayland clients, advertises the core compositor, shm, seat, xdg-shell, the standard data-device manager and one `wl_output` global, then renders mapped xdg toplevel windows through a Smithay `Space<Window>`.
+The current Winit backend opens a development window, creates a Wayland socket in `XDG_RUNTIME_DIR`, accepts Wayland clients, advertises the core compositor, shm, seat, xdg-shell, the standard data-device manager, `wlr-layer-shell` and one `wl_output` global, then renders mapped windows and layer surfaces through Smithay's desktop space.
 
 ```sh
 cargo run
@@ -40,7 +40,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 ### Current compositor capabilities
 
 - One nested Winit window and one Wayland display socket.
-- Core `wl_compositor`, `wl_shm`, `wl_seat`, `xdg-shell`, `wl_data_device_manager` and `wl_output` globals.
+- Core `wl_compositor`, `wl_shm`, `wl_seat`, `xdg-shell`, `wl_data_device_manager`, `zwlr_layer_shell_v1` and `wl_output` globals.
 - One virtual output whose advertised pixel mode follows Winit window resize events. The development mode currently advertises 60 Hz.
 - A stable toplevel registry tracks creation, mapping, unmapping, remapping and destruction while preserving each window's last floating position.
 - A Smithay `Space<Window>` handles mapped xdg toplevels, initial cascading placement, output enter/leave tracking and scene rendering.
@@ -50,7 +50,9 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - XDG interactive move and resize requests are accepted only when their serial matches an active pointer grab for the requesting client. Resize requests use the client's minimum/maximum size hints and complete with a final configure after release.
 - XDG maximize and unmaximize requests are supported. BubbleWM saves the pre-maximized floating position and size, then restores them when the client requests unmaximize.
 - XDG transient toplevels are positioned relative to their known parent and raised with their parent window family.
-- XDG popups are tracked and rendered with their owning toplevel. Popup placement is constrained to the output, reposition requests are handled, and protocol popup grabs route keyboard and pointer focus through Smithay's popup-grab helpers.
+- XDG popups are tracked and rendered with their owning toplevel or layer surface. Popup placement is constrained to the appropriate output, reposition requests are handled, and protocol popup grabs route keyboard and pointer focus through Smithay's popup-grab helpers.
+- The `wlr-layer-shell` server maps Background, Bottom, Top and Overlay surfaces, arranges anchors and margins, honors exclusive zones, renders layers in the desktop scene, routes pointer input and handles exclusive/on-demand keyboard focus. Layer-shell popups are tracked and constrained as well.
+- Maximized windows use the remaining non-exclusive work area reserved by layer surfaces, and the work area is recalculated when layer surfaces change or the output is resized.
 - XDG minimize requests unmap the window and its transient descendants. `Super+H` minimizes the focused window and `Super+Tab` restores the most recently minimized window family.
 - `Super+Q` and the server-side titlebar close control send the standard XDG close event to the client; BubbleWM does not forcibly terminate the application.
 - BubbleWM advertises XDG minimize/maximize capabilities only. Fullscreen and compositor window-menu capabilities remain unadvertised.
@@ -65,19 +67,19 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Polished decorations: the current server-side titlebar is a basic prototype with colored controls, not yet a themed titlebar with title text, icons, borders or full accessibility behavior.
 - Tiling and virtual workspaces.
 - Virtual workspaces and workspace switching.
-- `wlr-layer-shell`, output-management protocols, multiple outputs and native DRM/KMS.
-- BubblePanel integration and real system status modules.
+- Output-management protocols, multiple outputs and native DRM/KMS.
+- BubblePanel IPC/workspace integration and real system status modules.
 
 ## BubblePanel prototype
 
-The independent panel connects to a Wayland compositor, creates a bottom `wlr-layer-shell` surface, reserves a 40-pixel exclusive zone and renders a three-zone layout with workspace/status placeholders and a seven-segment local-time clock. It also detects pointer clicks and scroll gestures and refreshes the clock once per minute.
+The independent panel connects to BubbleWM (or another compatible Wayland compositor), creates a bottom `wlr-layer-shell` surface, reserves a 40-pixel exclusive zone and renders a three-zone layout with workspace/status placeholders and a seven-segment local-time clock. It also detects pointer clicks and scroll gestures and refreshes the clock once per minute.
 
 ```sh
 cargo build -p bubblepanel
 cargo run -p bubblepanel
 ```
 
-BubblePanel currently requires a compositor that supports `wlr-layer-shell`. BubbleWM does not yet implement the server side of that protocol, so use another compatible Wayland compositor to test the panel for now. Real workspace state, IPC client integration and system modules remain future work.
+BubbleWM now implements the server side of `wlr-layer-shell`, so BubblePanel can be tested directly in the nested BubbleWM session. Real workspace state, IPC client integration and system modules remain future work.
 
 See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANEL.md).
 
@@ -87,7 +89,7 @@ See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANE
 - Cargo.
 - A Wayland or X11 host session with working EGL/OpenGL drivers for the Winit development backend.
 - Native development libraries required by the selected Smithay backend.
-- A separate compositor with `wlr-layer-shell` to run the current BubblePanel prototype.
+- A Wayland session with working EGL/OpenGL drivers for the Winit backend; BubblePanel can use BubbleWM's own layer-shell server.
 
 ## Planned subsystems
 
