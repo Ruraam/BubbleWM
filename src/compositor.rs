@@ -53,7 +53,7 @@ use smithay::{
             shell::server::xdg_toplevel,
         },
         wayland_server::{
-            Client, Display, ListeningSocket, Resource,
+            Client, Display, DisplayHandle, ListeningSocket, Resource,
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::{
                 wl_buffer, wl_seat,
@@ -76,6 +76,13 @@ use smithay::{
             PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
             XdgShellState,
             decoration::{XdgDecorationHandler, XdgDecorationState},
+        },
+        selection::{
+            SelectionHandler,
+            data_device::{
+                ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
+                set_data_device_focus,
+            },
         },
         shm::{ShmHandler, ShmState},
     },
@@ -148,10 +155,12 @@ struct WindowPointerGrab {
 }
 
 struct CompositorStateData {
+    display_handle: DisplayHandle,
     compositor_state: CompositorState,
     xdg_shell_state: XdgShellState,
     _xdg_decoration_state: XdgDecorationState,
     shm_state: ShmState,
+    data_device_state: DataDeviceState,
     seat_state: SeatState<Self>,
     seat: Seat<Self>,
     keyboard: Option<KeyboardHandle<Self>>,
@@ -1077,6 +1086,20 @@ impl ShmHandler for CompositorStateData {
     }
 }
 
+impl SelectionHandler for CompositorStateData {
+    type SelectionUserData = ();
+}
+
+impl ClientDndGrabHandler for CompositorStateData {}
+
+impl ServerDndGrabHandler for CompositorStateData {}
+
+impl DataDeviceHandler for CompositorStateData {
+    fn data_device_state(&self) -> &DataDeviceState {
+        &self.data_device_state
+    }
+}
+
 impl OutputHandler for CompositorStateData {}
 
 impl XdgShellHandler for CompositorStateData {
@@ -1252,7 +1275,10 @@ impl SeatHandler for CompositorStateData {
         &mut self.seat_state
     }
 
-    fn focus_changed(&mut self, _seat: &Seat<Self>, _focused: Option<&WlSurface>) {}
+    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        let client = focused.and_then(|surface| self.display_handle.get_client(surface.id()).ok());
+        set_data_device_focus(&self.display_handle, seat, client);
+    }
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, _image: CursorImageStatus) {}
 }
@@ -1519,8 +1545,8 @@ impl ClientData for WaylandClientState {
         info!("Wayland client connected");
     }
 
-    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {
-        info!("Wayland client disconnected");
+    fn disconnected(&self, _client_id: ClientId, reason: DisconnectReason) {
+        info!(?reason, "Wayland client disconnected");
     }
 }
 
@@ -1528,6 +1554,7 @@ delegate_compositor!(CompositorStateData);
 delegate_output!(CompositorStateData);
 delegate_seat!(CompositorStateData);
 delegate_shm!(CompositorStateData);
+delegate_data_device!(CompositorStateData);
 delegate_xdg_decoration!(CompositorStateData);
 delegate_xdg_shell!(CompositorStateData);
 
@@ -1545,6 +1572,7 @@ pub fn run_winit() -> Result<()> {
 
     let compositor_state = CompositorState::new::<CompositorStateData>(&display_handle);
     let shm_state = ShmState::new::<CompositorStateData>(&display_handle, vec![]);
+    let data_device_state = DataDeviceState::new::<CompositorStateData>(&display_handle);
     let mut seat_state = SeatState::new();
     let seat = seat_state.new_wl_seat(&display_handle, "bubblewm");
 
@@ -1571,6 +1599,7 @@ pub fn run_winit() -> Result<()> {
     output.create_global::<CompositorStateData>(&display_handle);
 
     let mut state = CompositorStateData {
+        display_handle: display_handle.clone(),
         compositor_state,
         xdg_shell_state: XdgShellState::new_with_capabilities::<CompositorStateData>(
             &display_handle,
@@ -1581,6 +1610,7 @@ pub fn run_winit() -> Result<()> {
         ),
         _xdg_decoration_state: XdgDecorationState::new::<CompositorStateData>(&display_handle),
         shm_state,
+        data_device_state,
         seat_state,
         seat,
         keyboard: None,
