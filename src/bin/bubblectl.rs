@@ -56,7 +56,7 @@ fn request_for(command: Command) -> Option<Request> {
 
 fn print_response(client: &mut UnixIpcClient, response: Response) -> Result<()> {
     match response {
-        Response::Failure { error } => bail!("{}: {}", error.code, error.message),
+        Response::Failure { error } => bail!("{:?}: {}", error.code, error.message),
         Response::Success {
             data: ResponseData::Capabilities { workspace_control },
         } => {
