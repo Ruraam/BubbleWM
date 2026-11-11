@@ -102,7 +102,7 @@ use smithay::{
 };
 use tracing::info;
 
-use crate::layout::{master_stack, MasterStackConfig, Rect as LayoutRect};
+use crate::layout::{MasterStackConfig, Rect as LayoutRect, master_stack};
 
 use crate::ipc::IpcRuntime;
 
@@ -484,7 +484,10 @@ impl CompositorStateData {
                     && entry.parent_surface.is_none()
                     && self.space.element_location(&entry.window).is_some()
                     && !entry.window.toplevel().is_some_and(|surface| {
-                        surface.current_state().states.contains(xdg_toplevel::State::Maximized)
+                        surface
+                            .current_state()
+                            .states
+                            .contains(xdg_toplevel::State::Maximized)
                     })
             })
             .map(|entry| (entry.stacking_order, entry.window.clone()))
@@ -492,7 +495,11 @@ impl CompositorStateData {
         tiled.sort_by_key(|(order, _)| std::cmp::Reverse(*order));
 
         for (_, window) in &tiled {
-            if let Some(entry) = self.windows.iter_mut().find(|entry| entry.window == *window) {
+            if let Some(entry) = self
+                .windows
+                .iter_mut()
+                .find(|entry| entry.window == *window)
+            {
                 if entry.tiling_restore.is_none() {
                     entry.tiling_restore = Some(RestoreGeometry {
                         location: entry.location,
@@ -541,7 +548,10 @@ impl CompositorStateData {
                     .windows
                     .iter_mut()
                     .filter_map(|entry| {
-                        entry.tiling_restore.take().map(|restore| (entry.window.clone(), restore))
+                        entry
+                            .tiling_restore
+                            .take()
+                            .map(|restore| (entry.window.clone(), restore))
                     })
                     .collect::<Vec<_>>();
                 for (window, restore) in restores {
