@@ -23,16 +23,18 @@ The event-loop handler must remain quick and must not perform blocking I/O. It m
 
 ## Current command capabilities
 
-- GetCapabilities succeeds and currently reports workspace_control = false.
-- GetWorkspaceState returns unavailable because workspace state does not exist yet.
-- WorkspacePrevious, WorkspaceNext and ActivateWorkspace return unavailable for the same reason.
+- GetCapabilities reports workspace_control = true.
+- GetWorkspaceState returns the active zero-based workspace index and the current workspace count.
+- WorkspacePrevious and WorkspaceNext switch to the adjacent workspace and wrap at either end.
+- ActivateWorkspace validates the requested zero-based index and switches to that workspace.
+- Successful state-changing requests return Acknowledged; invalid indices return InvalidRequest.
 
-This is intentional. The endpoint is live and correctly reports the current feature boundary rather than pretending that workspace switching works.
+The compositor currently initializes four workspaces. Each managed toplevel belongs to one workspace; transient descendants inherit their parent's workspace. Switching unmaps the previous workspace and maps the target workspace in its saved stacking order without destroying clients or losing floating geometry. Minimized windows remain minimized, and restoring a minimized family on another workspace first activates that workspace.
 
 ## Current implementation boundary
 
-The compositor is still an early nested prototype. It advertises wl_compositor, wl_shm, wl_seat, xdg-shell, xdg-decoration and one wl_output, accepts clients and renders mapped xdg toplevel windows through a Smithay Space. Its current window manager tracks toplevel map/unmap/remap/destruction, supports XDG interactive move/resize using validated pointer grabs, preserves floating geometry across maximize/unmaximize, tracks transient toplevel relationships, supports minimizing/restoring whole transient families and manages XDG popup placement, repositioning and grabs. A prototype server-side titlebar is available to clients negotiating XDG decorations.
+The compositor is still an early nested prototype. It advertises wl_compositor, wl_shm, wl_seat, xdg-shell, xdg-decoration, wlr-layer-shell and one wl_output, accepts clients and renders mapped xdg toplevels and layer surfaces through Smithay's desktop space. Its window manager tracks toplevel map/unmap/remap/destruction, supports XDG interactive move/resize using validated pointer grabs, preserves floating geometry across maximize/unmaximize, tracks transient families, supports minimizing/restoring whole families, manages XDG popup placement/repositioning/grabs, and implements four virtual workspaces. BubblePanel uses the same versioned IPC protocol for live workspace state and switching. A prototype server-side titlebar is available to clients negotiating XDG decorations.
 
-These desktop operations are not exposed over IPC yet: protocol v1 still provides capability discovery and workspace requests only, and workspace requests correctly return unavailable. The compositor also does not yet implement workspace management, output-management protocols or multiple outputs, pointer cursor rendering, touch, polished/title-bearing decorations, tiling or the layer-shell server protocol.
+Protocol v1 intentionally exposes only capability discovery and workspace control; window-management operations remain compositor-local. Output-management protocols, multiple outputs, pointer cursor rendering, touch, polished/title-bearing decorations and tiling are still future work.
 
 See docs/ARCHITECTURE.md and docs/ROADMAP.md for the next integration milestones.
