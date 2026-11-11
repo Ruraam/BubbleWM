@@ -31,8 +31,8 @@ use smithay::{
         winit::{self, WinitEvent},
     },
     delegate_compositor, delegate_data_device, delegate_layer_shell, delegate_output,
-    delegate_primary_selection,
-    delegate_seat, delegate_shm, delegate_xdg_decoration, delegate_xdg_shell,
+    delegate_primary_selection, delegate_seat, delegate_shm, delegate_xdg_decoration,
+    delegate_xdg_shell,
     desktop::{
         LayerSurface as DesktopLayerSurface, PopupKeyboardGrab, PopupKind, PopupManager,
         PopupPointerGrab, PopupUngrabStrategy, Space, Window, WindowSurfaceType,
@@ -77,12 +77,12 @@ use smithay::{
         seat::WaylandFocus,
         selection::{
             SelectionHandler,
-            primary_selection::{
-                PrimarySelectionHandler, PrimarySelectionState, set_primary_focus,
-            },
             data_device::{
                 ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
                 set_data_device_focus,
+            },
+            primary_selection::{
+                PrimarySelectionHandler, PrimarySelectionState, set_primary_focus,
             },
         },
         shell::wlr_layer::{
