@@ -497,7 +497,12 @@ impl CompositorStateData {
                 !entry.minimized
                     && entry.workspace == self.active_workspace
                     && entry.parent_surface.is_none()
-                    && self.space.element_location(&entry.window).is_some()
+                    // A window can be temporarily absent from Space's location
+                    // lookup while a configure/map transition is in flight.
+                    // mapped_once is the compositor's stable eligibility marker;
+                    // using the transient Space lookup here could silently drop
+                    // one of three visible windows from the tiling calculation.
+                    && entry.mapped_once
                     && excluded != Some(&entry.window)
                     && entry.layout_override != WindowLayoutOverride::Floating
             })
