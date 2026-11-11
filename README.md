@@ -21,7 +21,7 @@ A native, lightweight and customizable Wayland compositor for BubbleOS, written 
 
 ## Run the nested compositor
 
-The current Winit backend opens a development window, creates a Wayland socket in `XDG_RUNTIME_DIR`, accepts Wayland clients, advertises the core compositor, shm, seat, xdg-shell and one `wl_output` global, then renders mapped xdg toplevel windows through a Smithay `Space<Window>`.
+The current Winit backend opens a development window, creates a Wayland socket in `XDG_RUNTIME_DIR`, accepts Wayland clients, advertises the core compositor, shm, seat, xdg-shell, the standard data-device manager and one `wl_output` global, then renders mapped xdg toplevel windows through a Smithay `Space<Window>`.
 
 ```sh
 cargo run
@@ -40,11 +40,12 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 ### Current compositor capabilities
 
 - One nested Winit window and one Wayland display socket.
-- Core `wl_compositor`, `wl_shm`, `wl_seat`, `xdg-shell` and `wl_output` globals.
+- Core `wl_compositor`, `wl_shm`, `wl_seat`, `xdg-shell`, `wl_data_device_manager` and `wl_output` globals.
 - One virtual output whose advertised pixel mode follows Winit window resize events. The development mode currently advertises 60 Hz.
 - A stable toplevel registry tracks creation, mapping, unmapping, remapping and destruction while preserving each window's last floating position.
 - A Smithay `Space<Window>` handles mapped xdg toplevels, initial cascading placement, output enter/leave tracking and scene rendering.
 - Absolute pointer motion, mouse buttons and scroll-axis events are routed to the surface under the pointer.
+- Standard Wayland clipboard selection is available between clients; data-device focus follows the keyboard-focused client. Primary-selection extensions are not advertised yet.
 - A click raises and activates the clicked window and moves keyboard focus to its toplevel. Focus and activation are restored to the topmost remaining window after an unmap or destruction.
 - XDG interactive move and resize requests are accepted only when their serial matches an active pointer grab for the requesting client. Resize requests use the client's minimum/maximum size hints and complete with a final configure after release.
 - XDG maximize and unmaximize requests are supported. BubbleWM saves the pre-maximized floating position and size, then restores them when the client requests unmaximize.
