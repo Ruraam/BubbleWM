@@ -621,7 +621,11 @@ impl CompositorStateData {
             info!("Focused window switched to tiled mode");
         }
 
-        self.arrange_tiled_windows();
+        // A window detached from the tiling set must also become visible
+        // above the remaining tiled windows. Re-raise its complete transient
+        // family after changing the override; this updates z-order only and
+        // leaves the stable tiling_order untouched.
+        self.raise_window_family(&window);
         self.space.refresh();
     }
 
