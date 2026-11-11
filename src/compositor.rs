@@ -72,17 +72,17 @@ use smithay::{
         },
         output::OutputHandler,
         seat::WaylandFocus,
-        shell::xdg::{
-            PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
-            XdgShellState,
-            decoration::{XdgDecorationHandler, XdgDecorationState},
-        },
         selection::{
             SelectionHandler,
             data_device::{
                 ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
                 set_data_device_focus,
             },
+        },
+        shell::xdg::{
+            PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
+            XdgShellState,
+            decoration::{XdgDecorationHandler, XdgDecorationState},
         },
         shm::{ShmHandler, ShmState},
     },
