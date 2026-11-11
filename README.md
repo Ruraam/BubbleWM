@@ -55,6 +55,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - The `wlr-layer-shell` server maps Background, Bottom, Top and Overlay surfaces, arranges anchors and margins, honors exclusive zones, renders layers in the desktop scene, routes pointer input and handles exclusive/on-demand keyboard focus. Layer-shell popups are tracked and constrained as well.
 - Maximized windows use the remaining non-exclusive work area reserved by layer surfaces, and the work area is recalculated when layer surfaces change or the output is resized.
 - XDG minimize requests unmap the window and its transient descendants. `Super+H` minimizes the focused window and `Super+Tab` restores the most recently minimized window family.
+- `Super+Left` and `Super+Right` switch to the previous and next virtual workspace, wrapping at either end.
 - `Super+Q` and the server-side titlebar close control send the standard XDG close event to the client; BubbleWM does not forcibly terminate the application.
 - BubbleWM advertises XDG minimize/maximize capabilities only. Fullscreen and compositor window-menu capabilities remain unadvertised.
 - Clients negotiating XDG server-side decorations receive a prototype 32-pixel titlebar with close, maximize/restore and minimize controls. Client-side decoration requests are respected. The titlebar can also initiate an interactive move.
