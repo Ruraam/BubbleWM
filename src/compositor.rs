@@ -66,13 +66,8 @@ use smithay::{
     },
     utils::{IsAlive, Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size, Transform},
     wayland::{
+        Dispatch2, GlobalData, GlobalDispatch2,
         buffer::BufferHandler,
-        shell::wlr_layer::{
-            KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface,
-            WlrLayerShellGlobalData, WlrLayerShellHandler, WlrLayerShellState,
-            WlrLayerSurfaceUserData,
-        },
-        GlobalData, Dispatch2, GlobalDispatch2,
         compositor::{
             CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
             TraversalAction, add_post_commit_hook, get_parent, with_states,
@@ -86,6 +81,10 @@ use smithay::{
                 ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
                 set_data_device_focus,
             },
+        },
+        shell::wlr_layer::{
+            KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, WlrLayerShellGlobalData,
+            WlrLayerShellHandler, WlrLayerShellState, WlrLayerSurfaceUserData,
         },
         shell::xdg::{
             PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
@@ -1431,7 +1430,6 @@ impl XdgShellHandler for CompositorStateData {
     }
 }
 
-
 impl WlrLayerShellHandler for CompositorStateData {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
         &mut self.layer_shell_state
@@ -1450,7 +1448,10 @@ impl WlrLayerShellHandler for CompositorStateData {
             .or_else(|| self.space.outputs().next().cloned());
 
         let Some(output) = output else {
-            tracing::warn!(namespace, "Ignoring layer surface because no output is available");
+            tracing::warn!(
+                namespace,
+                "Ignoring layer surface because no output is available"
+            );
             return;
         };
 
