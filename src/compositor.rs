@@ -310,11 +310,10 @@ impl CompositorStateData {
             map.layer_for_surface(&focused, WindowSurfaceType::ALL)
                 .map(|layer| {
                     let interactivity = layer.cached_state().keyboard_interactivity;
-                    let has_buffer =
-                        with_renderer_surface_state(layer.wl_surface(), |state| {
-                            state.buffer().is_some()
-                        })
-                        .unwrap_or(false);
+                    let has_buffer = with_renderer_surface_state(layer.wl_surface(), |state| {
+                        state.buffer().is_some()
+                    })
+                    .unwrap_or(false);
                     (interactivity, has_buffer)
                 })
         });
@@ -1504,11 +1503,15 @@ impl WlrLayerShellHandler for CompositorStateData {
     }
 
     fn layer_destroyed(&mut self, surface: WlrLayerSurface) {
-        let focused = self.keyboard.as_ref().and_then(|keyboard| keyboard.current_focus()).is_some_and(|focused| {
-            let map = layer_map_for_output(&self.output);
-            map.layer_for_surface(&focused, WindowSurfaceType::ALL)
-                .is_some_and(|layer| layer.layer_surface() == &surface)
-        });
+        let focused = self
+            .keyboard
+            .as_ref()
+            .and_then(|keyboard| keyboard.current_focus())
+            .is_some_and(|focused| {
+                let map = layer_map_for_output(&self.output);
+                map.layer_for_surface(&focused, WindowSurfaceType::ALL)
+                    .is_some_and(|layer| layer.layer_surface() == &surface)
+            });
 
         {
             let mut map = layer_map_for_output(&self.output);
