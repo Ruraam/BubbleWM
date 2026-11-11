@@ -1,10 +1,7 @@
 //! Small command-line client for BubbleWM's authenticated local IPC.
 
 use anyhow::{Context, Result, bail};
-use bubble_ipc::{
-    Request, Response, ResponseData,
-    unix::UnixIpcClient,
-};
+use bubble_ipc::{Request, Response, ResponseData, unix::UnixIpcClient};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Command {
@@ -62,7 +59,11 @@ fn print_response(client: &mut UnixIpcClient, response: Response) -> Result<()> 
         } => {
             println!(
                 "Workspace control: {}",
-                if workspace_control { "enabled" } else { "disabled" }
+                if workspace_control {
+                    "enabled"
+                } else {
+                    "disabled"
+                }
             );
         }
         Response::Success {
@@ -140,10 +141,7 @@ mod tests {
 
     #[test]
     fn workspace_status_is_the_default_command() {
-        assert_eq!(
-            parse_command(&[]).unwrap(),
-            Command::WorkspaceStatus
-        );
+        assert_eq!(parse_command(&[]).unwrap(), Command::WorkspaceStatus);
         assert_eq!(
             parse_command(&args(&["workspace", "list"])).unwrap(),
             Command::WorkspaceStatus
