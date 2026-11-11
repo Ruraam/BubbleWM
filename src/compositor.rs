@@ -870,6 +870,11 @@ impl CompositorStateData {
             family_windows.push(target);
         }
 
+        // Reflow tiled windows before changing z-order. Mapping/configuring
+        // their new rectangles can affect Space ordering, so the focused
+        // window family must be raised only after the layout pass is complete.
+        self.arrange_tiled_windows();
+
         for (_, member) in family_windows {
             if let Some(entry) = self.windows.iter_mut().find(|entry| entry.window == member) {
                 entry.stacking_order = self.next_stacking_order;
@@ -878,7 +883,6 @@ impl CompositorStateData {
             self.space.raise_element(&member, member == *window);
         }
         self.configure_toplevels();
-        self.arrange_tiled_windows();
     }
 
     fn window_family_surfaces(&self, root: &WlSurface) -> Vec<WlSurface> {
