@@ -455,6 +455,7 @@ impl CompositorStateData {
             // arrange() handles subsequent size changes.
             layer.layer_surface().send_pending_configure();
             self.reconfigure_maximized_windows();
+            self.arrange_tiled_windows();
             self.refresh_exclusive_layer_focus();
             self.space.refresh();
         }
@@ -2205,7 +2206,7 @@ delegate_layer_shell!(CompositorStateData);
 
 /// Starts the initial Winit-backed Wayland compositor and owns IPC for its
 /// complete lifetime.
-pub fn run_winit() -> Result<()> {
+pub fn run_winit(initial_layout: &str) -> Result<()> {
     let (mut backend, mut winit_loop) =
         winit::init::<smithay::backend::renderer::gles::GlesRenderer>()
             .map_err(|error| anyhow!("cannot initialize the Winit/EGL backend: {error}"))?;
@@ -2280,7 +2281,11 @@ pub fn run_winit() -> Result<()> {
         active_workspace: 0,
         workspace_count: WORKSPACE_COUNT,
         suppressed_keys: Vec::new(),
-        layout_mode: LayoutMode::Floating,
+        layout_mode: if initial_layout == "tiling" {
+            LayoutMode::MasterStack
+        } else {
+            LayoutMode::Floating
+        },
     };
     state.space.map_output(&output, (0, 0));
 
