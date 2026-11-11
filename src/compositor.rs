@@ -504,6 +504,15 @@ impl CompositorStateData {
                     // using the transient Space lookup here could silently drop
                     // one of three visible windows from the tiling calculation.
                     && entry.mapped_once
+                    // A previously mapped toplevel may currently be unmapped
+                    // after committing a null buffer. Do not let that stale
+                    // handle consume a tile or get remapped by set_window_location.
+                    && entry.window.toplevel().is_some_and(|surface| {
+                        with_renderer_surface_state(surface.wl_surface(), |state| {
+                            state.buffer().is_some()
+                        })
+                        .unwrap_or(false)
+                    })
                     && excluded != Some(&entry.window)
                     && entry.layout_override != WindowLayoutOverride::Floating
             })
@@ -1449,6 +1458,10 @@ impl CompositorStateData {
             if self.space.element_location(&window).is_some() {
                 self.space.unmap_elem(&window);
                 self.focus_topmost_window();
+                // Reflow the remaining windows immediately. The unmapped
+                // toplevel stays in the management list for a possible remap,
+                // but must not retain a tile while it has no buffer.
+                self.arrange_tiled_windows();
             }
             if self
                 .resize_session
