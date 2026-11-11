@@ -32,8 +32,9 @@ use smithay::{
     delegate_compositor, delegate_data_device, delegate_output, delegate_seat, delegate_shm,
     delegate_xdg_decoration, delegate_xdg_shell,
     desktop::{
-        PopupKeyboardGrab, PopupKind, PopupManager, PopupPointerGrab, PopupUngrabStrategy, Space,
-        Window, WindowSurfaceType, find_popup_root_surface, get_popup_toplevel_coords,
+        LayerSurface as DesktopLayerSurface, PopupKeyboardGrab, PopupKind, PopupManager,
+        PopupPointerGrab, PopupUngrabStrategy, Space, Window, WindowSurfaceType,
+        find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output,
     },
     input::{
         Seat, SeatHandler, SeatState,
@@ -53,7 +54,8 @@ use smithay::{
             shell::server::xdg_toplevel,
         },
         wayland_server::{
-            Client, Display, DisplayHandle, ListeningSocket, Resource,
+            Client, DataInit, Dispatch, Display, DisplayHandle, GlobalDispatch, ListeningSocket,
+            New, Resource,
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::{
                 wl_buffer, wl_seat,
@@ -65,6 +67,12 @@ use smithay::{
     utils::{IsAlive, Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size, Transform},
     wayland::{
         buffer::BufferHandler,
+        shell::wlr_layer::{
+            KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface,
+            WlrLayerShellGlobalData, WlrLayerShellHandler, WlrLayerShellState,
+            WlrLayerSurfaceUserData,
+        },
+        GlobalData, Dispatch2, GlobalDispatch2,
         compositor::{
             CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
             TraversalAction, add_post_commit_hook, get_parent, with_states,
@@ -157,6 +165,7 @@ struct WindowPointerGrab {
 struct CompositorStateData {
     display_handle: DisplayHandle,
     compositor_state: CompositorState,
+    layer_shell_state: WlrLayerShellState,
     xdg_shell_state: XdgShellState,
     _xdg_decoration_state: XdgDecorationState,
     shm_state: ShmState,
@@ -213,6 +222,38 @@ fn consume_shortcut_release(suppressed: &mut Vec<Keysym>, keysym: Keysym) -> boo
 }
 
 impl CompositorStateData {
+    fn layer_under_pointer(
+        &self,
+        location: Point<f64, Logical>,
+        layers: &[Layer],
+    ) -> Option<(DesktopLayerSurface, WlSurface, Point<f64, Logical>)> {
+        let output_geometry = self.space.output_geometry(&self.output)?;
+        let output_location = location - output_geometry.loc.to_f64();
+        let map = layer_map_for_output(&self.output);
+
+        for layer in layers {
+            let Some(layer_surface) = map.layer_under(*layer, output_location) else {
+                continue;
+            };
+            let Some(layer_geometry) = map.layer_geometry(layer_surface) else {
+                continue;
+            };
+            let local_location = output_location - layer_geometry.loc.to_f64();
+            let Some((surface, surface_location)) =
+                layer_surface.surface_under(local_location, WindowSurfaceType::ALL)
+            else {
+                continue;
+            };
+
+            let absolute_location = output_geometry.loc.to_f64()
+                + layer_geometry.loc.to_f64()
+                + surface_location.to_f64();
+            return Some((layer_surface.clone(), surface, absolute_location));
+        }
+
+        None
+    }
+
     fn pointer_focus(
         &self,
         location: smithay::utils::Point<f64, smithay::utils::Logical>,
@@ -220,14 +261,97 @@ impl CompositorStateData {
         WlSurface,
         smithay::utils::Point<f64, smithay::utils::Logical>,
     )> {
-        let (window, window_location) = self.space.element_under(location)?;
-        let local_location = location - window_location.to_f64();
-        let (surface, surface_location) =
-            window.surface_under(local_location, WindowSurfaceType::ALL)?;
-        Some((
-            surface,
-            window_location.to_f64() + surface_location.to_f64(),
-        ))
+        if let Some((_, surface, surface_location)) =
+            self.layer_under_pointer(location, &[Layer::Overlay, Layer::Top])
+        {
+            return Some((surface, surface_location));
+        }
+
+        if let Some((window, window_location)) = self.space.element_under(location) {
+            let local_location = location - window_location.to_f64();
+            if let Some((surface, surface_location)) =
+                window.surface_under(local_location, WindowSurfaceType::ALL)
+            {
+                return Some((
+                    surface,
+                    window_location.to_f64() + surface_location.to_f64(),
+                ));
+            }
+        }
+
+        self.layer_under_pointer(location, &[Layer::Bottom, Layer::Background])
+            .map(|(_, surface, surface_location)| (surface, surface_location))
+    }
+
+    fn exclusive_layer_focus(&self) -> Option<WlSurface> {
+        let map = layer_map_for_output(&self.output);
+        map.layers_on(Layer::Overlay)
+            .rev()
+            .chain(map.layers_on(Layer::Top).rev())
+            .find(|layer| {
+                layer.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
+                    && with_renderer_surface_state(layer.wl_surface(), |state| {
+                        state.buffer().is_some()
+                    })
+                    .unwrap_or(false)
+            })
+            .map(|layer| layer.wl_surface().clone())
+    }
+
+    fn refresh_exclusive_layer_focus(&self) {
+        let Some(keyboard) = self.keyboard.clone() else {
+            return;
+        };
+        if let Some(surface) = self.exclusive_layer_focus() {
+            keyboard.set_focus(self, Some(surface), SERIAL_COUNTER.next_serial());
+        }
+    }
+
+    fn reconfigure_maximized_windows(&mut self) {
+        let maximized = self
+            .windows
+            .iter()
+            .filter_map(|entry| {
+                entry.window.toplevel().filter(|surface| {
+                    surface
+                        .current_state()
+                        .states
+                        .contains(xdg_toplevel::State::Maximized)
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for surface in maximized {
+            self.maximize_window(&surface);
+        }
+    }
+
+    fn handle_layer_commit(&mut self, surface: &WlSurface) {
+        let layer = {
+            let mut map = layer_map_for_output(&self.output);
+            let layer = map
+                .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
+                .cloned();
+            if layer.is_some() {
+                map.arrange();
+            }
+            layer
+        };
+
+        if let Some(layer) = layer {
+            // Send the initial configure after the client's first commit;
+            // arrange() handles subsequent size changes.
+            layer.layer_surface().send_pending_configure();
+            self.reconfigure_maximized_windows();
+            self.refresh_exclusive_layer_focus();
+            self.space.refresh();
+        }
+    }
+
+    fn work_area(&self) -> Option<Rectangle<i32, Logical>> {
+        let output_geometry = self.space.output_geometry(&self.output)?;
+        let zone = layer_map_for_output(&self.output).non_exclusive_zone();
+        Some(Rectangle::new(output_geometry.loc + zone.loc, zone.size))
     }
 
     fn configure_toplevels(&self) {
@@ -632,7 +756,7 @@ impl CompositorStateData {
             }
             return;
         };
-        let Some(bounds) = self.space.output_geometry(&self.output) else {
+        let Some(bounds) = self.work_area() else {
             if surface.is_initial_configure_sent() {
                 surface.send_configure();
             }
@@ -710,18 +834,33 @@ impl CompositorStateData {
         let Ok(root) = find_popup_root_surface(&kind) else {
             return;
         };
-        let Some(window) = self.managed_window_for_surface(&root) else {
-            return;
-        };
-        let Some(window_geometry) = self.space.element_geometry(&window) else {
-            return;
-        };
         let Some(mut target) = self.space.output_geometry(&self.output) else {
             return;
         };
 
+        let parent_location = if let Some(window) = self.managed_window_for_surface(&root) {
+            let Some(window_geometry) = self.space.element_geometry(&window) else {
+                return;
+            };
+            window_geometry.loc
+        } else {
+            let Some(layer_location) = self.space.outputs().find_map(|output| {
+                let map = layer_map_for_output(output);
+                map.layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)
+                    .and_then(|layer| map.layer_geometry(layer))
+                    .and_then(|geometry| {
+                        self.space
+                            .output_geometry(output)
+                            .map(|output_geometry| output_geometry.loc + geometry.loc)
+                    })
+            }) else {
+                return;
+            };
+            layer_location
+        };
+
         target.loc -= get_popup_toplevel_coords(&kind);
-        target.loc -= window_geometry.loc;
+        target.loc -= parent_location;
         popup.with_pending_state(|state| {
             state.geometry = state.positioner.get_unconstrained_geometry(target);
         });
@@ -747,18 +886,23 @@ impl CompositorStateData {
 
     fn focus_topmost_window(&mut self) {
         let serial = SERIAL_COUNTER.next_serial();
+        let exclusive_layer = self.exclusive_layer_focus();
         let target = self.space.elements().last().cloned();
 
-        if let Some(window) = target.as_ref() {
-            self.space.raise_element(window, true);
-            self.configure_toplevels();
+        if exclusive_layer.is_none() {
+            if let Some(window) = target.as_ref() {
+                self.space.raise_element(window, true);
+                self.configure_toplevels();
+            }
         }
 
         if let Some(keyboard) = self.keyboard.clone() {
-            let focus = target.and_then(|window| {
-                window
-                    .toplevel()
-                    .map(|toplevel| toplevel.wl_surface().clone())
+            let focus = exclusive_layer.or_else(|| {
+                target.and_then(|window| {
+                    window
+                        .toplevel()
+                        .map(|toplevel| toplevel.wl_surface().clone())
+                })
             });
             keyboard.set_focus(self, focus, serial);
         }
@@ -976,23 +1120,43 @@ impl CompositorStateData {
         self.output.set_preferred(mode);
         self.output
             .change_current_state(Some(mode), None, None, None);
+        layer_map_for_output(&self.output).arrange();
+        self.reconfigure_maximized_windows();
         self.space.refresh();
         info!(width = size.w, height = size.h, "Winit output mode changed");
     }
 
     fn focus_window_under_pointer(&mut self, serial: Serial) {
+        if let Some((layer, surface, _)) =
+            self.layer_under_pointer(self.pointer_location, &[Layer::Overlay, Layer::Top])
+        {
+            if layer.cached_state().keyboard_interactivity != KeyboardInteractivity::None {
+                if let Some(keyboard) = self.keyboard.clone() {
+                    keyboard.set_focus(self, Some(surface), serial);
+                }
+            }
+            return;
+        }
+
         let target = self
             .space
             .element_under(self.pointer_location)
             .map(|(window, _location)| window.clone());
-        let Some(window) = target else {
+        if let Some(window) = target {
+            self.raise_window_family(&window);
+
+            if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel()) {
+                keyboard.set_focus(self, Some(toplevel.wl_surface().clone()), serial);
+            }
             return;
-        };
+        }
 
-        self.raise_window_family(&window);
-
-        if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel()) {
-            keyboard.set_focus(self, Some(toplevel.wl_surface().clone()), serial);
+        if let Some((layer, surface, _)) =
+            self.layer_under_pointer(self.pointer_location, &[Layer::Bottom, Layer::Background])
+            && layer.cached_state().keyboard_interactivity != KeyboardInteractivity::None
+            && let Some(keyboard) = self.keyboard.clone()
+        {
+            keyboard.set_focus(self, Some(surface), serial);
         }
     }
 }
@@ -1048,6 +1212,7 @@ impl CompositorHandler for CompositorStateData {
             }
         }
 
+        self.handle_layer_commit(surface);
         self.popups.cleanup();
         self.space.refresh();
     }
@@ -1263,6 +1428,69 @@ impl XdgShellHandler for CompositorStateData {
 
     fn popup_destroyed(&mut self, _surface: PopupSurface) {
         self.popups.cleanup();
+    }
+}
+
+
+impl WlrLayerShellHandler for CompositorStateData {
+    fn shell_state(&mut self) -> &mut WlrLayerShellState {
+        &mut self.layer_shell_state
+    }
+
+    fn new_layer_surface(
+        &mut self,
+        surface: WlrLayerSurface,
+        requested_output: Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput>,
+        _layer: Layer,
+        namespace: String,
+    ) {
+        let output = requested_output
+            .as_ref()
+            .and_then(Output::from_resource)
+            .or_else(|| self.space.outputs().next().cloned());
+
+        let Some(output) = output else {
+            tracing::warn!(namespace, "Ignoring layer surface because no output is available");
+            return;
+        };
+
+        let layer = DesktopLayerSurface::new(surface, namespace);
+        let mut map = layer_map_for_output(&output);
+        if let Err(error) = map.map_layer(&layer) {
+            tracing::warn!(?error, "Unable to map layer surface");
+            return;
+        }
+        drop(map);
+
+        self.refresh_exclusive_layer_focus();
+        self.space.refresh();
+    }
+
+    fn layer_destroyed(&mut self, surface: WlrLayerSurface) {
+        let focused = self
+            .keyboard
+            .as_ref()
+            .and_then(|keyboard| keyboard.current_focus())
+            .as_ref()
+            == Some(surface.wl_surface());
+
+        {
+            let mut map = layer_map_for_output(&self.output);
+            if let Some(layer) = map
+                .layers()
+                .find(|layer| layer.layer_surface() == &surface)
+                .cloned()
+            {
+                map.unmap_layer(&layer);
+            }
+            map.cleanup();
+        }
+
+        if focused {
+            self.focus_topmost_window();
+        }
+        self.reconfigure_maximized_windows();
+        self.space.refresh();
     }
 }
 
@@ -1558,6 +1786,63 @@ delegate_data_device!(CompositorStateData);
 delegate_xdg_decoration!(CompositorStateData);
 delegate_xdg_shell!(CompositorStateData);
 
+type LayerShellGlobal = smithay::reexports::wayland_protocols_wlr::layer_shell::v1::server::zwlr_layer_shell_v1::ZwlrLayerShellV1;
+type LayerShellSurface = smithay::reexports::wayland_protocols_wlr::layer_shell::v1::server::zwlr_layer_surface_v1::ZwlrLayerSurfaceV1;
+
+impl Dispatch<LayerShellGlobal, GlobalData> for CompositorStateData {
+    fn request(
+        state: &mut Self,
+        client: &Client,
+        resource: &LayerShellGlobal,
+        request: <LayerShellGlobal as Resource>::Request,
+        data: &GlobalData,
+        dhandle: &DisplayHandle,
+        data_init: &mut DataInit<'_, Self>,
+    ) {
+        Dispatch2::request(data, state, client, resource, request, dhandle, data_init);
+    }
+}
+
+impl Dispatch<LayerShellSurface, WlrLayerSurfaceUserData> for CompositorStateData {
+    fn request(
+        state: &mut Self,
+        client: &Client,
+        resource: &LayerShellSurface,
+        request: <LayerShellSurface as Resource>::Request,
+        data: &WlrLayerSurfaceUserData,
+        dhandle: &DisplayHandle,
+        data_init: &mut DataInit<'_, Self>,
+    ) {
+        Dispatch2::request(data, state, client, resource, request, dhandle, data_init);
+    }
+
+    fn destroyed(
+        state: &mut Self,
+        client: ClientId,
+        resource: &LayerShellSurface,
+        data: &WlrLayerSurfaceUserData,
+    ) {
+        Dispatch2::destroyed(data, state, client, resource);
+    }
+}
+
+impl GlobalDispatch<LayerShellGlobal, WlrLayerShellGlobalData> for CompositorStateData {
+    fn bind(
+        state: &mut Self,
+        dhandle: &DisplayHandle,
+        client: &Client,
+        resource: New<LayerShellGlobal>,
+        data: &WlrLayerShellGlobalData,
+        data_init: &mut DataInit<'_, Self>,
+    ) {
+        GlobalDispatch2::bind(data, state, dhandle, client, resource, data_init);
+    }
+
+    fn can_view(client: Client, data: &WlrLayerShellGlobalData) -> bool {
+        GlobalDispatch2::can_view(data, &client)
+    }
+}
+
 /// Starts the initial Winit-backed Wayland compositor and owns IPC for its
 /// complete lifetime.
 pub fn run_winit() -> Result<()> {
@@ -1571,6 +1856,7 @@ pub fn run_winit() -> Result<()> {
     let display_handle = display.handle();
 
     let compositor_state = CompositorState::new::<CompositorStateData>(&display_handle);
+    let layer_shell_state = WlrLayerShellState::new::<CompositorStateData>(&display_handle);
     let shm_state = ShmState::new::<CompositorStateData>(&display_handle, vec![]);
     let data_device_state = DataDeviceState::new::<CompositorStateData>(&display_handle);
     let mut seat_state = SeatState::new();
@@ -1601,6 +1887,7 @@ pub fn run_winit() -> Result<()> {
     let mut state = CompositorStateData {
         display_handle: display_handle.clone(),
         compositor_state,
+        layer_shell_state,
         xdg_shell_state: XdgShellState::new_with_capabilities::<CompositorStateData>(
             &display_handle,
             [
