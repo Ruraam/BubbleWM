@@ -31,8 +31,8 @@ use smithay::{
         winit::{self, WinitEvent},
     },
     delegate_compositor, delegate_data_device, delegate_layer_shell, delegate_output,
-    delegate_primary_selection, delegate_seat, delegate_shm, delegate_xdg_decoration,
-    delegate_xdg_shell,
+    delegate_primary_selection, delegate_seat, delegate_shm, delegate_xdg_activation,
+    delegate_xdg_decoration, delegate_xdg_shell,
     desktop::{
         LayerSurface as DesktopLayerSurface, PopupKeyboardGrab, PopupKind, PopupManager,
         PopupPointerGrab, PopupUngrabStrategy, Space, Window, WindowSurfaceType,
@@ -85,9 +85,15 @@ use smithay::{
                 PrimarySelectionHandler, PrimarySelectionState, set_primary_focus,
             },
         },
-        shell::wlr_layer::{
-            KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler,
-            WlrLayerShellState,
+        shell::{
+            wlr_layer::{
+                KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler,
+                WlrLayerShellState,
+            },
+            xdg_activation::{
+                XdgActivationHandler, XdgActivationState, XdgActivationToken,
+                XdgActivationTokenData,
+            },
         },
         shell::xdg::{
             PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
@@ -176,6 +182,8 @@ struct CompositorStateData {
     shm_state: ShmState,
     data_device_state: DataDeviceState,
     primary_selection_state: PrimarySelectionState,
+    xdg_activation_state: XdgActivationState,
+    recent_input_serials: Vec<(Serial, Instant, WlSurface)>,
     seat_state: SeatState<Self>,
     seat: Seat<Self>,
     keyboard: Option<KeyboardHandle<Self>>,
@@ -235,6 +243,40 @@ fn consume_shortcut_release(suppressed: &mut Vec<Keysym>, keysym: Keysym) -> boo
 }
 
 impl CompositorStateData {
+    fn remember_input_serial(&mut self, serial: Serial, surface: Option<WlSurface>) {
+        let Some(surface) = surface else {
+            return;
+        };
+        let now = Instant::now();
+        self.recent_input_serials
+            .retain(|(_, timestamp, _)| now.duration_since(*timestamp) <= Duration::from_secs(5));
+        self.recent_input_serials.push((serial, now, surface));
+        if self.recent_input_serials.len() > 64 {
+            self.recent_input_serials.remove(0);
+        }
+    }
+
+    fn activation_token_is_valid(&self, data: &XdgActivationTokenData) -> bool {
+        let Some((serial, seat)) = data.serial.as_ref() else {
+            return false;
+        };
+        let Some(source) = data.surface.as_ref() else {
+            return false;
+        };
+        if data.timestamp.elapsed() > Duration::from_secs(5)
+            || !self.seat.owns(seat)
+            || self.display_handle.get_client(source.id()).ok().map(|client| client.id())
+                != data.client_id
+        {
+            return false;
+        }
+        self.recent_input_serials.iter().any(|(known, timestamp, surface)| {
+            known == serial
+                && surface == source
+                && timestamp.elapsed() <= Duration::from_secs(5)
+        })
+    }
+
     fn layer_under_pointer(
         &self,
         location: Point<f64, Logical>,
@@ -1435,6 +1477,46 @@ impl PrimarySelectionHandler for CompositorStateData {
     }
 }
 
+impl XdgActivationHandler for CompositorStateData {
+    fn activation_state(&mut self) -> &mut XdgActivationState {
+        &mut self.xdg_activation_state
+    }
+
+    fn token_created(&mut self, _token: XdgActivationToken, data: XdgActivationTokenData) -> bool {
+        self.activation_token_is_valid(&data)
+    }
+
+    fn request_activation(
+        &mut self,
+        token: XdgActivationToken,
+        token_data: XdgActivationTokenData,
+        surface: WlSurface,
+    ) {
+        // Tokens are single-use in BubbleWM, including denied requests.
+        self.xdg_activation_state.remove_token(&token);
+
+        if !self.activation_token_is_valid(&token_data) {
+            return;
+        }
+
+        let Some(window) = self.managed_window_for_surface(&surface) else {
+            return;
+        };
+        let Some(entry) = self.windows.iter().find(|entry| entry.window == window) else {
+            return;
+        };
+        if entry.minimized
+            || entry.workspace != self.active_workspace
+            || self.space.element_location(&window).is_none()
+        {
+            return;
+        }
+
+        self.raise_window_family(&window);
+        self.set_keyboard_focus(Some(surface), SERIAL_COUNTER.next_serial());
+    }
+}
+
 impl ClientDndGrabHandler for CompositorStateData {}
 
 impl ServerDndGrabHandler for CompositorStateData {}
@@ -1993,6 +2075,7 @@ delegate_seat!(CompositorStateData);
 delegate_shm!(CompositorStateData);
 delegate_data_device!(CompositorStateData);
 delegate_primary_selection!(CompositorStateData);
+delegate_xdg_activation!(CompositorStateData);
 delegate_xdg_decoration!(CompositorStateData);
 delegate_xdg_shell!(CompositorStateData);
 
@@ -2016,6 +2099,7 @@ pub fn run_winit() -> Result<()> {
     let data_device_state = DataDeviceState::new::<CompositorStateData>(&display_handle);
     let primary_selection_state =
         PrimarySelectionState::new::<CompositorStateData>(&display_handle);
+    let xdg_activation_state = XdgActivationState::new::<CompositorStateData>(&display_handle);
     let mut seat_state = SeatState::new();
     let seat = seat_state.new_wl_seat(&display_handle, "bubblewm");
 
@@ -2056,6 +2140,8 @@ pub fn run_winit() -> Result<()> {
         shm_state,
         data_device_state,
         primary_selection_state,
+        xdg_activation_state,
+        recent_input_serials: Vec::new(),
         seat_state,
         seat,
         keyboard: None,
@@ -2117,11 +2203,16 @@ pub fn run_winit() -> Result<()> {
             WinitEvent::Resized { size, .. } => state.update_output_mode(size),
             WinitEvent::Input(InputEvent::Keyboard { event }) => {
                 if let Some(keyboard) = state.keyboard.clone() {
+                    let serial = SERIAL_COUNTER.next_serial();
+                    if event.state() == smithay::backend::input::KeyState::Pressed {
+                        let focus = keyboard.current_focus();
+                        state.remember_input_serial(serial, focus);
+                    }
                     keyboard.input::<(), _>(
                         &mut state,
                         event.key_code(),
                         event.state(),
-                        SERIAL_COUNTER.next_serial(),
+                        serial,
                         (event.time() / 1000) as u32,
                         |compositor, modifiers, key| {
                             let keysym = key.modified_sym();
@@ -2203,6 +2294,10 @@ pub fn run_winit() -> Result<()> {
             WinitEvent::Input(InputEvent::PointerButton { event }) => {
                 let serial = SERIAL_COUNTER.next_serial();
                 let time = (event.time() / 1000) as u32;
+                if event.state() == ButtonState::Pressed {
+                    let focus = state.pointer_focus(state.pointer_location).map(|(surface, _)| surface);
+                    state.remember_input_serial(serial, focus);
+                }
 
                 let mut decoration_move = None;
                 if event.state() == ButtonState::Pressed {
