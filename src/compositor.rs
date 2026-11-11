@@ -2461,7 +2461,7 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
                                 if let Some(action) = compositor_shortcut(*modifiers, keysym) {
                                     if suppress_shortcut_press(
                                         &mut compositor.suppressed_keys,
-                                        key_code,
+                                        key_code.into(),
                                     ) {
                                         match action {
                                             CompositorShortcut::Minimize => {
@@ -2501,7 +2501,7 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
                                 }
                             } else if consume_shortcut_release(
                                 &mut compositor.suppressed_keys,
-                                key_code,
+                                key_code.into(),
                             ) {
                                 FilterResult::Intercept(())
                             } else {
