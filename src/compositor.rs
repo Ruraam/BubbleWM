@@ -500,12 +500,6 @@ impl CompositorStateData {
                     && self.space.element_location(&entry.window).is_some()
                     && excluded != Some(&entry.window)
                     && entry.layout_override != WindowLayoutOverride::Floating
-                    && !entry.window.toplevel().is_some_and(|surface| {
-                        surface
-                            .current_state()
-                            .states
-                            .contains(xdg_toplevel::State::Maximized)
-                    })
             })
             .map(|entry| (entry.stacking_order, entry.window.clone()))
             .collect::<Vec<_>>();
@@ -645,6 +639,20 @@ impl CompositorStateData {
                     self.unmaximize_window(&surface);
                 }
 
+                // Super+T is a global layout transition: windows previously
+                // detached with Super+F must rejoin the tiling set.
+                for entry in self.windows.iter_mut().filter(|entry| {
+                    !entry.minimized
+                        && entry.workspace == self.active_workspace
+                        && entry.parent_surface.is_none()
+                }) {
+                    entry.layout_override = WindowLayoutOverride::Tiled;
+                }
+
+                // Do not wait for clients to acknowledge the unmaximize
+                // configure before arranging: that acknowledgement is
+                // asynchronous, while arrange_tiled_windows() must include
+                // every eligible window immediately.
                 self.arrange_tiled_windows();
                 info!("Master/Stack layout enabled");
             }
