@@ -180,7 +180,7 @@ struct CompositorStateData {
     data_device_state: DataDeviceState,
     primary_selection_state: PrimarySelectionState,
     xdg_activation_state: XdgActivationState,
-    recent_input_serials: Vec<(Serial, Instant, WlSurface)>,
+    recent_input_serials: Vec<(Serial, Instant, ClientId)>,
     seat_state: SeatState<Self>,
     seat: Seat<Self>,
     keyboard: Option<KeyboardHandle<Self>>,
@@ -244,10 +244,18 @@ impl CompositorStateData {
         let Some(surface) = surface else {
             return;
         };
+        let Some(client_id) = self
+            .display_handle
+            .get_client(surface.id())
+            .ok()
+            .map(|client| client.id())
+        else {
+            return;
+        };
         let now = Instant::now();
         self.recent_input_serials
             .retain(|(_, timestamp, _)| now.duration_since(*timestamp) <= Duration::from_secs(5));
-        self.recent_input_serials.push((serial, now, surface));
+        self.recent_input_serials.push((serial, now, client_id));
         if self.recent_input_serials.len() > 64 {
             self.recent_input_serials.remove(0);
         }
@@ -260,22 +268,21 @@ impl CompositorStateData {
         let Some(source) = data.surface.as_ref() else {
             return false;
         };
+        let Some(requesting_client) = data.client_id.as_ref() else {
+            return false;
+        };
+        let source_client = self.display_handle.get_client(source.id()).ok().map(|client| client.id());
         if data.timestamp.elapsed() > Duration::from_secs(5)
             || !self.seat.owns(seat)
-            || self
-                .display_handle
-                .get_client(source.id())
-                .ok()
-                .map(|client| client.id())
-                != data.client_id
+            || source_client.as_ref() != Some(requesting_client)
         {
             return false;
         }
         self.recent_input_serials
             .iter()
-            .any(|(known, timestamp, surface)| {
+            .any(|(known, timestamp, client_id)| {
                 known == serial
-                    && surface == source
+                    && client_id == requesting_client
                     && timestamp.elapsed() <= Duration::from_secs(5)
             })
     }
