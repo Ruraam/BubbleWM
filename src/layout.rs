@@ -82,22 +82,24 @@ pub fn master_stack(area: Rect, window_count: usize, config: MasterStackConfig) 
     let stack_width = inner_width - master_width;
 
     let stack_count = window_count - 1;
-    let vertical_gap = if stack_count > 1 {
-        gap.min(area.height.saturating_sub(1).max(0) / (stack_count - 1) as i32)
+    let max_vertical_gap = if stack_count > 1 {
+        (area.height.saturating_sub(1).max(0) as usize) / (stack_count - 1)
     } else {
         0
     };
-    let stack_height = area.height - vertical_gap * (stack_count - 1) as i32;
-    let stack_count_i32 = stack_count as i32;
-    let base_height = stack_height / stack_count_i32;
-    let remainder = stack_height % stack_count_i32;
+    let vertical_gap = gap.min(i32::try_from(max_vertical_gap).unwrap_or(i32::MAX));
+    let total_vertical_gap = (vertical_gap as i64 * (stack_count - 1) as i64) as i32;
+    let stack_height = area.height - total_vertical_gap;
+    let stack_height_usize = stack_height as usize;
+    let base_height = (stack_height_usize / stack_count) as i32;
+    let remainder = stack_height_usize % stack_count;
 
     let mut result = Vec::with_capacity(window_count);
     result.push(Rect::new(area.x, area.y, master_width, area.height));
 
     let mut y = area.y;
     for index in 0..stack_count {
-        let height = base_height + i32::from((index as i32) < remainder);
+        let height = base_height + if index < remainder { 1 } else { 0 };
         result.push(Rect::new(stack_x, y, stack_width, height));
         y = y.saturating_add(height).saturating_add(vertical_gap);
     }
