@@ -17,7 +17,8 @@ A native, lightweight and customizable Wayland compositor for BubbleOS, written 
 
 - **bubblewm:** Smithay compositor, configuration and application lifecycle.
 - **bubblepanel:** independent Wayland panel client using Smithay Client Toolkit.
-- **bubble-ipc:** shared, versioned local-control protocol and Linux Unix-socket transport.
+- **bubble-ipc:** shared, versioned local-control protocol, Linux Unix-socket transport and reusable client.
+- **bubblectl:** terminal utility for workspace status and navigation through the local IPC endpoint.
 
 ## Run the nested compositor
 
