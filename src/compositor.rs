@@ -136,6 +136,8 @@ struct ManagedWindow {
     minimized: bool,
     minimized_order: Option<u64>,
     workspace: u32,
+    /// Stable order used by the tiler; unlike stacking_order, focus changes never modify it.
+    tiling_order: u64,
     stacking_order: u64,
     tiling_restore: Option<RestoreGeometry>,
     layout_override: WindowLayoutOverride,
@@ -515,7 +517,7 @@ impl CompositorStateData {
                     && excluded != Some(&entry.window)
                     && entry.layout_override != WindowLayoutOverride::Floating
             })
-            .map(|entry| (entry.stacking_order, entry.window.clone()))
+            .map(|entry| (entry.tiling_order, entry.window.clone()))
             .collect::<Vec<_>>();
         tiled.sort_by_key(|(order, _)| std::cmp::Reverse(*order));
 
@@ -632,6 +634,10 @@ impl CompositorStateData {
                 // arrange_tiled_windows() and repeated Super+T transitions can
                 // leave windows stacked as full-screen maximized surfaces.
                 self.layout_mode = LayoutMode::MasterStack;
+                // Preserve the geometry saved when a client was maximized.
+                // Waiting for an asynchronous xdg configure acknowledgement here
+                // would let the still-fullscreen client geometry be captured as
+                // its tiling restore size.
                 let maximized = self
                     .windows
                     .iter()
@@ -639,18 +645,41 @@ impl CompositorStateData {
                         !entry.minimized
                             && entry.workspace == self.active_workspace
                             && entry.parent_surface.is_none()
-                            && entry.window.toplevel().is_some_and(|surface| {
-                                surface
-                                    .current_state()
-                                    .states
-                                    .contains(xdg_toplevel::State::Maximized)
-                            })
                     })
-                    .filter_map(|entry| entry.window.toplevel().cloned())
+                    .filter_map(|entry| {
+                        entry.window.toplevel().and_then(|surface| {
+                            surface
+                                .current_state()
+                                .states
+                                .contains(xdg_toplevel::State::Maximized)
+                                .then(|| {
+                                    let restore = entry.restore_geometry.unwrap_or(RestoreGeometry {
+                                        location: entry.location,
+                                        size: Some(entry.window.geometry().size),
+                                    });
+                                    (surface.clone(), entry.window.clone(), restore)
+                                })
+                        })
+                    })
                     .collect::<Vec<_>>();
 
-                for surface in maximized {
-                    self.unmaximize_window(&surface);
+                for (surface, window, restore) in maximized {
+                    if let Some(entry) = self
+                        .windows
+                        .iter_mut()
+                        .find(|entry| entry.window == window)
+                    {
+                        entry.restore_geometry = None;
+                        if entry.tiling_restore.is_none() {
+                            entry.tiling_restore = Some(restore);
+                        }
+                    }
+                    surface.with_pending_state(|state| {
+                        state.states.unset(xdg_toplevel::State::Maximized);
+                        state.size = restore.size;
+                    });
+                    surface.send_pending_configure();
+                    self.set_window_location(&window, restore.location, false);
                 }
 
                 // Super+T is a global layout transition: windows previously
@@ -1470,11 +1499,15 @@ impl CompositorStateData {
         {
             let location = self.windows[index].location;
             let content_location = self.content_location(&window, location);
-            let activate =
-                !self.windows[index].mapped_once || self.space.elements().next().is_none();
+            let first_map = !self.windows[index].mapped_once;
+            let activate = first_map || self.space.elements().next().is_none();
             self.windows[index].mapped_once = true;
             if activate {
-                self.windows[index].stacking_order = self.next_stacking_order;
+                let order = self.next_stacking_order;
+                self.windows[index].stacking_order = order;
+                if first_map {
+                    self.windows[index].tiling_order = order;
+                }
                 self.next_stacking_order = self.next_stacking_order.wrapping_add(1);
             }
             self.space
@@ -1871,6 +1904,7 @@ impl XdgShellHandler for CompositorStateData {
             minimized: false,
             minimized_order: None,
             workspace: self.active_workspace,
+            tiling_order: stacking_order,
             stacking_order,
             tiling_restore: None,
             layout_override: WindowLayoutOverride::Automatic,
