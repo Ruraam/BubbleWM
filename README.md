@@ -62,6 +62,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Window geometry is refreshed after root-surface and subsurface commits.
 - Frame pacing is throttled to approximately 60 updates per second in the nested development loop.
 - The authenticated IPC server starts and stops with the compositor. It reports workspace capabilities/state and accepts previous, next and indexed workspace activation requests on the compositor thread.
+- The `bubblectl` utility can query capabilities/workspace state and switch workspaces from a terminal without requiring BubblePanel.
 
 ### Not implemented yet
 
@@ -70,6 +71,20 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Tiling, workspace names, per-workspace configuration and dynamic workspace counts.
 - Output-management protocols, multiple outputs and native DRM/KMS.
 - Real system status modules, task-list integration and user-facing panel configuration.
+
+## Terminal control
+
+Build and use the `bubblectl` client while BubbleWM is running:
+
+```sh
+cargo run --bin bubblectl -- capabilities
+cargo run --bin bubblectl -- workspace
+cargo run --bin bubblectl -- workspace next
+cargo run --bin bubblectl -- workspace prev
+cargo run --bin bubblectl -- workspace go 3
+```
+
+Workspace numbers are one-based in the CLI. The same shared IPC client implementation is used by BubblePanel and `bubblectl`.
 
 ## BubblePanel prototype
 
