@@ -303,6 +303,17 @@ impl CompositorStateData {
         };
         if let Some(surface) = self.exclusive_layer_focus() {
             keyboard.set_focus(self, Some(surface), SERIAL_COUNTER.next_serial());
+            return;
+        }
+
+        let focused_layer_interactivity = keyboard.current_focus().and_then(|focused| {
+            let map = layer_map_for_output(&self.output);
+            map.layer_for_surface(&focused, WindowSurfaceType::ALL)
+                .map(|layer| layer.cached_state().keyboard_interactivity)
+        });
+
+        if focused_layer_interactivity == Some(KeyboardInteractivity::None) {
+            self.focus_topmost_window();
         }
     }
 
@@ -1376,10 +1387,15 @@ impl XdgShellHandler for CompositorStateData {
         let Some(root) = find_popup_root_surface(&kind).ok() else {
             return;
         };
-        let Some(window) = self.managed_window_for_surface(&root) else {
-            return;
-        };
-        if self.space.element_location(&window).is_none() {
+        let mapped_window = self
+            .managed_window_for_surface(&root)
+            .is_some_and(|window| self.space.element_location(&window).is_some());
+        let mapped_layer = self.space.outputs().any(|output| {
+            layer_map_for_output(output)
+                .layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)
+                .is_some()
+        });
+        if !mapped_window && !mapped_layer {
             return;
         }
 
