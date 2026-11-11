@@ -1036,16 +1036,21 @@ impl CompositorStateData {
         location: Point<i32, Logical>,
         activate: bool,
     ) {
-        if let Some(entry) = self
+        let visible = if let Some(entry) = self
             .windows
             .iter_mut()
             .find(|entry| entry.window == *window)
         {
             entry.location = location;
+            !entry.minimized && entry.workspace == self.active_workspace
+        } else {
+            false
+        };
+        if visible {
+            let content_location = self.content_location(window, location);
+            self.space
+                .map_element(window.clone(), content_location, activate);
         }
-        let content_location = self.content_location(window, location);
-        self.space
-            .map_element(window.clone(), content_location, activate);
     }
 
     fn focus_topmost_window(&mut self) {
