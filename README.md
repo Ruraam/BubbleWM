@@ -41,17 +41,18 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 ### Current compositor capabilities
 
 - One nested Winit window and one Wayland display socket.
-- Core `wl_compositor`, `wl_shm`, `wl_seat`, `xdg-shell`, `wl_data_device_manager`, `zwlr_layer_shell_v1` and `wl_output` globals.
+- Core `wl_compositor`, `wl_shm`, `wl_seat`, `xdg-shell`, `xdg-activation`, `wl_data_device_manager`, primary-selection, `zwlr_layer_shell_v1` and `wl_output` globals.
 - One virtual output whose advertised pixel mode follows Winit window resize events. The development mode currently advertises 60 Hz.
 - A stable toplevel registry tracks creation, mapping, unmapping, remapping and destruction while preserving each window's last floating position.
 - A Smithay `Space<Window>` handles the active workspace's mapped xdg toplevels, initial cascading placement, output enter/leave tracking and scene rendering.
 - Four virtual workspaces keep their own window membership and stacking order. Switching workspaces preserves each window's floating geometry, minimized state and transient family; previous/next navigation wraps around.
 - Absolute pointer motion, mouse buttons and scroll-axis events are routed to the surface under the pointer.
-- Standard Wayland clipboard selection is available between clients; data-device focus follows the keyboard-focused client. Primary-selection extensions are not advertised yet.
+- Standard Wayland clipboard and primary-selection protocols are available between clients; both selection foci follow the keyboard-focused client.
 - A click raises and activates the clicked window and moves keyboard focus to its toplevel. Focus and activation are restored to the topmost remaining window after an unmap or destruction.
 - XDG interactive move and resize requests are accepted only when their serial matches an active pointer grab for the requesting client. Resize requests use the client's minimum/maximum size hints and complete with a final configure after release.
 - XDG maximize and unmaximize requests are supported. BubbleWM saves the pre-maximized floating position and size, then restores them when the client requests unmaximize.
 - XDG transient toplevels are positioned relative to their known parent and raised with their parent window family.
+- XDG activation accepts only short-lived, single-use tokens backed by a recent input serial from the compositor seat and the requesting surface; activation is limited to already-mapped windows on the active workspace, preventing arbitrary clients from stealing focus or forcing workspace changes.
 - XDG popups are tracked and rendered with their owning toplevel or layer surface. Popup placement is constrained to the appropriate output, reposition requests are handled, and protocol popup grabs route keyboard and pointer focus through Smithay's popup-grab helpers.
 - The `wlr-layer-shell` server maps Background, Bottom, Top and Overlay surfaces, arranges anchors and margins, honors exclusive zones, renders layers in the desktop scene, routes pointer input and handles exclusive/on-demand keyboard focus. Layer-shell popups are tracked and constrained as well.
 - Maximized windows use the remaining non-exclusive work area reserved by layer surfaces, and the work area is recalculated when layer surfaces change or the output is resized.
