@@ -1112,6 +1112,10 @@ impl CompositorStateData {
             let activate =
                 !self.windows[index].mapped_once || self.space.elements().next().is_none();
             self.windows[index].mapped_once = true;
+            if activate {
+                self.windows[index].stacking_order = self.next_stacking_order;
+                self.next_stacking_order = self.next_stacking_order.wrapping_add(1);
+            }
             self.space
                 .map_element(window.clone(), content_location, activate);
             if activate {
