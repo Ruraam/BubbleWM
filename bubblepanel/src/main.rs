@@ -8,6 +8,7 @@
 use std::{
     num::NonZeroU32,
     os::fd::{AsFd, AsRawFd},
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -180,16 +181,15 @@ fn main() -> Result<()> {
 
     info!("Waiting for the compositor to configure BubblePanel");
     let wayland_fd = connection.as_fd().as_raw_fd();
+    let mut next_workspace_refresh = Instant::now() + Duration::from_secs(1);
     while !panel.closed {
-        // Poll instead of blocking indefinitely so the clock can refresh without
-        // introducing a background thread or continuously requesting frames.
+        // Poll instead of blocking indefinitely so the clock and workspace
+        // indicators can refresh without a background thread or frame loop.
         let mut descriptor = libc::pollfd {
             fd: wayland_fd,
             events: libc::POLLIN,
             revents: 0,
         };
-        // A one-second timeout keeps the loop responsive while the clock itself
-        // is only redrawn when its displayed minute changes.
         let ready = unsafe { libc::poll(&mut descriptor, 1, 1_000) };
         if ready < 0 {
             let error = std::io::Error::last_os_error();
@@ -205,8 +205,18 @@ fn main() -> Result<()> {
             event_queue
                 .blocking_dispatch(&mut panel)
                 .context("Wayland event dispatch failed")?;
-        } else if panel.clock_minute != current_clock_minute() {
-            panel.draw().context("cannot refresh the panel clock")?;
+        }
+
+        let now = Instant::now();
+        let workspace_changed = if now >= next_workspace_refresh {
+            next_workspace_refresh = now + Duration::from_secs(1);
+            panel.refresh_workspace_status()
+        } else {
+            false
+        };
+        let clock_changed = panel.clock_minute != current_clock_minute();
+        if workspace_changed || clock_changed {
+            panel.draw().context("cannot refresh BubblePanel")?;
         }
     }
 
@@ -407,13 +417,20 @@ struct BubblePanel {
 }
 
 impl BubblePanel {
-    fn refresh_workspace_status(&mut self) {
+    fn refresh_workspace_status(&mut self) -> bool {
         let Some(client) = self.workspace_client.as_mut() else {
-            return;
+            return false;
         };
         match client.query_status() {
-            Ok(status) => self.workspace_status = status,
-            Err(error) => warn!(%error, "Cannot refresh BubbleWM workspace state"),
+            Ok(status) => {
+                let changed = self.workspace_status != status;
+                self.workspace_status = status;
+                changed
+            }
+            Err(error) => {
+                warn!(%error, "Cannot refresh BubbleWM workspace state");
+                false
+            }
         }
     }
 
