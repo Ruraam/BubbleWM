@@ -25,6 +25,7 @@ use smithay::{
             element::{
                 Kind,
                 solid::{SolidColorBuffer, SolidColorRenderElement},
+                surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
             },
             utils::{draw_render_elements, on_commit_buffer_handler, with_renderer_surface_state},
         },
@@ -42,7 +43,8 @@ use smithay::{
         Seat, SeatHandler, SeatState,
         keyboard::{FilterResult, KeyboardHandle, Keysym, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent, CursorImageStatus, Focus, GestureHoldBeginEvent,
+            AxisFrame, ButtonEvent, CursorImageStatus, CursorImageSurfaceData, Focus,
+            GestureHoldBeginEvent,
             GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent,
             GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
             GestureSwipeUpdateEvent, GrabStartData, MotionEvent, PointerGrab, PointerHandle,
@@ -200,6 +202,7 @@ struct CompositorStateData {
     keyboard: Option<KeyboardHandle<Self>>,
     pointer: Option<PointerHandle<Self>>,
     pointer_location: smithay::utils::Point<f64, smithay::utils::Logical>,
+    pointer_cursor_status: CursorImageStatus,
     output: Output,
     output_manager_state: OutputManagerState,
     space: Space<Window>,
@@ -2158,7 +2161,9 @@ impl SeatHandler for CompositorStateData {
         set_primary_focus(&self.display_handle, seat, client);
     }
 
-    fn cursor_image(&mut self, _seat: &Seat<Self>, _image: CursorImageStatus) {}
+    fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
+        self.pointer_cursor_status = image;
+    }
 }
 
 fn toplevel_title(surface: &ToplevelSurface) -> Option<String> {
@@ -2643,6 +2648,7 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
         keyboard: None,
         pointer: None,
         pointer_location: (0.0, 0.0).into(),
+        pointer_cursor_status: CursorImageStatus::default_named(),
         output: output.clone(),
         output_manager_state,
         space: Space::default(),
@@ -2915,6 +2921,13 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
             .flush_clients()
             .context("cannot flush Wayland client events")?;
 
+        // Winit supplies the fallback named cursor. Hide it when a client asks
+        // for a custom surface or explicitly hides the pointer; the custom
+        // surface is composited into BubbleWM's own scene below.
+        backend
+            .window()
+            .set_cursor_visible(host_cursor_visible(&state.pointer_cursor_status));
+
         let size = backend.window_size();
         if size.w <= 0 || size.h <= 0 {
             thread::sleep(FRAME_INTERVAL);
@@ -2946,6 +2959,35 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
                 SolidColorRenderElement,
             >(&mut frame, 1.0, &decorations, &[damage])
             .context("cannot render server-side decorations")?;
+            let cursor_elements: Vec<
+                WaylandSurfaceRenderElement<smithay::backend::renderer::gles::GlesRenderer>,
+            > = match &state.pointer_cursor_status {
+                CursorImageStatus::Surface(surface) if surface.alive() => {
+                    let hotspot = with_states(surface, |states| {
+                        states
+                            .data_map
+                            .get::<CursorImageSurfaceData>()
+                            .and_then(|data| data.lock().ok().map(|attributes| attributes.hotspot))
+                    })
+                    .flatten()
+                    .unwrap_or((0, 0).into());
+                    let scale = Scale::from(state.output.current_scale().fractional_scale());
+                    let location = (state.pointer_location - hotspot.to_f64())
+                        .to_physical_precise_round(scale);
+                    render_elements_from_surface_tree(
+                        renderer,
+                        surface,
+                        location,
+                        scale,
+                        1.0,
+                        Kind::Cursor,
+                    )
+                }
+                _ => Vec::new(),
+            };
+            draw_render_elements(&mut frame, 1.0, &cursor_elements, &[damage])
+                .context("cannot render the pointer cursor")?;
+
             let sync_point = frame.finish().context("cannot finish the Winit frame")?;
             loop {
                 if sync_point.wait().is_ok() {
@@ -2960,6 +3002,11 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
         }
         for surface in state.layer_shell_state.layer_surfaces() {
             send_frames_layer_surface_tree(surface.wl_surface(), frame_time);
+        }
+        if let CursorImageStatus::Surface(surface) = &state.pointer_cursor_status
+            && surface.alive()
+        {
+            send_frames_surface_tree(surface, frame_time);
         }
 
         backend
@@ -2977,6 +3024,10 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
         .context("cannot shut down the BubbleWM IPC worker")?;
     info!("BubbleWM compositor is shutting down");
     Ok(())
+}
+
+fn host_cursor_visible(status: &CursorImageStatus) -> bool {
+    matches!(status, CursorImageStatus::Named(_))
 }
 
 fn previous_workspace(current: u32, count: u32) -> u32 {
@@ -3025,6 +3076,12 @@ fn send_frames_surface_tree(surface: &wl_surface::WlSurface, time: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_cursor_is_visible_only_for_named_fallback_shapes() {
+        assert!(host_cursor_visible(&CursorImageStatus::default_named()));
+        assert!(!host_cursor_visible(&CursorImageStatus::Hidden));
+    }
 
     #[test]
     fn compositor_shortcuts_require_the_logo_modifier() {
