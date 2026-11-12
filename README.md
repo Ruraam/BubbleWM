@@ -46,7 +46,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - A stable toplevel registry tracks creation, mapping, unmapping, remapping and destruction while preserving each window's last floating position.
 - A Smithay `Space<Window>` handles the active workspace's mapped xdg toplevels, initial cascading placement, output enter/leave tracking and scene rendering. `Super+T` toggles the hybrid floating/Master-Stack layout; floating remains the default and previous floating geometry is restored when switching back. In Master/Stack mode, `Super+F` toggles the topmost eligible top-level window between automatic tiling and a floating override, restoring its pre-tiling geometry when it becomes floating.
 - Four virtual workspaces keep their own window membership and stacking order. Switching workspaces preserves each window's floating geometry, minimized state and transient family; previous/next navigation wraps around.
-- Absolute pointer motion, mouse buttons and scroll-axis events are routed to the surface under the pointer.
+- Absolute pointer motion, mouse buttons and scroll-axis events are routed to the surface under the pointer. Client-provided cursor surfaces are composited at the pointer hotspot; the nested Winit window's default cursor is hidden while a custom cursor or hidden-pointer state is active.
 - Standard Wayland clipboard and primary-selection protocols are available between clients; both selection foci follow the keyboard-focused client.
 - A click raises and activates the clicked window and moves keyboard focus to its toplevel. Focus and activation are restored to the topmost remaining window after an unmap or destruction.
 - XDG interactive move and resize requests are accepted only when their serial matches an active pointer grab for the requesting client. Resize requests use the client's minimum/maximum size hints and complete with a final configure after release.
@@ -69,7 +69,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 
 ### Not implemented yet
 
-- Pointer cursor rendering, touch input, and a complete focus/grab policy.
+- Named cursor-theme rendering, touch input, and a complete focus/grab policy. Named cursor requests currently use the nested Winit window's default arrow as a fallback.
 - Polished decorations: the current server-side titlebar is a basic prototype with colored controls, not yet a themed titlebar with title text, icons, borders or full accessibility behavior.
 - Workspace names, per-workspace layout configuration and dynamic workspace counts.
 - Output-management protocols, multiple outputs and native DRM/KMS.
