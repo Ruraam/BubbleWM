@@ -2943,21 +2943,6 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
                 .render_elements_for_output(renderer, &state.output, 1.0)
                 .map_err(|error| anyhow!("cannot assemble output scene: {error}"))?;
 
-            let mut frame = renderer
-                .render(&mut framebuffer, size, Transform::Flipped180)
-                .context("cannot begin a Winit frame")?;
-            frame
-                .clear(Color32F::new(0.075, 0.09, 0.12, 1.0), &[damage])
-                .context("cannot clear the Winit frame")?;
-            draw_render_elements(&mut frame, 1.0, &elements, &[damage])
-                .context("cannot render Wayland surfaces")?;
-            let decorations = state.decoration_render_elements();
-            draw_render_elements::<
-                smithay::backend::renderer::gles::GlesRenderer,
-                f64,
-                SolidColorRenderElement,
-            >(&mut frame, 1.0, &decorations, &[damage])
-            .context("cannot render server-side decorations")?;
             let cursor_elements: Vec<
                 WaylandSurfaceRenderElement<smithay::backend::renderer::gles::GlesRenderer>,
             > = match &state.pointer_cursor_status {
@@ -2983,6 +2968,21 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
                 }
                 _ => Vec::new(),
             };
+            let mut frame = renderer
+                .render(&mut framebuffer, size, Transform::Flipped180)
+                .context("cannot begin a Winit frame")?;
+            frame
+                .clear(Color32F::new(0.075, 0.09, 0.12, 1.0), &[damage])
+                .context("cannot clear the Winit frame")?;
+            draw_render_elements(&mut frame, 1.0, &elements, &[damage])
+                .context("cannot render Wayland surfaces")?;
+            let decorations = state.decoration_render_elements();
+            draw_render_elements::<
+                smithay::backend::renderer::gles::GlesRenderer,
+                f64,
+                SolidColorRenderElement,
+            >(&mut frame, 1.0, &decorations, &[damage])
+            .context("cannot render server-side decorations")?;
             draw_render_elements(&mut frame, 1.0, &cursor_elements, &[damage])
                 .context("cannot render the pointer cursor")?;
 
