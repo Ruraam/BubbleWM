@@ -17,7 +17,8 @@
 - [x] Initial click-to-focus policy: raise/activate the clicked window and give its toplevel keyboard focus.
 - [x] Initial activation and keyboard focus for newly mapped toplevels.
 - [x] Bounded frame pacing, versioned IPC startup, compositor-thread dispatch and orderly shutdown.
-- [ ] Pointer cursor rendering, touch routing and robust keyboard/pointer grabs.
+- [x] Composite client-provided cursor surfaces at the requested pointer hotspot; hide the nested host cursor for custom/hidden cursor states.
+- [ ] Named cursor-theme rendering, touch routing and robust keyboard/pointer grabs.
 - [ ] Output-management protocols, multi-output layout and hotplug handling.
 - [x] wlr-layer-shell server support for BubblePanel, including layer arrangement, exclusive zones, rendering, input and keyboard focus.
 
