@@ -1734,6 +1734,11 @@ impl CompositorStateData {
             && layer.cached_state().keyboard_interactivity != KeyboardInteractivity::None
         {
             self.set_keyboard_focus(Some(surface), serial);
+        } else {
+            // Clicking empty desktop space must not leave keyboard focus on
+            // the previously focused toplevel. Exclusive layers are still
+            // enforced centrally by set_keyboard_focus().
+            self.set_keyboard_focus(None, serial);
         }
     }
 }
@@ -2670,7 +2675,7 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
 
     let keyboard = state
         .seat
-        .add_keyboard(Default::default(), 200, 200)
+        .add_keyboard(Default::default(), 25, 600)
         .context("cannot initialize the virtual keyboard")?;
     let pointer = state.seat.add_pointer();
     state.keyboard = Some(keyboard);
