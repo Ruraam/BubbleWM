@@ -626,6 +626,9 @@ impl CompositorStateData {
         // family after changing the override; this updates z-order only and
         // leaves the stable tiling_order untouched.
         self.raise_window_family(&window);
+        // Reflow the remaining tiled windows immediately and apply the newly
+        // tiled window's geometry without waiting for another compositor event.
+        self.arrange_tiled_windows();
         self.space.refresh();
     }
 
