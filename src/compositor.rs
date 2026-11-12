@@ -2969,9 +2969,8 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
                             .get::<CursorImageSurfaceData>()
                             .and_then(|data| data.lock().ok().map(|attributes| attributes.hotspot))
                     })
-                    .flatten()
                     .unwrap_or((0, 0).into());
-                    let scale = Scale::from(state.output.current_scale().fractional_scale());
+                    let scale = state.output.current_scale().fractional_scale();
                     let location = (state.pointer_location - hotspot.to_f64())
                         .to_physical_precise_round(scale);
                     render_elements_from_surface_tree(
