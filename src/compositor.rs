@@ -73,7 +73,7 @@ use smithay::{
             TraversalAction, add_post_commit_hook, get_parent, with_states,
             with_surface_tree_downward,
         },
-        output::OutputHandler,
+        output::{OutputHandler, OutputManagerState},
         seat::WaylandFocus,
         selection::{
             SelectionHandler,
@@ -201,6 +201,7 @@ struct CompositorStateData {
     pointer: Option<PointerHandle<Self>>,
     pointer_location: smithay::utils::Point<f64, smithay::utils::Logical>,
     output: Output,
+    output_manager_state: OutputManagerState,
     space: Space<Window>,
     windows: Vec<ManagedWindow>,
     popups: PopupManager,
@@ -2586,6 +2587,8 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
         Display::new().context("cannot create the Wayland display")?;
     let display_handle = display.handle();
 
+    let output_manager_state =
+        OutputManagerState::new_with_xdg_output::<CompositorStateData>(&display_handle);
     let compositor_state = CompositorState::new::<CompositorStateData>(&display_handle);
     let layer_shell_state = WlrLayerShellState::new::<CompositorStateData>(&display_handle);
     let shm_state = ShmState::new::<CompositorStateData>(&display_handle, vec![]);
@@ -2641,6 +2644,7 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
         pointer: None,
         pointer_location: (0.0, 0.0).into(),
         output: output.clone(),
+        output_manager_state,
         space: Space::default(),
         windows: Vec::new(),
         popups: PopupManager::default(),
