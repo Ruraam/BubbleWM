@@ -657,10 +657,11 @@ impl CompositorStateData {
                                 .states
                                 .contains(xdg_toplevel::State::Maximized)
                                 .then(|| {
-                                    let restore = entry.restore_geometry.unwrap_or(RestoreGeometry {
-                                        location: entry.location,
-                                        size: Some(entry.window.geometry().size),
-                                    });
+                                    let restore =
+                                        entry.restore_geometry.unwrap_or(RestoreGeometry {
+                                            location: entry.location,
+                                            size: Some(entry.window.geometry().size),
+                                        });
                                     (surface.clone(), entry.window.clone(), restore)
                                 })
                         })
@@ -668,10 +669,8 @@ impl CompositorStateData {
                     .collect::<Vec<_>>();
 
                 for (surface, window, restore) in maximized {
-                    if let Some(entry) = self
-                        .windows
-                        .iter_mut()
-                        .find(|entry| entry.window == window)
+                    if let Some(entry) =
+                        self.windows.iter_mut().find(|entry| entry.window == window)
                     {
                         entry.restore_geometry = None;
                         if entry.tiling_restore.is_none() {
