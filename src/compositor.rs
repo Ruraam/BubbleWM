@@ -2135,6 +2135,9 @@ impl WlrLayerShellHandler for CompositorStateData {
             self.focus_topmost_window();
         }
         self.reconfigure_maximized_windows();
+        // Reclaim or release the layer's exclusive zone immediately so tiled
+        // windows do not keep geometry from the previous work area.
+        self.arrange_tiled_windows();
         self.space.refresh();
     }
 }
