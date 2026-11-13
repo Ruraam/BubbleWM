@@ -473,7 +473,8 @@ fn render_palette(grid: &gtk::Grid, palette: &ThemePalette) {
         grid.attach(&frame, (index % 2) as i32, (index / 2) as i32, 1, 1);
     }
 }
-\n#[cfg(test)]
+
+#[cfg(test)]
 mod wallpaper_validation_tests {
     use super::*;
     use std::{
