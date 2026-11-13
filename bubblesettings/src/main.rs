@@ -11,10 +11,7 @@ use std::{
     time::Duration,
 };
 
-use bubble_ipc::{
-    Request, Response, ResponseData, ThemePalette,
-    unix::UnixIpcClient,
-};
+use bubble_ipc::{Request, Response, ResponseData, ThemePalette, unix::UnixIpcClient};
 use gtk::prelude::*;
 
 fn main() -> glib::ExitCode {
@@ -90,9 +87,7 @@ fn build_appearance_page() -> AppearancePage {
     palette_title.set_margin_top(12);
     page.append(&palette_title);
 
-    let status = gtk::Label::new(Some(
-        "Connexion au compositeur BubbleWM…",
-    ));
+    let status = gtk::Label::new(Some("Connexion au compositeur BubbleWM…"));
     status.set_halign(gtk::Align::Start);
     page.append(&status);
 
@@ -130,17 +125,19 @@ fn start_palette_monitor(grid: gtk::Grid, status: gtk::Label) {
 
     // IPC is blocking by design (bounded two-second socket timeout), so keep it
     // off GTK's main thread. The UI only receives immutable palette snapshots.
-    thread::spawn(move || loop {
-        let result = match UnixIpcClient::connect_default() {
-            Ok(mut client) => client.request(Request::GetThemePalette),
-            Err(error) => {
-                let _ = sender.try_send(Err(error));
-                thread::sleep(Duration::from_secs(1));
-                continue;
-            }
-        };
-        let _ = sender.try_send(result);
-        thread::sleep(Duration::from_secs(1));
+    thread::spawn(move || {
+        loop {
+            let result = match UnixIpcClient::connect_default() {
+                Ok(mut client) => client.request(Request::GetThemePalette),
+                Err(error) => {
+                    let _ = sender.try_send(Err(error));
+                    thread::sleep(Duration::from_secs(1));
+                    continue;
+                }
+            };
+            let _ = sender.try_send(result);
+            thread::sleep(Duration::from_secs(1));
+        }
     });
 
     let grid = RefCell::new(grid);
@@ -148,7 +145,10 @@ fn start_palette_monitor(grid: gtk::Grid, status: gtk::Label) {
     glib::timeout_add_seconds_local(1, move || {
         match receiver.try_recv() {
             Ok(Ok(Response::Success {
-                data: ResponseData::ThemePalette { palette: Some(palette) },
+                data:
+                    ResponseData::ThemePalette {
+                        palette: Some(palette),
+                    },
             })) if palette.schema_version == 1 => {
                 render_palette(&grid.borrow(), &palette);
                 status.borrow().set_text(&format!(
@@ -166,19 +166,27 @@ fn start_palette_monitor(grid: gtk::Grid, status: gtk::Label) {
             }
             Ok(Ok(Response::Failure { error })) => {
                 clear_palette(&grid.borrow());
-                status.borrow().set_text(&format!("BubbleWM : {}", error.message));
+                status
+                    .borrow()
+                    .set_text(&format!("BubbleWM : {}", error.message));
             }
             Ok(Ok(_)) => {
                 clear_palette(&grid.borrow());
-                status.borrow().set_text("Réponse IPC inattendue de BubbleWM.");
+                status
+                    .borrow()
+                    .set_text("Réponse IPC inattendue de BubbleWM.");
             }
             Ok(Err(error)) => {
                 clear_palette(&grid.borrow());
-                status.borrow().set_text(&format!("BubbleWM indisponible : {error}"));
+                status
+                    .borrow()
+                    .set_text(&format!("BubbleWM indisponible : {error}"));
             }
             Err(TryRecvError::Empty) => {}
             Err(TryRecvError::Disconnected) => {
-                status.borrow().set_text("Le service de palette est arrêté.");
+                status
+                    .borrow()
+                    .set_text("Le service de palette est arrêté.");
                 return glib::ControlFlow::Break;
             }
         }
