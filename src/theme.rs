@@ -557,7 +557,7 @@ fn dominant_color(pixels: &[Rgb]) -> Option<Rgb> {
 mod tests {
     use super::*;
     use image::{DynamicImage, ImageFormat, Rgb as ImageRgb, RgbImage};
-    use std::io::Cursor;
+    use std::{io::Cursor, path::PathBuf};
 
     fn write_test_image(directory: &std::path::Path, name: &str, format: ImageFormat) -> PathBuf {
         let image = DynamicImage::ImageRgb8(RgbImage::from_pixel(
@@ -592,8 +592,8 @@ mod tests {
     fn rejects_corrupt_and_truncated_image_data() {
         let directory = tempfile::tempdir().expect("create temporary directory");
         for (name, bytes) in [
-            ("corrupt.png", b"\\x89PNG\\r\\n\\x1a\\nnot-image-data".as_slice()),
-            ("truncated.png", b"\\x89PNG\\r\\n\\x1a\\n".as_slice()),
+            ("corrupt.png", b"\x89PNG\r\n\x1a\nnot-image-data".as_slice()),
+            ("truncated.png", b"\x89PNG\r\n\x1a\n".as_slice()),
         ] {
             let path = directory.path().join(name);
             std::fs::write(&path, bytes).expect("write invalid image");
