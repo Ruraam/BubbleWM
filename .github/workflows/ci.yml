@@ -23,6 +23,7 @@ jobs:
             libgbm-dev \
             libdrm-dev \
             libseat-dev \
+            libgtk-4-dev \
             pkg-config
       - uses: dtolnay/rust-toolchain@stable
         with:
