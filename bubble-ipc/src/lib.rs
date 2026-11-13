@@ -34,6 +34,45 @@ pub enum Request {
     WorkspacePrevious,
     WorkspaceNext,
     ActivateWorkspace { index: u32 },
+    GetSessionState,
+    GetSessionCapabilities,
+    RequestSessionAction { action: SessionAction },
+}
+
+/// Actions that a session manager may request from a native session provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionAction {
+    Lock,
+    Logout,
+    Suspend,
+    Reboot,
+    PowerOff,
+}
+
+/// Runtime kind reported by the session manager.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionEnvironment {
+    NestedDevelopment,
+    Native,
+}
+
+/// Explicit capability flags; unsupported actions must remain false.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionCapabilities {
+    pub lock: bool,
+    pub logout: bool,
+    pub suspend: bool,
+    pub reboot: bool,
+    pub power_off: bool,
+}
+
+/// Session status reported to shell and settings clients.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionState {
+    pub environment: SessionEnvironment,
+    pub action_in_progress: bool,
 }
 
 /// Response envelope matching a request ID.
@@ -58,6 +97,8 @@ pub enum Response {
 pub enum ResponseData {
     Capabilities { workspace_control: bool },
     WorkspaceState { active: u32, count: u32 },
+    SessionCapabilities { capabilities: SessionCapabilities },
+    SessionState { state: SessionState },
     Acknowledged,
 }
 
@@ -204,6 +245,22 @@ mod tests {
         write_frame(&mut bytes, &expected).expect("frame should serialize");
         let decoded: RequestEnvelope =
             read_frame(&mut Cursor::new(bytes)).expect("frame should deserialize");
+        assert_eq!(decoded, expected);
+    }
+
+    #[test]
+    fn session_action_requests_round_trip_with_typed_actions() {
+        let expected = RequestEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: 77,
+            request: Request::RequestSessionAction {
+                action: SessionAction::PowerOff,
+            },
+        };
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, &expected).expect("session request should serialize");
+        let decoded: RequestEnvelope =
+            read_frame(&mut Cursor::new(bytes)).expect("session request should deserialize");
         assert_eq!(decoded, expected);
     }
 

@@ -104,6 +104,7 @@ use smithay::{
 use tracing::info;
 
 use crate::layout::{MasterStackConfig, Rect as LayoutRect, master_stack};
+use crate::session::SessionManager;
 
 use crate::ipc::IpcRuntime;
 
@@ -1081,7 +1082,7 @@ impl CompositorStateData {
         Ok(())
     }
 
-    fn handle_ipc_request(&mut self, request: Request) -> Response {
+    fn handle_ipc_request(&mut self, request: Request, session: &SessionManager) -> Response {
         match request {
             Request::GetCapabilities => Response::Success {
                 data: ResponseData::Capabilities {
@@ -1118,6 +1119,17 @@ impl CompositorStateData {
                 },
                 Err(response) => response,
             },
+            Request::GetSessionState => Response::Success {
+                data: ResponseData::SessionState {
+                    state: session.state(),
+                },
+            },
+            Request::GetSessionCapabilities => Response::Success {
+                data: ResponseData::SessionCapabilities {
+                    capabilities: session.capabilities(),
+                },
+            },
+            Request::RequestSessionAction { action } => session.request_action(action),
         }
     }
 
@@ -2690,6 +2702,9 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
 
     // The socket is advertised before starting the IPC endpoint. If IPC setup
     // fails, dropping the listener closes the Wayland socket as startup unwinds.
+    // The Winit backend is a nested development compositor. Its session
+    // manager deliberately exposes no host power or logout actions.
+    let session_manager = SessionManager::nested_development();
     let (ipc_runtime, ipc_commands) =
         IpcRuntime::start_default().context("cannot initialize BubbleWM IPC")?;
 
@@ -2903,7 +2918,7 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
 
         // IPC commands are consumed on the compositor thread. No IPC worker
         // callback accesses Smithay state directly.
-        ipc_commands.dispatch_pending(|request| state.handle_ipc_request(request));
+        ipc_commands.dispatch_pending(|request| state.handle_ipc_request(request, &session_manager));
 
         while let Some(stream) = wayland_listener
             .accept()

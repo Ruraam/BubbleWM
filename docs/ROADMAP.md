@@ -89,3 +89,12 @@
 
 ## 1.0.0 — BubbleOS integration
 - [ ] Packaging, session integration, documentation and release hardening.
+
+## 0.11.0 — Session Manager foundation
+- [x] Add typed, versioned IPC requests for session state, capabilities and actions.
+- [x] Add a backend-independent Rust session policy layer.
+- [x] Disable host session and power actions in the nested Winit development backend.
+- [x] Test that every session action is rejected when no trusted provider is installed.
+- [ ] Add a native session provider with explicit capability detection and authorization.
+- [ ] Add lock/logout/suspend/reboot/power-off confirmation and execution flows.
+- [ ] Add an independent graphical Session Menu with keyboard accessibility and BubbleColor styling.

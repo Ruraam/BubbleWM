@@ -38,3 +38,13 @@ The compositor is still an early nested prototype. It advertises wl_compositor, 
 Protocol v1 intentionally exposes only capability discovery and workspace control; window-management operations remain compositor-local. Output-management protocols, multiple outputs, pointer cursor rendering, touch, polished/title-bearing decorations and tiling are still future work.
 
 See docs/ARCHITECTURE.md and docs/ROADMAP.md for the next integration milestones.
+
+## Session Manager protocol foundation
+
+Protocol v1 also defines typed session requests:
+
+- GetSessionState reports whether the compositor is running as a nested development session or a native session, plus whether an action is in progress.
+- GetSessionCapabilities returns explicit flags for lock, logout, suspend, reboot and power-off.
+- RequestSessionAction carries one typed SessionAction value; arbitrary shell commands are never accepted.
+
+The first implementation is deliberately policy-only. The Winit backend identifies itself as NestedDevelopment, advertises every host-session action as unavailable and rejects every action request with a structured Unavailable response. It never invokes loginctl, systemctl, pkexec or any other host command. A native session provider must be implemented and initialized before capabilities can become available. The provider must own authorization, confirmation and action execution outside the compositor render path.
