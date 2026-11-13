@@ -202,7 +202,8 @@ impl Config {
             "decoration.mode must be 'server' or 'client'"
         );
         anyhow::ensure!(
-            ["center", "contain", "cover", "zoom", "tile"].contains(&self.appearance.wallpaper_mode.as_str()),
+            ["center", "contain", "cover", "zoom", "tile"]
+                .contains(&self.appearance.wallpaper_mode.as_str()),
             "appearance.wallpaper_mode must be center, contain, cover, zoom or tile"
         );
         anyhow::ensure!(
@@ -245,7 +246,8 @@ impl Config {
             "bubble_color.palette_source must be wallpaper or manual"
         );
         anyhow::ensure!(
-            ["subtle", "balanced", "vivid", "neon"].contains(&self.bubble_color.palette_variant.as_str()),
+            ["subtle", "balanced", "vivid", "neon"]
+                .contains(&self.bubble_color.palette_variant.as_str()),
             "bubble_color.palette_variant must be subtle, balanced, vivid or neon"
         );
         Ok(())
@@ -267,7 +269,8 @@ pub fn default_path() -> Result<PathBuf> {
         }
     }
 
-    let home = std::env::var_os("HOME").context("neither absolute XDG_CONFIG_HOME nor HOME is set")?;
+    let home = std::env::var_os("HOME")
+        .context("neither absolute XDG_CONFIG_HOME nor HOME is set")?;
     Ok(PathBuf::from(home).join(".config/bubblewm/config.toml"))
 }
 
@@ -284,7 +287,8 @@ pub fn load(path: Option<&str>) -> Result<Config> {
     let raw = fs::read_to_string(&path)
         .with_context(|| format!("cannot read configuration file: {display_path}"))?;
     let config: Config =
-        toml::from_str(&raw).with_context(|| format!("invalid TOML configuration: {display_path}"))?;
+        toml::from_str(&raw)
+            .with_context(|| format!("invalid TOML configuration: {display_path}"))?;
     config.validate()?;
     Ok(config)
 }
@@ -294,9 +298,15 @@ pub fn load(path: Option<&str>) -> Result<Config> {
 /// The temporary file is created beside the destination so rename stays on one filesystem.
 /// On Unix it is private to the current user (0600). The active file is never truncated in place.
 pub fn save_atomic(path: &Path, config: &Config) -> Result<()> {
-    config.validate().context("refusing to save invalid configuration")?;
-    let serialized = toml::to_string_pretty(config).context("cannot serialize configuration")?;
-    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    config
+        .validate()
+        .context("refusing to save invalid configuration")?;
+    let serialized =
+        toml::to_string_pretty(config).context("cannot serialize configuration")?;
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     fs::create_dir_all(parent)
         .with_context(|| format!("cannot create configuration directory: {}", parent.display()))?;
 
@@ -326,13 +336,17 @@ pub fn save_atomic(path: &Path, config: &Config) -> Result<()> {
         }
     }
 
-    let temporary_path = temporary_path.context("could not allocate a unique temporary config file")?;
+    let temporary_path =
+        temporary_path.context("could not allocate a unique temporary config file")?;
     let write_result = (|| -> Result<()> {
         let mut file = temporary_file.expect("temporary path and file are created together");
-        file.write_all(serialized.as_bytes()).context("cannot write temporary configuration")?;
+        file.write_all(serialized.as_bytes())
+            .context("cannot write temporary configuration")?;
         file.sync_all().context("cannot sync temporary configuration")?;
         fs::rename(&temporary_path, path)
-            .with_context(|| format!("cannot atomically replace configuration: {}", path.display()))?;
+            .with_context(|| {
+                format!("cannot atomically replace configuration: {}", path.display())
+            })?;
         #[cfg(unix)]
         fs::File::open(parent)
             .and_then(|directory| directory.sync_all())
@@ -352,7 +366,9 @@ mod tests {
 
     #[test]
     fn defaults_are_valid() {
-        Config::default().validate().expect("default config should be valid");
+        Config::default()
+            .validate()
+            .expect("default config should be valid");
     }
 
     #[test]
@@ -407,7 +423,9 @@ mod tests {
             "#,
         )
         .expect("legacy configuration should deserialize");
-        config.validate().expect("legacy config should remain valid");
+        config
+            .validate()
+            .expect("legacy config should remain valid");
         assert_eq!(config.appearance.icon_theme, "Bubble");
         assert_eq!(config.bubble_color.engine, "bubble-color");
     }
@@ -420,7 +438,8 @@ mod tests {
         config.appearance.icon_theme = "Bubble-Neon".into();
 
         save_atomic(&path, &config).expect("save should succeed");
-        let loaded: Config = toml::from_str(&fs::read_to_string(path).expect("saved file"))
+        let loaded: Config =
+            toml::from_str(&fs::read_to_string(path).expect("saved file"))
             .expect("saved TOML should parse");
         assert_eq!(loaded.appearance.icon_theme, "Bubble-Neon");
     }
@@ -434,6 +453,9 @@ mod tests {
         config.appearance.accent_color = "not-a-color".into();
 
         assert!(save_atomic(&path, &config).is_err());
-        assert_eq!(fs::read_to_string(path).expect("existing file"), "keep me");
+        assert_eq!(
+            fs::read_to_string(path).expect("existing file"),
+            "keep me"
+        );
     }
 }
