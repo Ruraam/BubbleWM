@@ -112,12 +112,11 @@
 ## 1.0.0 — BubbleOS integration
 - [ ] Packaging, session integration, documentation and release hardening.
 
-## Bubble Icons — initial coverage expansion
-- [x] Add an original freedesktop-compatible `Bubble` icon theme with scalable SVG directories.
-- [x] Add first-party BubbleWM, BubblePanel and BubbleSettings artwork plus starter system icons.
-- [x] Add a standard-library validator for theme metadata, declared directories and SVG structure.
-- [x] Add original generic desktop icon names for common applications and system settings.
-- [ ] Expand desktop-entry aliases and audit coverage against installed applications.
+## Bubble Icons — coverage and diagnostics
+- [x] Add original scalable SVG icons and a freedesktop-compatible theme.
+- [x] Add a standard-library validator for theme metadata and SVG structure.
+- [x] Add common application-name aliases as relative SVG links and validate their targets.
+- [x] Add a read-only auditor for installed XDG desktop entries with JSON and strict modes.
+- [ ] Expand the icon inventory from real Debian/Flatpak/AppImage desktop-entry usage.
 - [ ] Design and validate Bubble Dark, Bubble Light, Bubble Neon and Bubble Glass variants.
-- [ ] Add missing-icon reporting against installed desktop entries.
 - [ ] Integrate icon-theme selection and previews into BubbleSettings.

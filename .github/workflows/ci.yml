@@ -29,6 +29,8 @@ jobs:
           components: rustfmt
       - name: Validate Bubble icon theme
         run: python3 tools/check-icons.py
+      - name: Test Bubble icon audit
+        run: python3 -m unittest discover -s tools -p 'test_*.py'
       - name: Format
         run: cargo fmt --all -- --check
       - name: Test workspace

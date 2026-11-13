@@ -4,26 +4,18 @@ Bubble is the original freedesktop-compatible icon theme for BubbleOS. Artwork i
 
 ## Install for a user
 
-Copy the `Bubble` directory to:
+Copy the `Bubble` directory to `~/.local/share/icons/Bubble`, then select **Bubble** in the desktop environment's icon-theme setting. The theme inherits from `hicolor` for icons not yet provided.
 
-```text
-~/.local/share/icons/Bubble
-```
+## Coverage and aliases
 
-Then select **Bubble** in the desktop environment's icon-theme setting. The theme inherits from `hicolor` for icons not yet provided.
+The scalable SVG set includes first-party BubbleOS artwork and generic names for common application and system roles. `aliases.json` documents common application icon names; matching relative SVG symlinks make those names resolvable by standard icon-theme lookup. Coverage remains incremental.
 
-## Current coverage
+## Validate
 
-The original scalable SVG set includes BubbleWM, BubblePanel and BubbleSettings, plus generic desktop icon names for a file manager, web browser, text editor, calculator, software installation, system monitoring, display settings, appearance settings, wireless networking and audio volume. Starter category, place and status icons are also included.
+From the repository root run `python3 tools/check-icons.py`. This validates theme metadata, SVGs and every alias target/link.
 
-This is a growing foundation, not a claim of complete coverage for every installed application. Themes should provide generic names and common desktop-entry aliases before adding application-specific artwork.
+## Audit installed applications
 
-## Validation
+Run `python3 tools/audit_icons.py` to inspect XDG application desktop entries against the repository theme. For an installed copy, pass `--theme-dir ~/.local/share/icons/Bubble`. Use `--applications-dir PATH` repeatedly for explicit application directories, `--json` for machine-readable output, or `--strict` to return status 1 when icons are missing.
 
-From the repository root:
-
-```sh
-python3 tools/check-icons.py
-```
-
-The validator checks theme metadata, declared directories and SVG XML/viewBox. Desktop-entry coverage auditing, missing-icon reporting and visual variant previews remain planned work.
+The auditor is read-only: it does not edit desktop entries, install icons or change system settings.
