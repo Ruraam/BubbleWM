@@ -151,7 +151,10 @@ mod tests {
     #[test]
     fn polling_returns_immediately_when_result_slot_is_locked() {
         let runtime = ThemeRuntime::start().expect("worker should start");
-        let guard = runtime.updates.lock().expect("result slot should be available");
+        let guard = runtime
+            .updates
+            .lock()
+            .expect("result slot should be available");
 
         assert!(runtime.try_take_update().is_none());
 
