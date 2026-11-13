@@ -1012,11 +1012,12 @@ impl CompositorStateData {
             .as_ref()
             .and_then(|pointer| {
                 pointer.with_grab(|_, grab| {
-                    grab.downcast_ref::<WindowPointerGrab>().is_some_and(|grab| {
-                        grab.window.toplevel().is_some_and(|toplevel| {
-                            family.contains(toplevel.wl_surface())
+                    grab.downcast_ref::<WindowPointerGrab>()
+                        .is_some_and(|grab| {
+                            grab.window
+                                .toplevel()
+                                .is_some_and(|toplevel| family.contains(toplevel.wl_surface()))
                         })
-                    })
                 })
             })
             .unwrap_or(false);
