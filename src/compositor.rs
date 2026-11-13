@@ -244,13 +244,18 @@ enum CompositorShortcut {
 }
 
 fn compositor_shortcut(modifiers: ModifiersState, keysym: Keysym) -> Option<CompositorShortcut> {
+    // Keep restore off the host's Super-based global shortcuts (XFCE uses
+    // Super+R for its application finder in common configurations).
+    if modifiers.ctrl && modifiers.alt && matches!(keysym, Keysym::r | Keysym::R) {
+        return Some(CompositorShortcut::Restore);
+    }
+
     if !modifiers.logo {
         return None;
     }
 
     match keysym {
         Keysym::h => Some(CompositorShortcut::Minimize),
-        Keysym::r | Keysym::R => Some(CompositorShortcut::Restore),
         Keysym::q => Some(CompositorShortcut::Close),
         Keysym::Left => Some(CompositorShortcut::WorkspacePrevious),
         Keysym::Right => Some(CompositorShortcut::WorkspaceNext),
@@ -3425,7 +3430,14 @@ mod tests {
             ..ModifiersState::default()
         };
         assert_eq!(
-            compositor_shortcut(modifiers, Keysym::r),
+            compositor_shortcut(
+                ModifiersState {
+                    ctrl: true,
+                    alt: true,
+                    ..ModifiersState::default()
+                },
+                Keysym::r
+            ),
             Some(CompositorShortcut::Restore)
         );
         assert_eq!(
