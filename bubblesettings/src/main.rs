@@ -336,7 +336,7 @@ fn validate_wallpaper_path(value: &str) -> Result<String, String> {
         .map_err(|error| format!("impossible de lire l’en-tête de l’image : {error}"))?;
     let valid_signature = match extension.as_str() {
         "png" => header.starts_with(b"\x89PNG\r\n\x1a\n"),
-        "jpg" | "jpeg" => header.starts_with(b"\xff\\xd8\xff"),
+        "jpg" | "jpeg" => header.starts_with(b"\xff\xd8\xff"),
         "webp" => {
             header.len() >= 12 && &header[0..4] == b"RIFF" && &header[8..12] == b"WEBP"
         }
@@ -510,7 +510,7 @@ mod wallpaper_validation_tests {
     }
 
     const PNG_HEADER: &[u8] = b"\x89PNG\r\n\x1a\n";
-    const JPEG_HEADER: &[u8] = b"\xff\\xd8\xff\xe0\x00\x10JFIF";
+    const JPEG_HEADER: &[u8] = b"\xff\xd8\xff\xe0\x00\x10JFIF";
     const WEBP_HEADER: &[u8] = b"RIFF\x00\x00\x00\x00WEBP";
 
     #[test]
