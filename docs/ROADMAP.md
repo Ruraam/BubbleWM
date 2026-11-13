@@ -132,6 +132,7 @@
 - [x] Start the bounded BubbleColor worker from the Winit compositor when a wallpaper is configured.
 - [x] Poll results on the compositor thread and retain the accepted immutable `ThemeDocument` snapshot.
 - [x] Reject results whose generation does not match the current request.
-- [ ] Publish the shared snapshot to BubblePanel and BubbleSettings.
+- [x] Publish the shared semantic snapshot to BubblePanel over the versioned IPC protocol.
+- [ ] Publish the shared snapshot to BubbleSettings.
 - [x] Apply semantic palette roles to server-side window decorations.
-- [ ] Apply semantic palette roles to BubblePanel surfaces.
+- [x] Apply semantic palette roles to BubblePanel surfaces.

@@ -18,6 +18,7 @@ The first implementation lives in the bubblepanel/ workspace member. It is inten
 - Pointer enter/motion/leave tracking and left-click press/release handling. A click is confirmed only when press and release target the same panel action.
 - Pointer scroll detection for vertical, horizontal and diagonal movement. Direction is resolved from high-resolution, discrete or continuous axis data.
 - BubbleWM IPC capability discovery and workspace-state queries over the authenticated per-user Unix socket.
+- Read-only polling of the compositor's versioned BubbleColor semantic palette; the panel consumes RGB tokens and never analyzes wallpaper images.
 - Workspace clicks send indexed activation requests; vertical scrolling over a workspace hit region sends previous/next requests. The panel refreshes the active indicator after successful commands.
 - IPC is optional: on other Wayland compositors, or when BubbleWM's socket is unavailable, the panel remains a visual-only client and reports that workspace control is unavailable.
 
@@ -28,6 +29,7 @@ The first implementation lives in the bubblepanel/ workspace member. It is inten
 - Real network, audio, Bluetooth, battery or notification modules.
 - Multi-monitor surface management.
 - User-facing panel configuration.
+- Live palette editing or wallpaper analysis (the panel only consumes the compositor snapshot).
 - Blur, transparency and GPU rendering.
 
 ### Development order after the prototype
