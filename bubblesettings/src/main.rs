@@ -306,8 +306,8 @@ fn validate_wallpaper_path(value: &str) -> Result<String, String> {
     let canonical = path
         .canonicalize()
         .map_err(|error| format!("impossible d’accéder au fichier : {error}"))?;
-    let mut file = File::open(&canonical)
-        .map_err(|error| format!("fichier non lisible : {error}"))?;
+    let mut file =
+        File::open(&canonical).map_err(|error| format!("fichier non lisible : {error}"))?;
     let metadata = file
         .metadata()
         .map_err(|error| format!("impossible de lire les informations du fichier : {error}"))?;
@@ -337,9 +337,7 @@ fn validate_wallpaper_path(value: &str) -> Result<String, String> {
     let valid_signature = match extension.as_str() {
         "png" => header.starts_with(b"\x89PNG\r\n\x1a\n"),
         "jpg" | "jpeg" => header.starts_with(b"\xff\xd8\xff"),
-        "webp" => {
-            header.len() >= 12 && &header[0..4] == b"RIFF" && &header[8..12] == b"WEBP"
-        }
+        "webp" => header.len() >= 12 && &header[0..4] == b"RIFF" && &header[8..12] == b"WEBP",
         _ => false,
     };
     if !valid_signature {
@@ -563,9 +561,11 @@ mod wallpaper_validation_tests {
         let file = File::create(&path).expect("create sparse file");
         file.set_len(64 * 1024 * 1024 + 1)
             .expect("size sparse file");
-        assert!(validate_wallpaper_path(path.to_str().unwrap())
-            .unwrap_err()
-            .contains("64 Mio"));
+        assert!(
+            validate_wallpaper_path(path.to_str().unwrap())
+                .unwrap_err()
+                .contains("64 Mio")
+        );
     }
 }
 
