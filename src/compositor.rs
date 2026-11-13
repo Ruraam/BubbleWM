@@ -2944,9 +2944,14 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
             clients.push(client);
         }
 
-        display
+        let dispatched = display
             .dispatch_clients(&mut state)
             .context("Wayland client dispatch failed")?;
+
+        tracing::info!(
+            dispatched,
+            "DEBUG: Wayland client requests dispatched"
+        );
         state.popups.cleanup();
         state.space.refresh();
         display
