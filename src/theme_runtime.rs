@@ -6,7 +6,7 @@
 
 use std::{
     path::{Path, PathBuf},
-    sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
+    sync::{\n        Arc, Mutex,\n        mpsc::{self, SyncSender, TrySendError},\n    },
     thread::{self, JoinHandle},
 };
 
@@ -32,7 +32,7 @@ struct ThemeRequest {
 /// wallpaper changes from creating an unbounded backlog.
 pub struct ThemeRuntime {
     requests: Option<SyncSender<ThemeRequest>>,
-    updates: Receiver<ThemeUpdate>,
+    updates: Arc<Mutex<Option<ThemeUpdate>>>,
     worker: Option<JoinHandle<()>>,
 }
 
@@ -57,7 +57,7 @@ impl ThemeRuntime {
     /// Starts the dedicated BubbleColor worker.
     pub fn start() -> std::io::Result<Self> {
         let (request_tx, request_rx) = mpsc::sync_channel::<ThemeRequest>(1);
-        let (update_tx, update_rx) = mpsc::sync_channel::<ThemeUpdate>(1);
+        let updates = Arc::new(Mutex::new(None));\n        let worker_updates = Arc::clone(&updates);
         let worker = thread::Builder::new()
             .name("bubblecolor-worker".into())
             .spawn(move || {
@@ -85,7 +85,7 @@ impl ThemeRuntime {
 
         Ok(Self {
             requests: Some(request_tx),
-            updates: update_rx,
+            updates,
             worker: Some(worker),
         })
     }
