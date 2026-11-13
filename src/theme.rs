@@ -4,7 +4,7 @@
 //! deterministic, versioned palette that the compositor, panel and settings
 //! application can consume through one shared contract.
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use image::{ImageReader, Limits};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -40,7 +40,11 @@ pub struct Rgb {
 
 impl Rgb {
     pub const BLACK: Self = Self { r: 0, g: 0, b: 0 };
-    pub const WHITE: Self = Self { r: 255, g: 255, b: 255 };
+    pub const WHITE: Self = Self {
+        r: 255,
+        g: 255,
+        b: 255,
+    };
 
     pub const fn new(r: u8, g: u8, b: u8) -> Self {
         Self { r, g, b }
@@ -49,7 +53,6 @@ impl Rgb {
     pub fn to_hex(self) -> String {
         format!("#{:02X}{:02X}{:02X}", self.r, self.g, self.b)
     }
-
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -125,10 +128,7 @@ pub struct ThemeDocument {
 
 /// Generate a theme from a local wallpaper. Decoding and sampling are bounded
 /// so a malformed or unusually large image cannot consume unbounded memory.
-pub fn generate_from_path(
-    path: impl AsRef<Path>,
-    options: &ThemeOptions,
-) -> Result<ThemeDocument> {
+pub fn generate_from_path(path: impl AsRef<Path>, options: &ThemeOptions) -> Result<ThemeDocument> {
     validate_options(options)?;
     let path = path.as_ref();
     let metadata = std::fs::metadata(path)
@@ -147,7 +147,8 @@ pub fn generate_from_path(
     let image = reader.decode().context("cannot decode wallpaper")?;
 
     generate_from_pixels(
-        image.thumbnail(SAMPLE_EDGE, SAMPLE_EDGE)
+        image
+            .thumbnail(SAMPLE_EDGE, SAMPLE_EDGE)
             .to_rgb8()
             .pixels()
             .map(|pixel| Rgb::new(pixel[0], pixel[1], pixel[2]))
@@ -207,8 +208,7 @@ pub fn generate_from_pixels(
 
 fn validate_options(options: &ThemeOptions) -> Result<()> {
     ensure!(
-        options.contrast_target.is_finite()
-            && (4.5..=7.0).contains(&options.contrast_target),
+        options.contrast_target.is_finite() && (4.5..=7.0).contains(&options.contrast_target),
         "contrast_target must be between 4.5 and 7.0"
     );
     Ok(())
@@ -216,8 +216,18 @@ fn validate_options(options: &ThemeOptions) -> Result<()> {
 
 fn build_semantic_colors(base: Hsl, options: &ThemeOptions) -> SemanticColors {
     let dark = options.mode == ColorMode::Dark;
-    let primary = accessible_tone(base, if dark { 0.78 } else { 0.40 }, options.contrast_target, dark);
-    let primary_container = accessible_tone(base, if dark { 0.30 } else { 0.88 }, options.contrast_target, !dark);
+    let primary = accessible_tone(
+        base,
+        if dark { 0.78 } else { 0.40 },
+        options.contrast_target,
+        dark,
+    );
+    let primary_container = accessible_tone(
+        base,
+        if dark { 0.30 } else { 0.88 },
+        options.contrast_target,
+        !dark,
+    );
     let secondary_hsl = Hsl {
         hue: (base.hue + 36.0).rem_euclid(360.0),
         saturation: (base.saturation * 0.72).clamp(0.25, 0.68),
@@ -228,12 +238,39 @@ fn build_semantic_colors(base: Hsl, options: &ThemeOptions) -> SemanticColors {
         saturation: (base.saturation * 0.82).clamp(0.30, 0.78),
         lightness: base.lightness,
     };
-    let secondary = accessible_tone(secondary_hsl, if dark { 0.76 } else { 0.42 }, options.contrast_target, dark);
-    let tertiary = accessible_tone(tertiary_hsl, if dark { 0.78 } else { 0.40 }, options.contrast_target, dark);
-    let background = if dark { Rgb::new(12, 14, 22) } else { Rgb::new(248, 247, 252) };
-    let surface = if dark { Rgb::new(20, 23, 34) } else { Rgb::WHITE };
-    let surface_variant = if dark { Rgb::new(39, 43, 58) } else { Rgb::new(231, 229, 239) };
-    let error = accessible_tone(Hsl::from_rgb(Rgb::new(186, 26, 26)), 0.42, options.contrast_target, dark);
+    let secondary = accessible_tone(
+        secondary_hsl,
+        if dark { 0.76 } else { 0.42 },
+        options.contrast_target,
+        dark,
+    );
+    let tertiary = accessible_tone(
+        tertiary_hsl,
+        if dark { 0.78 } else { 0.40 },
+        options.contrast_target,
+        dark,
+    );
+    let background = if dark {
+        Rgb::new(12, 14, 22)
+    } else {
+        Rgb::new(248, 247, 252)
+    };
+    let surface = if dark {
+        Rgb::new(20, 23, 34)
+    } else {
+        Rgb::WHITE
+    };
+    let surface_variant = if dark {
+        Rgb::new(39, 43, 58)
+    } else {
+        Rgb::new(231, 229, 239)
+    };
+    let error = accessible_tone(
+        Hsl::from_rgb(Rgb::new(186, 26, 26)),
+        0.42,
+        options.contrast_target,
+        dark,
+    );
 
     SemanticColors {
         primary,
@@ -250,15 +287,27 @@ fn build_semantic_colors(base: Hsl, options: &ThemeOptions) -> SemanticColors {
         on_surface: readable_foreground(surface, options.contrast_target),
         surface_variant,
         on_surface_variant: readable_foreground(surface_variant, options.contrast_target),
-        outline: if dark { Rgb::new(143, 147, 164) } else { Rgb::new(104, 101, 117) },
+        outline: if dark {
+            Rgb::new(143, 147, 164)
+        } else {
+            Rgb::new(104, 101, 117)
+        },
         error,
         on_error: readable_foreground(error, options.contrast_target),
         success: Rgb::new(46, 160, 105),
         warning: Rgb::new(210, 143, 25),
         info: Rgb::new(50, 130, 210),
         glass_tint: if dark { primary_container } else { primary },
-        glass_border: if dark { Rgb::new(95, 105, 133) } else { Rgb::new(180, 176, 199) },
-        glass_highlight: if dark { Rgb::new(185, 205, 255) } else { Rgb::WHITE },
+        glass_border: if dark {
+            Rgb::new(95, 105, 133)
+        } else {
+            Rgb::new(180, 176, 199)
+        },
+        glass_highlight: if dark {
+            Rgb::new(185, 205, 255)
+        } else {
+            Rgb::WHITE
+        },
         neon_cyan: Rgb::new(45, 225, 235),
         neon_magenta: Rgb::new(245, 65, 190),
         neon_violet: Rgb::new(165, 95, 255),
@@ -278,13 +327,16 @@ fn accessible_tone(base: Hsl, preferred: f32, target: f32, prefer_light: bool) -
             preferred * (1.0 - delta)
         };
         let candidate = base.with_lightness(lightness).to_rgb();
-        if contrast_ratio(Rgb::BLACK, candidate).max(contrast_ratio(Rgb::WHITE, candidate)) >= target {
+        if contrast_ratio(Rgb::BLACK, candidate).max(contrast_ratio(Rgb::WHITE, candidate))
+            >= target
+        {
             return candidate;
         }
     }
     // Black or white always provides at least 1:1 and the loop reaches both
     // extremes in the requested direction; this is a defensive fallback.
-    base.with_lightness(if prefer_light { 1.0 } else { 0.0 }).to_rgb()
+    base.with_lightness(if prefer_light { 1.0 } else { 0.0 })
+        .to_rgb()
 }
 
 fn readable_foreground(background: Rgb, target: f32) -> Rgb {
@@ -334,7 +386,11 @@ impl Hsl {
         let delta = max - min;
         let lightness = (max + min) / 2.0;
         if delta == 0.0 {
-            return Self { hue: 0.0, saturation: 0.0, lightness };
+            return Self {
+                hue: 0.0,
+                saturation: 0.0,
+                lightness,
+            };
         }
         let saturation = delta / (1.0 - (2.0 * lightness - 1.0).abs());
         let hue = if max == r {
@@ -344,7 +400,11 @@ impl Hsl {
         } else {
             60.0 * ((r - g) / delta + 4.0)
         };
-        Self { hue: hue.rem_euclid(360.0), saturation, lightness }
+        Self {
+            hue: hue.rem_euclid(360.0),
+            saturation,
+            lightness,
+        }
     }
 
     fn with_lightness(self, lightness: f32) -> Self {
@@ -371,7 +431,11 @@ impl Hsl {
 fn rgb_to_oklab(color: Rgb) -> [f32; 3] {
     fn linear(channel: u8) -> f32 {
         let value = channel as f32 / 255.0;
-        if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
     }
     let r = linear(color.r);
     let g = linear(color.g);
@@ -415,18 +479,34 @@ fn dominant_color(pixels: &[Rgb]) -> Option<Rgb> {
         return None;
     }
     let points: Vec<[f32; 3]> = pixels.iter().copied().map(rgb_to_oklab).collect();
-    let first = points.iter().enumerate().max_by(|(ia, a), (ib, b)| {
-        a[1].hypot(a[2]).total_cmp(&b[1].hypot(b[2])).then_with(|| ib.cmp(ia))
-    })?.0;
+    let first = points
+        .iter()
+        .enumerate()
+        .max_by(|(ia, a), (ib, b)| {
+            a[1].hypot(a[2])
+                .total_cmp(&b[1].hypot(b[2]))
+                .then_with(|| ib.cmp(ia))
+        })?
+        .0;
     let mut centers = vec![points[first]];
 
     while centers.len() < CLUSTER_COUNT.min(points.len()) {
-        let next = points.iter().enumerate().map(|(index, point)| {
-            let nearest = centers.iter().map(|center| distance(*point, *center))
-                .fold(f32::INFINITY, f32::min);
-            (index, nearest)
-        }).max_by(|(ia, da), (ib, db)| da.total_cmp(db).then_with(|| ib.cmp(ia)))?.0;
-        if centers.iter().any(|center| distance(*center, points[next]) <= f32::EPSILON) {
+        let next = points
+            .iter()
+            .enumerate()
+            .map(|(index, point)| {
+                let nearest = centers
+                    .iter()
+                    .map(|center| distance(*point, *center))
+                    .fold(f32::INFINITY, f32::min);
+                (index, nearest)
+            })
+            .max_by(|(ia, da), (ib, db)| da.total_cmp(db).then_with(|| ib.cmp(ia)))?
+            .0;
+        if centers
+            .iter()
+            .any(|center| distance(*center, points[next]) <= f32::EPSILON)
+        {
             break;
         }
         centers.push(points[next]);
@@ -437,10 +517,15 @@ fn dominant_color(pixels: &[Rgb]) -> Option<Rgb> {
         let mut sums = vec![[0.0f64; 3]; centers.len()];
         counts.fill(0);
         for point in &points {
-            let nearest = centers.iter().enumerate().min_by(|(ia, a), (ib, b)| {
-                distance(*point, **a).total_cmp(&distance(*point, **b))
-                    .then_with(|| ia.cmp(ib))
-            })?.0;
+            let nearest = centers
+                .iter()
+                .enumerate()
+                .min_by(|(ia, a), (ib, b)| {
+                    distance(*point, **a)
+                        .total_cmp(&distance(*point, **b))
+                        .then_with(|| ia.cmp(ib))
+                })?
+                .0;
             counts[nearest] += 1;
             for channel in 0..3 {
                 sums[nearest][channel] += point[channel] as f64;
@@ -455,7 +540,10 @@ fn dominant_color(pixels: &[Rgb]) -> Option<Rgb> {
         }
     }
 
-    centers.iter().enumerate().filter(|(index, _)| counts[*index] > 0)
+    centers
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| counts[*index] > 0)
         .map(|(index, center)| {
             let chroma = center[1].hypot(center[2]);
             let score = counts[index] as f32 * (0.08 + chroma * 5.0);
@@ -472,14 +560,27 @@ mod tests {
     #[test]
     fn ok_lab_round_trip_is_close_for_srgb_colors() {
         for color in [
-            Rgb::new(0, 0, 0), Rgb::WHITE, Rgb::new(255, 0, 0),
-            Rgb::new(0, 255, 0), Rgb::new(0, 0, 255),
-            Rgb::new(30, 180, 220), Rgb::new(128, 128, 128),
+            Rgb::new(0, 0, 0),
+            Rgb::WHITE,
+            Rgb::new(255, 0, 0),
+            Rgb::new(0, 255, 0),
+            Rgb::new(0, 0, 255),
+            Rgb::new(30, 180, 220),
+            Rgb::new(128, 128, 128),
         ] {
             let restored = oklab_to_rgb(rgb_to_oklab(color));
-            assert!(restored.r.abs_diff(color.r) <= 1, "{color:?} -> {restored:?}");
-            assert!(restored.g.abs_diff(color.g) <= 1, "{color:?} -> {restored:?}");
-            assert!(restored.b.abs_diff(color.b) <= 1, "{color:?} -> {restored:?}");
+            assert!(
+                restored.r.abs_diff(color.r) <= 1,
+                "{color:?} -> {restored:?}"
+            );
+            assert!(
+                restored.g.abs_diff(color.g) <= 1,
+                "{color:?} -> {restored:?}"
+            );
+            assert!(
+                restored.b.abs_diff(color.b) <= 1,
+                "{color:?} -> {restored:?}"
+            );
         }
     }
 
@@ -494,11 +595,17 @@ mod tests {
     #[test]
     fn palette_styles_have_distinct_saturation() {
         let pixels = vec![Rgb::new(30, 80, 220); 256];
-        let make = |style| generate_from_pixels(
-            pixels.clone(),
-            &ThemeOptions { style, ..ThemeOptions::default() },
-            "unit-test",
-        ).unwrap();
+        let make = |style| {
+            generate_from_pixels(
+                pixels.clone(),
+                &ThemeOptions {
+                    style,
+                    ..ThemeOptions::default()
+                },
+                "unit-test",
+            )
+            .unwrap()
+        };
         let balanced = Hsl::from_rgb(make(PaletteStyle::Balanced).colors.primary).saturation;
         let vivid = Hsl::from_rgb(make(PaletteStyle::Vivid).colors.primary).saturation;
         let muted = Hsl::from_rgb(make(PaletteStyle::Muted).colors.primary).saturation;
@@ -509,16 +616,24 @@ mod tests {
     #[test]
     fn semantic_text_pairs_meet_requested_contrast() {
         for mode in [ColorMode::Dark, ColorMode::Light] {
-            let options = ThemeOptions { mode, contrast_target: 7.0, ..ThemeOptions::default() };
-            let theme = generate_from_pixels(
-                vec![Rgb::new(220, 40, 120); 64], &options, "contrast-test",
-            ).unwrap();
+            let options = ThemeOptions {
+                mode,
+                contrast_target: 7.0,
+                ..ThemeOptions::default()
+            };
+            let theme =
+                generate_from_pixels(vec![Rgb::new(220, 40, 120); 64], &options, "contrast-test")
+                    .unwrap();
             let c = &theme.colors;
             for (foreground, background) in [
-                (c.on_background, c.background), (c.on_surface, c.surface),
-                (c.on_primary, c.primary), (c.on_primary_container, c.primary_container),
-                (c.on_secondary, c.secondary), (c.on_tertiary, c.tertiary),
-                (c.on_surface_variant, c.surface_variant), (c.on_error, c.error),
+                (c.on_background, c.background),
+                (c.on_surface, c.surface),
+                (c.on_primary, c.primary),
+                (c.on_primary_container, c.primary_container),
+                (c.on_secondary, c.secondary),
+                (c.on_tertiary, c.tertiary),
+                (c.on_surface_variant, c.surface_variant),
+                (c.on_error, c.error),
             ] {
                 assert!(contrast_ratio(foreground, background) >= 7.0);
             }
@@ -528,8 +643,11 @@ mod tests {
     #[test]
     fn grayscale_wallpaper_gets_a_stable_chromatic_accent() {
         let theme = generate_from_pixels(
-            vec![Rgb::new(128, 128, 128); 16], &ThemeOptions::default(), "gray",
-        ).unwrap();
+            vec![Rgb::new(128, 128, 128); 16],
+            &ThemeOptions::default(),
+            "gray",
+        )
+        .unwrap();
         assert_ne!(theme.colors.primary, Rgb::new(128, 128, 128));
         assert!(Hsl::from_rgb(theme.colors.primary).saturation > 0.4);
     }
@@ -537,15 +655,21 @@ mod tests {
     #[test]
     fn empty_samples_and_invalid_contrast_are_rejected() {
         assert!(generate_from_pixels(vec![], &ThemeOptions::default(), "empty").is_err());
-        let options = ThemeOptions { contrast_target: 3.0, ..ThemeOptions::default() };
+        let options = ThemeOptions {
+            contrast_target: 3.0,
+            ..ThemeOptions::default()
+        };
         assert!(generate_from_pixels(vec![Rgb::WHITE], &options, "invalid").is_err());
     }
 
     #[test]
     fn output_schema_is_versioned_and_stable() {
         let theme = generate_from_pixels(
-            vec![Rgb::new(50, 100, 200); 16], &ThemeOptions::default(), "wallpaper.png",
-        ).unwrap();
+            vec![Rgb::new(50, 100, 200); 16],
+            &ThemeOptions::default(),
+            "wallpaper.png",
+        )
+        .unwrap();
         assert_eq!(theme.schema_version, THEME_SCHEMA_VERSION);
         assert_eq!(theme.colors.primary.to_hex().len(), 7);
     }
