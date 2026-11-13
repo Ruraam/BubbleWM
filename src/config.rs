@@ -56,6 +56,7 @@ pub struct ThemeConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct AppearanceConfig {
     /// Optional image path. Wallpaper rendering is provided by a future desktop service.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub wallpaper: Option<String>,
     pub wallpaper_mode: String,
     pub icon_theme: String,
