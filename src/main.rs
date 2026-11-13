@@ -2,10 +2,9 @@
 
 #[cfg(feature = "native-backend")]
 mod backend;
-mod config;
 
 use anyhow::{Context, Result, bail};
-use bubblewm::theme::{ColorMode, PaletteStyle, ThemeOptions};
+use bubblewm::{config, theme::{ColorMode, PaletteStyle, ThemeOptions}};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
