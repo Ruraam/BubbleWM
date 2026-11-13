@@ -62,7 +62,7 @@
 - [x] Read-only BubbleColor semantic palette preview through authenticated IPC.
 - [x] Keep IPC polling off the GTK main thread and expose unavailable/empty states.
 - [ ] Searchable categories, descriptions, presets and reset controls.
-- [ ] Validated configuration editing, persistence and clear apply/restart feedback.
+- [x] Initial validated Appearance controls with atomic persistence and explicit restart feedback.\n- [ ] Live reload, per-setting restart metadata and broader configuration coverage.
 - [ ] Panel settings and module-management interface.
 - [x] The compositor remains functional without the settings app.
 
