@@ -269,8 +269,8 @@ pub fn default_path() -> Result<PathBuf> {
         }
     }
 
-    let home = std::env::var_os("HOME")
-        .context("neither absolute XDG_CONFIG_HOME nor HOME is set")?;
+    let home =
+        std::env::var_os("HOME").context("neither absolute XDG_CONFIG_HOME nor HOME is set")?;
     Ok(PathBuf::from(home).join(".config/bubblewm/config.toml"))
 }
 
@@ -286,9 +286,8 @@ pub fn load(path: Option<&str>) -> Result<Config> {
     let display_path = path.display().to_string();
     let raw = fs::read_to_string(&path)
         .with_context(|| format!("cannot read configuration file: {display_path}"))?;
-    let config: Config =
-        toml::from_str(&raw)
-            .with_context(|| format!("invalid TOML configuration: {display_path}"))?;
+    let config: Config = toml::from_str(&raw)
+        .with_context(|| format!("invalid TOML configuration: {display_path}"))?;
     config.validate()?;
     Ok(config)
 }
@@ -301,16 +300,21 @@ pub fn save_atomic(path: &Path, config: &Config) -> Result<()> {
     config
         .validate()
         .context("refusing to save invalid configuration")?;
-    let serialized =
-        toml::to_string_pretty(config).context("cannot serialize configuration")?;
+    let serialized = toml::to_string_pretty(config).context("cannot serialize configuration")?;
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
-    fs::create_dir_all(parent)
-        .with_context(|| format!("cannot create configuration directory: {}", parent.display()))?;
+    fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "cannot create configuration directory: {}",
+            parent.display()
+        )
+    })?;
 
-    let file_name = path.file_name().context("configuration path has no file name")?;
+    let file_name = path
+        .file_name()
+        .context("configuration path has no file name")?;
     let mut temporary_path = None;
     let mut temporary_file = None;
     for _ in 0..32 {
@@ -342,11 +346,14 @@ pub fn save_atomic(path: &Path, config: &Config) -> Result<()> {
         let mut file = temporary_file.expect("temporary path and file are created together");
         file.write_all(serialized.as_bytes())
             .context("cannot write temporary configuration")?;
-        file.sync_all().context("cannot sync temporary configuration")?;
-        fs::rename(&temporary_path, path)
-            .with_context(|| {
-                format!("cannot atomically replace configuration: {}", path.display())
-            })?;
+        file.sync_all()
+            .context("cannot sync temporary configuration")?;
+        fs::rename(&temporary_path, path).with_context(|| {
+            format!(
+                "cannot atomically replace configuration: {}",
+                path.display()
+            )
+        })?;
         #[cfg(unix)]
         fs::File::open(parent)
             .and_then(|directory| directory.sync_all())
@@ -453,9 +460,6 @@ mod tests {
         config.appearance.accent_color = "not-a-color".into();
 
         assert!(save_atomic(&path, &config).is_err());
-        assert_eq!(
-            fs::read_to_string(path).expect("existing file"),
-            "keep me"
-        );
+        assert_eq!(fs::read_to_string(path).expect("existing file"), "keep me");
     }
 }
