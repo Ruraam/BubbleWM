@@ -632,8 +632,7 @@ mod tests {
         // Let the server accept the incomplete request and observe EOF.
         thread::sleep(Duration::from_millis(50));
 
-        let mut valid_client =
-            UnixStream::connect(server.path()).expect("connect valid client");
+        let mut valid_client = UnixStream::connect(server.path()).expect("connect valid client");
         let request = RequestEnvelope {
             protocol_version: PROTOCOL_VERSION,
             request_id: 42,
