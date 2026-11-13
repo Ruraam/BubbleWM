@@ -54,8 +54,7 @@ pub struct LogindProbe {
 impl LogindProbe {
     /// Connects to the system bus and verifies that logind's manager is present.
     pub fn connect() -> Result<Self> {
-        let connection =
-            Connection::system().context("cannot connect to the system D-Bus")?;
+        let connection = Connection::system().context("cannot connect to the system D-Bus")?;
         let _ = manager_proxy(&connection)
             .context("systemd-logind manager is unavailable on the system bus")?;
         Ok(Self { connection })
@@ -89,13 +88,8 @@ impl LogindProbe {
 }
 
 fn manager_proxy(connection: &Connection) -> Result<Proxy<'_>> {
-    Proxy::new(
-        connection,
-        LOGIND_DESTINATION,
-        LOGIND_PATH,
-        LOGIND_MANAGER,
-    )
-    .context("cannot create systemd-logind manager proxy")
+    Proxy::new(connection, LOGIND_DESTINATION, LOGIND_PATH, LOGIND_MANAGER)
+        .context("cannot create systemd-logind manager proxy")
 }
 
 #[cfg(test)]
