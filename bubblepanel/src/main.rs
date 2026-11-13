@@ -183,6 +183,13 @@ fn main() -> Result<()> {
     let wayland_fd = connection.as_fd().as_raw_fd();
     let mut next_workspace_refresh = Instant::now() + Duration::from_secs(1);
     while !panel.closed {
+        // Flush queued Wayland requests before waiting for readable events.
+        // Otherwise the client can wait for a configure that the compositor
+        // cannot send because get_layer_surface/commit are still buffered.
+        connection
+            .flush()
+            .context("cannot flush pending Wayland requests")?;
+
         // Poll instead of blocking indefinitely so the clock and workspace
         // indicators can refresh without a background thread or frame loop.
         let mut descriptor = libc::pollfd {
