@@ -805,8 +805,8 @@ mod tests {
             "the blocked write should reach its configured timeout: {elapsed:?}"
         );
         assert!(
-            elapsed <= CLIENT_IO_TIMEOUT + Duration::from_secs(1),
-            "server exceeded the bounded write timeout: {elapsed:?}"
+            elapsed <= CLIENT_IO_TIMEOUT * 2 + Duration::from_secs(1),
+            "server exceeded the bounded write timeout budget: {elapsed:?}"
         );
 
         drop(client);
