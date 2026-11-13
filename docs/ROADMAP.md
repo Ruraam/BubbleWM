@@ -65,8 +65,13 @@
 - [ ] The compositor remains functional without the settings app.
 
 ## 0.7.0 — BubbleColor
-- [ ] Wallpaper palette extraction.
-- [ ] Contrast-aware adaptive theme and manual tuning controls.
+- [x] Native wallpaper palette engine with bounded image decoding.
+- [x] Deterministic OKLab clustering and chroma-aware subject selection.
+- [x] Dark/light semantic palette, Material-style roles and Cyberpunk Glass accents.
+- [x] Balanced, vivid and muted palette styles.
+- [x] Contrast-aware accent tones and diagnostics.
+- [ ] Manual tuning, wallpaper watching and live theme publication.
+- [ ] BubbleWM decoration and BubblePanel theme adapters.
 
 ## 0.8.0 — BubbleFX
 - [ ] Animation scheduler and easing.

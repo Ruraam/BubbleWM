@@ -4,3 +4,5 @@ pub mod compositor;
 pub mod ipc;
 pub mod layout;
 pub mod session;
+pub mod theme;
+pub mod theme_runtime;
