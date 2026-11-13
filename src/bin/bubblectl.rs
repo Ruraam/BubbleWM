@@ -10,6 +10,8 @@ enum Command {
     WorkspacePrevious,
     WorkspaceNext,
     ActivateWorkspace(u32),
+    SessionStatus,
+    SessionCapabilities,
     Help,
 }
 
@@ -21,6 +23,11 @@ fn parse_command(args: &[String]) -> Result<Command> {
         }
         [command] if command == "capabilities" => Ok(Command::Capabilities),
         [command] if command == "workspace" => Ok(Command::WorkspaceStatus),
+        [command, action] if command == "session" => match action.as_str() {
+            "status" => Ok(Command::SessionStatus),
+            "capabilities" => Ok(Command::SessionCapabilities),
+            _ => bail!("unknown session action: {action}"),
+        },
         [command, action] if command == "workspace" => match action.as_str() {
             "status" | "list" => Ok(Command::WorkspaceStatus),
             "prev" | "previous" => Ok(Command::WorkspacePrevious),
@@ -47,6 +54,8 @@ fn request_for(command: Command) -> Option<Request> {
         Command::WorkspacePrevious => Some(Request::WorkspacePrevious),
         Command::WorkspaceNext => Some(Request::WorkspaceNext),
         Command::ActivateWorkspace(index) => Some(Request::ActivateWorkspace { index }),
+        Command::SessionStatus => Some(Request::GetSessionState),
+        Command::SessionCapabilities => Some(Request::GetSessionCapabilities),
         Command::Help => None,
     }
 }
@@ -113,8 +122,11 @@ Usage:
   bubblectl workspace prev
   bubblectl workspace next
   bubblectl workspace go <number>
+  bubblectl session status
+  bubblectl session capabilities
 
-Workspace numbers are one-based. Commands require a running BubbleWM compositor."
+Workspace numbers are one-based. Session commands report the active backend and
+which session actions are currently available. Commands require a running BubbleWM compositor."
     );
 }
 
@@ -166,6 +178,19 @@ mod tests {
             parse_command(&args(&["workspace", "list"])).unwrap(),
             Command::WorkspaceStatus
         );
+    }
+
+    #[test]
+    fn session_queries_parse_as_read_only_commands() {
+        assert_eq!(
+            parse_command(&args(&["session", "status"])).unwrap(),
+            Command::SessionStatus
+        );
+        assert_eq!(
+            parse_command(&args(&["session", "capabilities"])).unwrap(),
+            Command::SessionCapabilities
+        );
+        assert!(parse_command(&args(&["session", "reboot"])).is_err());
     }
 
     #[test]
