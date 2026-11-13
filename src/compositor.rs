@@ -1731,6 +1731,8 @@ impl CompositorStateData {
         };
 
         let window = self.windows[index].window.clone();
+        let was_mapped = self.space.element_location(&window).is_some();
+        let is_transient = self.windows[index].parent_surface.is_some();
         let has_buffer =
             with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false);
         info!(
@@ -1830,6 +1832,16 @@ impl CompositorStateData {
             }
         }
         self.arrange_tiled_windows();
+
+        // A newly mapped transient can be inserted below its parent by Space.
+        // Raise the child after layout has finished so it is immediately visible.
+        if !was_mapped
+            && is_transient
+            && !self.windows[index].minimized
+            && self.windows[index].workspace == self.active_workspace
+        {
+            self.raise_window_family(&window);
+        }
     }
 
     fn begin_move(&mut self, surface: &ToplevelSurface, seat: &Seat<Self>, serial: Serial) {
