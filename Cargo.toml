@@ -23,5 +23,16 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 smithay = { version = "0.7", default-features = false, features = ["backend_winit", "wayland_frontend", "desktop"] }
 zbus = "5.19"
 
+[features]
+default = []
+# Optional native DRM/KMS dependencies. The runtime backend is not enabled yet.
+native-backend = [
+    "smithay/backend_drm",
+    "smithay/backend_gbm",
+    "smithay/backend_libinput",
+    "smithay/backend_udev",
+    "smithay/backend_session_libseat",
+]
+
 [dev-dependencies]
 tempfile = "3"

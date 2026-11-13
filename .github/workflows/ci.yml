@@ -22,6 +22,7 @@ jobs:
             libudev-dev \
             libgbm-dev \
             libdrm-dev \
+            libseat-dev \
             pkg-config
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -30,3 +31,5 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Test workspace
         run: cargo test --workspace --all-targets
+      - name: Check optional native backend dependencies
+        run: cargo check -p bubblewm --features native-backend

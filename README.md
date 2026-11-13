@@ -36,7 +36,7 @@ WAYLAND_DISPLAY=wayland-1 <your-wayland-client>
 
 Replace `wayland-1` with the exact display name printed by BubbleWM. Close the Winit window to stop the nested compositor.
 
-The Winit backend uses the host session's EGL/OpenGL environment. The native DRM/KMS backend is not implemented yet; selecting `core.backend = drm` exits with an explicit error.
+The Winit backend uses the host session's EGL/OpenGL environment. The native DRM/KMS runtime backend is not implemented yet; selecting `core.backend = drm` exits with an explicit error.
 
 ### Current compositor capabilities
 
@@ -72,7 +72,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Named cursor-theme rendering, touch input, and a complete focus/grab policy. Named cursor requests currently use the nested Winit window's default arrow as a fallback.
 - Polished decorations: the current server-side titlebar is a basic prototype with colored controls, not yet a themed titlebar with title text, icons, borders or full accessibility behavior.
 - Workspace names, per-workspace layout configuration and dynamic workspace counts.
-- Output-management protocols, multiple outputs and native DRM/KMS.
+- Output-management protocols, multiple outputs and native DRM/KMS runtime support.
 - Real system status modules, task-list integration and user-facing panel configuration.
 
 ## Terminal control
@@ -108,7 +108,20 @@ See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANE
 - Cargo.
 - A Wayland or X11 host session with working EGL/OpenGL drivers for the Winit development backend.
 - Native development libraries required by the selected Smithay backend.
-- A Wayland session with working EGL/OpenGL drivers for the Winit backend; BubblePanel can use BubbleWM's own layer-shell server.
+
+### Optional native backend build dependencies
+
+The `native-backend` Cargo feature enables Smithay's DRM, GBM, libinput, udev and libseat dependencies. It is a compile-time foundation only: it does not yet provide a runnable DRM/KMS compositor.
+
+On Debian 13, install the development packages before checking this feature:
+
+```sh
+sudo apt install libwayland-dev libxkbcommon-dev libegl1-mesa-dev libgles2-mesa-dev \
+  libinput-dev libudev-dev libgbm-dev libdrm-dev libseat-dev pkg-config
+cargo check -p bubblewm --features native-backend
+```
+
+The default build remains Winit-only and does not enable native session/device access.
 
 ## Planned subsystems
 

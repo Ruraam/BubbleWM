@@ -83,7 +83,9 @@
 - [ ] BubbleSettings integration and graceful degradation.
 
 ## 0.10.0 — Native backend
-- [ ] DRM/KMS session support.
+- [x] Add an opt-in Smithay feature set for DRM, GBM, libinput, udev and libseat.
+- [x] Add CI compile coverage for the optional native backend dependencies.
+- [ ] DRM/KMS device and connector initialization.
 - [ ] Multi-output and per-monitor settings.
 - [ ] Robustness, accessibility and performance testing.
 
