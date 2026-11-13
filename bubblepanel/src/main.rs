@@ -220,8 +220,13 @@ fn main() -> Result<()> {
         let refresh_due = now >= next_workspace_refresh;
         let (workspace_changed, theme_changed) = if refresh_due {
             next_workspace_refresh = now + Duration::from_secs(1);
-            (panel.refresh_workspace_status(), panel.refresh_theme_palette())
-        } else { (false, false) };
+            (
+                panel.refresh_workspace_status(),
+                panel.refresh_theme_palette(),
+            )
+        } else {
+            (false, false)
+        };
         let clock_changed = panel.clock_minute != current_clock_minute();
         if workspace_changed || theme_changed || clock_changed {
             panel.draw().context("cannot refresh BubblePanel")?;
@@ -382,11 +387,15 @@ impl WorkspaceIpcClient {
 
     fn query_theme_palette(&mut self) -> Result<Option<ThemePalette>> {
         match self.request(Request::GetThemePalette)? {
-            Response::Success { data: ResponseData::ThemePalette { palette } } => {
-                Ok(palette.filter(|palette| palette.schema_version == 1))
+            Response::Success {
+                data: ResponseData::ThemePalette { palette },
+            } => Ok(palette.filter(|palette| palette.schema_version == 1)),
+            Response::Failure { error } => {
+                bail!("BubbleWM theme palette query failed: {}", error.message)
             }
-            Response::Failure { error } => bail!("BubbleWM theme palette query failed: {}", error.message),
-            Response::Success { .. } => bail!("BubbleWM returned an invalid theme palette response"),
+            Response::Success { .. } => {
+                bail!("BubbleWM returned an invalid theme palette response")
+            }
         }
     }
 
@@ -463,7 +472,10 @@ impl BubblePanel {
                 self.theme_palette = palette;
                 changed
             }
-            Err(error) => { warn!(%error, "Cannot refresh BubbleColor palette for BubblePanel"); false }
+            Err(error) => {
+                tracing::debug!(%error, "Cannot refresh BubbleColor palette for BubblePanel");
+                false
+            }
         }
     }
 
@@ -512,7 +524,14 @@ impl BubblePanel {
         let background = palette.map_or(0xFF1B202B, |theme| argb(theme.surface));
         fill_rect(canvas, width, height, 0, 0, width, height, background);
         draw_brand(canvas, width, height, palette);
-        draw_workspaces(canvas, width, height, self.workspace_status.active, self.workspace_status.count, palette);
+        draw_workspaces(
+            canvas,
+            width,
+            height,
+            self.workspace_status.active,
+            self.workspace_status.count,
+            palette,
+        );
         draw_status_and_clock(canvas, width, height, palette);
 
         self.layer
@@ -840,17 +859,35 @@ fn draw_workspaces(
         let x = 82 + index * 24;
         let visible = index < workspace_count;
         let active = visible && index == active_workspace;
-        let color = if active { palette.map_or(0xFF62D6E8, |theme| argb(theme.primary)) }
-        else if visible { palette.map_or(0xFF465060, |theme| argb(theme.surface_variant)) }
-        else { palette.map_or(0xFF303744, |theme| argb(theme.outline)) };
+        let color = if active {
+            palette.map_or(0xFF62D6E8, |theme| argb(theme.primary))
+        } else if visible {
+            palette.map_or(0xFF465060, |theme| argb(theme.surface_variant))
+        } else {
+            palette.map_or(0xFF303744, |theme| argb(theme.outline))
+        };
         fill_rect(canvas, width, height, x, 14, 16, 12, color);
         if !active {
-            fill_rect(canvas, width, height, x + 3, 17, 10, 6, palette.map_or(0xFF1B202B, |theme| argb(theme.surface)));
+            fill_rect(
+                canvas,
+                width,
+                height,
+                x + 3,
+                17,
+                10,
+                6,
+                palette.map_or(0xFF1B202B, |theme| argb(theme.surface)),
+            );
         }
     }
 }
 
-fn draw_status_and_clock(canvas: &mut [u8], width: u32, height: u32, palette: Option<&ThemePalette>) {
+fn draw_status_and_clock(
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    palette: Option<&ThemePalette>,
+) {
     let clock = chrono::Local::now().format("%H:%M").to_string();
     let origin = width.saturating_sub(106);
     let accent = palette.map_or(0xFF62D6E8, |theme| argb(theme.primary));

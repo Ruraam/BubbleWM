@@ -275,20 +275,26 @@ mod tests {
             response: Response::Success {
                 data: ResponseData::ThemePalette {
                     palette: Some(ThemePalette {
-                        schema_version: 1, generation: 9,
-                        primary: [12, 34, 56], primary_container: [20, 40, 60],
-                        on_primary_container: [240, 245, 250], surface: [18, 22, 30],
-                        on_surface: [230, 235, 245], surface_variant: [38, 44, 55],
-                        outline: [90, 100, 115], warning: [240, 180, 40],
-                        success: [40, 190, 120], error: [220, 60, 70],
+                        schema_version: 1,
+                        generation: 9,
+                        primary: [12, 34, 56],
+                        primary_container: [20, 40, 60],
+                        on_primary_container: [240, 245, 250],
+                        surface: [18, 22, 30],
+                        on_surface: [230, 235, 245],
+                        surface_variant: [38, 44, 55],
+                        outline: [90, 100, 115],
+                        warning: [240, 180, 40],
+                        success: [40, 190, 120],
+                        error: [220, 60, 70],
                     }),
                 },
             },
         };
         let mut bytes = Vec::new();
         write_frame(&mut bytes, &expected).expect("theme palette should serialize");
-        let decoded: ResponseEnvelope = read_frame(&mut Cursor::new(bytes))
-            .expect("theme palette should deserialize");
+        let decoded: ResponseEnvelope =
+            read_frame(&mut Cursor::new(bytes)).expect("theme palette should deserialize");
         assert_eq!(decoded, expected);
     }
 
