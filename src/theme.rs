@@ -233,7 +233,7 @@ fn build_semantic_colors(base: Hsl, options: &ThemeOptions) -> SemanticColors {
     let background = if dark { Rgb::new(12, 14, 22) } else { Rgb::new(248, 247, 252) };
     let surface = if dark { Rgb::new(20, 23, 34) } else { Rgb::WHITE };
     let surface_variant = if dark { Rgb::new(39, 43, 58) } else { Rgb::new(231, 229, 239) };
-    let error = Rgb::new(186, 26, 26);
+    let error = accessible_tone(Hsl::from_rgb(Rgb::new(186, 26, 26)), 0.42, options.contrast_target, dark);
 
     SemanticColors {
         primary,
@@ -516,8 +516,9 @@ mod tests {
             let c = &theme.colors;
             for (foreground, background) in [
                 (c.on_background, c.background), (c.on_surface, c.surface),
-                (c.on_primary, c.primary), (c.on_secondary, c.secondary),
-                (c.on_tertiary, c.tertiary),
+                (c.on_primary, c.primary), (c.on_primary_container, c.primary_container),
+                (c.on_secondary, c.secondary), (c.on_tertiary, c.tertiary),
+                (c.on_surface_variant, c.surface_variant), (c.on_error, c.error),
             ] {
                 assert!(contrast_ratio(foreground, background) >= 7.0);
             }
