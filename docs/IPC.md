@@ -47,4 +47,6 @@ Protocol v1 also defines typed session requests:
 - GetSessionCapabilities returns explicit flags for lock, logout, suspend, reboot and power-off.
 - RequestSessionAction carries one typed SessionAction value; arbitrary shell commands are never accepted.
 
-The first implementation is deliberately policy-only. The Winit backend identifies itself as NestedDevelopment, advertises every host-session action as unavailable and rejects every action request with a structured Unavailable response. It never invokes loginctl, systemctl, pkexec or any other host command. A native session provider must be implemented and initialized before capabilities can become available. The provider must own authorization, confirmation and action execution outside the compositor render path.
+The Winit backend identifies itself as NestedDevelopment, advertises every host-session action as unavailable and rejects every action request with a structured Unavailable response. It never invokes loginctl, systemctl, pkexec or any other host command.
+
+The native session work now includes a read-only systemd-logind probe implemented with zbus over the system D-Bus. It queries CanSuspend, CanReboot and CanPowerOff. The probe is not wired into the compositor, does not execute actions, and does not change the public capability flags. Its blocking D-Bus calls must run outside the compositor event loop. A separate authorization, confirmation and execution flow is required before any action can be advertised.

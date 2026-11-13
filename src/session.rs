@@ -5,6 +5,8 @@
 //! The nested Winit backend is intentionally read-only with respect to the
 //! host session, so power and logout actions are always rejected.
 
+pub mod logind;
+
 use bubble_ipc::{
     ErrorCode, ErrorResponse, Response, SessionAction, SessionCapabilities, SessionEnvironment,
     SessionState,
@@ -39,7 +41,8 @@ impl SessionManager {
 
     /// Reports only actions backed by a real, initialized provider.
     ///
-    /// No provider is currently installed, so every action remains disabled.
+    /// The logind probe is currently read-only and cannot authorize or execute
+    /// actions, so no session action is advertised as available.
     pub const fn capabilities(&self) -> SessionCapabilities {
         SessionCapabilities {
             lock: false,

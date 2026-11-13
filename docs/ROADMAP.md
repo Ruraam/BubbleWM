@@ -87,14 +87,17 @@
 - [ ] Multi-output and per-monitor settings.
 - [ ] Robustness, accessibility and performance testing.
 
-## 1.0.0 — BubbleOS integration
-- [ ] Packaging, session integration, documentation and release hardening.
-
 ## 0.11.0 — Session Manager foundation
 - [x] Add typed, versioned IPC requests for session state, capabilities and actions.
 - [x] Add a backend-independent Rust session policy layer.
 - [x] Disable host session and power actions in the nested Winit development backend.
 - [x] Test that every session action is rejected when no trusted provider is installed.
-- [ ] Add a native session provider with explicit capability detection and authorization.
-- [ ] Add lock/logout/suspend/reboot/power-off confirmation and execution flows.
+- [x] Add a read-only systemd-logind probe over the system D-Bus.
+- [x] Parse logind's explicit yes/no/challenge/na capability responses conservatively.
+- [ ] Integrate native session detection outside the compositor event loop.
+- [ ] Add per-session lock/logout provider discovery.
+- [ ] Add authorization, confirmation and action execution flows.
 - [ ] Add an independent graphical Session Menu with keyboard accessibility and BubbleColor styling.
+
+## 1.0.0 — BubbleOS integration
+- [ ] Packaging, session integration, documentation and release hardening.
