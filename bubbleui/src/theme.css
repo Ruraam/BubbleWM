@@ -1,0 +1,18 @@
+/* BubbleUI — initial visual foundation */
+
+.bubble-button {
+    background-image: none;
+    background-color: #252b3e;
+    color: #edf1fb;
+    border: 1px solid #3a4562;
+    border-radius: 9px;
+    padding: 8px 14px;
+}
+
+.bubble-button:hover {
+    background-color: #303b58;
+}
+
+.bubble-label {
+    color: #edf1fb;
+}

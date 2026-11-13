@@ -1,0 +1,14 @@
+[package]
+name = "bubblesettings"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+license = "GPL-3.0-or-later"
+description = "Graphical settings application for the BubbleOS desktop."
+repository = "https://github.com/Ruraam/BubbleWM"
+
+[dependencies]
+bubble-ipc = { path = "../bubble-ipc" }
+bubblewm = { path = ".." }
+gtk = { package = "gtk4", version = "0.10" }
+glib = "0.21"

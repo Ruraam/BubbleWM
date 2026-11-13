@@ -556,6 +556,76 @@ fn dominant_color(pixels: &[Rgb]) -> Option<Rgb> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::{DynamicImage, ImageFormat, Rgb as ImageRgb, RgbImage};
+    use std::{io::Cursor, path::PathBuf};
+
+    fn write_test_image(directory: &std::path::Path, name: &str, format: ImageFormat) -> PathBuf {
+        let image = DynamicImage::ImageRgb8(RgbImage::from_pixel(8, 8, ImageRgb([32, 128, 220])));
+        let mut encoded = Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, format)
+            .expect("encode test image");
+        let path = directory.join(name);
+        std::fs::write(&path, encoded.into_inner()).expect("write test image");
+        path
+    }
+
+    #[test]
+    fn decodes_all_supported_wallpaper_formats() {
+        let directory = tempfile::tempdir().expect("create temporary directory");
+        for (name, format) in [
+            ("wallpaper.png", ImageFormat::Png),
+            ("wallpaper.jpg", ImageFormat::Jpeg),
+            ("wallpaper.webp", ImageFormat::WebP),
+        ] {
+            let path = write_test_image(directory.path(), name, format);
+            let theme = generate_from_path(&path, &ThemeOptions::default())
+                .unwrap_or_else(|error| panic!("failed to decode {name}: {error:#}"));
+            assert_eq!(theme.schema_version, THEME_SCHEMA_VERSION);
+            assert!(theme.diagnostics.sampled_pixels > 0);
+        }
+    }
+
+    #[test]
+    fn rejects_corrupt_and_truncated_image_data() {
+        let directory = tempfile::tempdir().expect("create temporary directory");
+        for (name, bytes) in [
+            ("corrupt.png", b"\x89PNG\r\n\x1a\nnot-image-data".as_slice()),
+            ("truncated.png", b"\x89PNG\r\n\x1a\n".as_slice()),
+        ] {
+            let path = directory.path().join(name);
+            std::fs::write(&path, bytes).expect("write invalid image");
+            assert!(
+                generate_from_path(&path, &ThemeOptions::default()).is_err(),
+                "{name} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_images_exceeding_dimension_limits() {
+        let directory = tempfile::tempdir().expect("create temporary directory");
+        let path = write_test_image(directory.path(), "oversized.png", ImageFormat::Png);
+        let mut bytes = std::fs::read(&path).expect("read encoded PNG");
+        // PNG IHDR stores width and height as big-endian u32 values.
+        bytes[16..20].copy_from_slice(&(MAX_IMAGE_EDGE + 1).to_be_bytes());
+        std::fs::write(&path, bytes).expect("write oversized PNG header");
+
+        assert!(generate_from_path(&path, &ThemeOptions::default()).is_err());
+    }
+
+    #[test]
+    fn rejects_files_larger_than_the_decode_limit_before_reading() {
+        let directory = tempfile::tempdir().expect("create temporary directory");
+        let path = directory.path().join("oversized.png");
+        let file = std::fs::File::create(&path).expect("create sparse image");
+        file.set_len(MAX_FILE_BYTES + 1)
+            .expect("extend sparse image");
+
+        let error = generate_from_path(&path, &ThemeOptions::default())
+            .expect_err("oversized image must be rejected");
+        assert!(format!("{error:#}").contains("wallpaper exceeds 64 MiB"));
+    }
 
     #[test]
     fn ok_lab_round_trip_is_close_for_srgb_colors() {
