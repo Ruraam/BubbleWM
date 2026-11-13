@@ -17,7 +17,10 @@ use smithay::{
     utils::DeviceFd,
 };
 use std::{
-    os::unix::{fs::{FileTypeExt, MetadataExt}, io::OwnedFd},
+    os::unix::{
+        fs::{FileTypeExt, MetadataExt},
+        io::OwnedFd,
+    },
     path::PathBuf,
 };
 
