@@ -50,6 +50,27 @@ Image decoding and palette generation must never run on the compositor event
 loop. The eventual integration should generate a candidate off-thread, validate
 it, then publish an immutable palette snapshot to the compositor.
 
+
+## Asynchronous generation runtime
+
+`bubblewm::theme_runtime::ThemeRuntime` provides a bounded worker-thread
+boundary around `generate_from_path`:
+
+- `start()` creates a dedicated `bubblecolor-worker` thread.
+- `request(generation, path, options)` queues work without decoding on the caller.
+- `try_take_update()` polls for a completed `ThemeDocument` without waiting.
+- Every result carries its generation number so consumers can reject stale
+  results after a newer wallpaper selection.
+- The request and result queues are bounded; the worker never blocks waiting for
+  the compositor to consume a result.
+- `shutdown()` joins the worker; dropping the runtime also performs orderly
+  shutdown.
+
+This is the asynchronous service boundary, not yet live wallpaper watching or
+visual application. The compositor must next own a runtime instance, poll it
+from its normal event loop, and publish accepted snapshots to decoration and
+panel adapters. No renderer state is accessed by the worker.
+
 ## Deliberately deferred
 
 This first engine commit does not yet change titlebar rendering, panel colors,
