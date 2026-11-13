@@ -149,6 +149,17 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
+    fn polling_returns_immediately_when_result_slot_is_locked() {
+        let runtime = ThemeRuntime::start().expect("worker should start");
+        let guard = runtime.updates.lock().expect("result slot should be available");
+
+        assert!(runtime.try_take_update().is_none());
+
+        drop(guard);
+        runtime.shutdown().expect("worker should stop cleanly");
+    }
+
+    #[test]
     fn invalid_wallpaper_returns_a_non_blocking_error_update() {
         let runtime = ThemeRuntime::start().expect("worker should start");
         runtime
