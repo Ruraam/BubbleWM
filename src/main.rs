@@ -5,6 +5,7 @@ mod backend;
 mod config;
 
 use anyhow::{Context, Result, bail};
+use bubblewm::theme::{ColorMode, PaletteStyle, ThemeOptions};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
@@ -36,8 +37,36 @@ fn main() -> Result<()> {
     tracing::info!("Configured layout: {}", config.core.layout);
 
     match config.core.backend.as_str() {
-        "winit" => bubblewm::compositor::run_winit(&config.core.layout)
-            .context("BubbleWM Winit compositor failed"),
+        "winit" => {
+            let theme_options = ThemeOptions {
+                mode: if config.appearance.color_scheme == "light" {
+                    ColorMode::Light
+                } else {
+                    ColorMode::Dark
+                },
+                style: match config.bubble_color.palette_variant.as_str() {
+                    "subtle" => PaletteStyle::Muted,
+                    "balanced" => PaletteStyle::Balanced,
+                    "vivid" | "neon" => PaletteStyle::Vivid,
+                    _ => PaletteStyle::Balanced,
+                },
+                contrast_target: if config.bubble_color.enforce_contrast {
+                    7.0
+                } else {
+                    4.5
+                },
+            };
+            let wallpaper = (config.bubble_color.enabled
+                && config.bubble_color.palette_source == "wallpaper")
+                .then_some(config.appearance.wallpaper.as_deref())
+                .flatten();
+            bubblewm::compositor::run_winit_with_theme(
+                &config.core.layout,
+                wallpaper,
+                theme_options,
+            )
+            .context("BubbleWM Winit compositor failed")
+        }
         "drm" => {
             #[cfg(feature = "native-backend")]
             {

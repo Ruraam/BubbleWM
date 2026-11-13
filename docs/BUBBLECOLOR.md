@@ -66,10 +66,23 @@ boundary around `generate_from_path`:
 - `shutdown()` joins the worker; dropping the runtime also performs orderly
   shutdown.
 
-This is the asynchronous service boundary, not yet live wallpaper watching or
-visual application. The compositor must next own a runtime instance, poll it
-from its normal event loop, and publish accepted snapshots to decoration and
-panel adapters. No renderer state is accessed by the worker.
+The Winit compositor now owns the runtime when BubbleColor is enabled and a
+wallpaper path is configured. It queues the initial generation before entering
+the event loop, polls completed results on the compositor thread, rejects
+results whose generation is no longer current, and retains the accepted
+`ThemeDocument` as an immutable `Arc` snapshot. Image decoding and analysis
+never run in the render loop. The legacy `run_winit()` entry point remains
+available and starts without a wallpaper request.
+
+The accepted snapshot now drives server-side decoration colors: focused and
+unfocused titlebars, title text, accent underline, and the minimize/maximize/
+close indicators use semantic palette roles. The previous fixed colors remain
+the fallback when no wallpaper palette is configured or generation fails.
+
+This is not yet live wallpaper watching, and BubblePanel/BubbleSettings do not
+consume the snapshot yet. The next integration step is to expose the same
+versioned snapshot to both consumers and add a supported update path for new
+wallpaper selections.
 
 ## Deliberately deferred
 

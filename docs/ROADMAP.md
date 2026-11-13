@@ -125,3 +125,13 @@
 - [ ] Expand the icon inventory from real Debian/Flatpak/AppImage desktop-entry usage.
 - [ ] Design and validate Bubble Dark, Bubble Light, Bubble Neon and Bubble Glass variants.
 - [ ] Integrate icon-theme selection and previews into BubbleSettings.
+
+
+## BubbleColor — compositor runtime hookup
+
+- [x] Start the bounded BubbleColor worker from the Winit compositor when a wallpaper is configured.
+- [x] Poll results on the compositor thread and retain the accepted immutable `ThemeDocument` snapshot.
+- [x] Reject results whose generation does not match the current request.
+- [ ] Publish the shared snapshot to BubblePanel and BubbleSettings.
+- [x] Apply semantic palette roles to server-side window decorations.
+- [ ] Apply semantic palette roles to BubblePanel surfaces.

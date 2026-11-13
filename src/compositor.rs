@@ -105,6 +105,8 @@ use tracing::info;
 
 use crate::layout::{MasterStackConfig, Rect as LayoutRect, master_stack};
 use crate::session::SessionManager;
+use crate::theme::{Rgb, ThemeDocument, ThemeOptions};
+use crate::theme_runtime::ThemeRuntime;
 
 use crate::ipc::IpcRuntime;
 
@@ -216,6 +218,9 @@ struct CompositorStateData {
     workspace_count: u32,
     suppressed_keys: Vec<u32>,
     layout_mode: LayoutMode,
+    theme_runtime: Option<ThemeRuntime>,
+    theme_generation: u64,
+    active_theme: Option<Arc<ThemeDocument>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -269,6 +274,47 @@ fn consume_shortcut_release(suppressed: &mut Vec<u32>, key_code: u32) -> bool {
 }
 
 impl CompositorStateData {
+    fn poll_bubblecolor(&mut self) {
+        loop {
+            let update = self
+                .theme_runtime
+                .as_ref()
+                .and_then(ThemeRuntime::try_take_update);
+            let Some(update) = update else {
+                break;
+            };
+
+            if !is_current_theme_generation(update.generation, self.theme_generation) {
+                tracing::debug!(
+                    received_generation = update.generation,
+                    current_generation = self.theme_generation,
+                    "Ignoring stale BubbleColor result"
+                );
+                continue;
+            }
+
+            match update.result {
+                Ok(theme) => {
+                    tracing::info!(
+                        generation = update.generation,
+                        schema_version = theme.schema_version,
+                        source = %theme.source_file,
+                        sampled_pixels = theme.diagnostics.sampled_pixels,
+                        "BubbleColor palette snapshot accepted"
+                    );
+                    self.active_theme = Some(Arc::new(theme));
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        generation = update.generation,
+                        %error,
+                        "BubbleColor palette generation failed; keeping previous snapshot"
+                    );
+                }
+            }
+        }
+    }
+
     fn remember_input_serial(&mut self, serial: Serial, surface: Option<WlSurface>) {
         let Some(surface) = surface else {
             return;
@@ -1219,11 +1265,31 @@ impl CompositorStateData {
                     .is_some_and(|surface| surface.wl_surface() == focused)
             });
 
-            let titlebar_color = if focused {
-                Color32F::new(0.16, 0.20, 0.29, 1.0)
-            } else {
-                Color32F::new(0.10, 0.12, 0.16, 1.0)
-            };
+            let palette = self.active_theme.as_deref();
+            let titlebar_color = palette
+                .map(|theme| {
+                    color32_from_rgb(if focused {
+                        theme.colors.primary_container
+                    } else {
+                        theme.colors.surface
+                    })
+                })
+                .unwrap_or_else(|| {
+                    if focused {
+                        Color32F::new(0.16, 0.20, 0.29, 1.0)
+                    } else {
+                        Color32F::new(0.10, 0.12, 0.16, 1.0)
+                    }
+                });
+            let title_color = palette
+                .map(|theme| {
+                    color32_from_rgb(if focused {
+                        theme.colors.on_primary_container
+                    } else {
+                        theme.colors.on_surface
+                    })
+                })
+                .unwrap_or(Color32F::new(0.88, 0.91, 0.96, 1.0));
             append_solid_decoration(
                 &mut elements,
                 entry.location,
@@ -1240,14 +1306,23 @@ impl CompositorStateData {
                         .and_then(|surface| toplevel_app_id(&surface))
                 })
             {
-                append_decoration_title(&mut elements, &title, entry.location, width, scale);
+                append_decoration_title(
+                    &mut elements,
+                    &title,
+                    entry.location,
+                    width,
+                    title_color,
+                    scale,
+                );
             }
             if focused {
                 append_solid_decoration(
                     &mut elements,
                     (entry.location.x, entry.location.y + TITLEBAR_HEIGHT - 2).into(),
                     (width, 2).into(),
-                    Color32F::new(0.25, 0.62, 0.95, 1.0),
+                    palette
+                        .map(|theme| color32_from_rgb(theme.colors.primary))
+                        .unwrap_or(Color32F::new(0.25, 0.62, 0.95, 1.0)),
                     scale,
                 );
             }
@@ -1262,21 +1337,27 @@ impl CompositorStateData {
                 &mut elements,
                 (minimize_x, button_y).into(),
                 (DECORATION_BUTTON_SIZE, DECORATION_BUTTON_SIZE).into(),
-                Color32F::new(0.86, 0.68, 0.24, 1.0),
+                palette
+                    .map(|theme| color32_from_rgb(theme.colors.warning))
+                    .unwrap_or(Color32F::new(0.86, 0.68, 0.24, 1.0)),
                 scale,
             );
             append_solid_decoration(
                 &mut elements,
                 (maximize_x, button_y).into(),
                 (DECORATION_BUTTON_SIZE, DECORATION_BUTTON_SIZE).into(),
-                Color32F::new(0.24, 0.68, 0.48, 1.0),
+                palette
+                    .map(|theme| color32_from_rgb(theme.colors.success))
+                    .unwrap_or(Color32F::new(0.24, 0.68, 0.48, 1.0)),
                 scale,
             );
             append_solid_decoration(
                 &mut elements,
                 (close_x, button_y).into(),
                 (DECORATION_BUTTON_SIZE, DECORATION_BUTTON_SIZE).into(),
-                Color32F::new(0.82, 0.28, 0.31, 1.0),
+                palette
+                    .map(|theme| color32_from_rgb(theme.colors.error))
+                    .unwrap_or(Color32F::new(0.82, 0.28, 0.31, 1.0)),
                 scale,
             );
         }
@@ -2207,6 +2288,7 @@ fn append_decoration_title(
     title: &str,
     window_location: Point<i32, Logical>,
     window_width: i32,
+    title_color: Color32F,
     scale: f64,
 ) {
     const GLYPH_WIDTH: i32 = 5;
@@ -2217,7 +2299,6 @@ fn append_decoration_title(
 
     let available_width = (window_width - TITLE_LEFT_PADDING - BUTTONS_RESERVED_WIDTH).max(0);
     let max_chars = (available_width / GLYPH_ADVANCE) as usize;
-    let title_color = Color32F::new(0.88, 0.91, 0.96, 1.0);
     let mut cursor_x = window_location.x + TITLE_LEFT_PADDING;
     let cursor_y = window_location.y + (TITLEBAR_HEIGHT - GLYPH_HEIGHT) / 2;
 
@@ -2308,6 +2389,19 @@ fn decoration_glyph(character: char) -> [u8; 7] {
         ' ' => [0; 7],
         _ => [14, 17, 1, 2, 4, 0, 4],
     }
+}
+
+fn rgb_channels(color: Rgb) -> [f32; 3] {
+    [
+        color.r as f32 / 255.0,
+        color.g as f32 / 255.0,
+        color.b as f32 / 255.0,
+    ]
+}
+
+fn color32_from_rgb(color: Rgb) -> Color32F {
+    let [red, green, blue] = rgb_channels(color);
+    Color32F::new(red, green, blue, 1.0)
 }
 
 fn append_solid_decoration(
@@ -2599,6 +2693,17 @@ delegate_layer_shell!(CompositorStateData);
 /// Starts the initial Winit-backed Wayland compositor and owns IPC for its
 /// complete lifetime.
 pub fn run_winit(initial_layout: &str) -> Result<()> {
+    run_winit_with_theme(initial_layout, None, ThemeOptions::default())
+}
+
+/// Starts the Winit compositor and optionally generates a wallpaper palette
+/// on the dedicated BubbleColor worker. Palette polling stays on the
+/// compositor thread and never waits for image decoding.
+pub fn run_winit_with_theme(
+    initial_layout: &str,
+    wallpaper: Option<&str>,
+    theme_options: ThemeOptions,
+) -> Result<()> {
     let (mut backend, mut winit_loop) =
         winit::init::<smithay::backend::renderer::gles::GlesRenderer>()
             .map_err(|error| anyhow!("cannot initialize the Winit/EGL backend: {error}"))?;
@@ -2642,6 +2747,33 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
     );
     output.create_global::<CompositorStateData>(&display_handle);
 
+    let mut theme_runtime = None;
+    let mut theme_generation = 0;
+    if let Some(wallpaper) = wallpaper.filter(|path| !path.trim().is_empty()) {
+        match ThemeRuntime::start() {
+            Ok(runtime) => {
+                let generation = 1;
+                match runtime.request(generation, wallpaper, theme_options) {
+                    Ok(()) => {
+                        theme_generation = generation;
+                        theme_runtime = Some(runtime);
+                        info!(
+                            wallpaper,
+                            generation, "Queued initial BubbleColor palette generation"
+                        );
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "Could not queue initial BubbleColor palette generation");
+                        let _ = runtime.shutdown();
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "Could not start BubbleColor worker; continuing without wallpaper palette");
+            }
+        }
+    }
+
     let mut state = CompositorStateData {
         display_handle: display_handle.clone(),
         compositor_state,
@@ -2682,6 +2814,9 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
         } else {
             LayoutMode::Floating
         },
+        theme_runtime,
+        theme_generation,
+        active_theme: None,
     };
     state.space.map_output(&output, (0, 0));
 
@@ -2916,6 +3051,10 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
             break;
         }
 
+        // BubbleColor results are consumed on the compositor thread. Image
+        // decoding and palette generation remain isolated on its worker.
+        state.poll_bubblecolor();
+
         // IPC commands are consumed on the compositor thread. No IPC worker
         // callback accesses Smithay state directly.
         ipc_commands
@@ -3038,11 +3177,20 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
         thread::sleep(FRAME_INTERVAL);
     }
 
+    if let Some(runtime) = state.theme_runtime.take() {
+        runtime
+            .shutdown()
+            .map_err(|_| anyhow!("BubbleColor worker panicked during shutdown"))?;
+    }
     ipc_runtime
         .shutdown()
         .context("cannot shut down the BubbleWM IPC worker")?;
     info!("BubbleWM compositor is shutting down");
     Ok(())
+}
+
+fn is_current_theme_generation(update_generation: u64, current_generation: u64) -> bool {
+    update_generation == current_generation
 }
 
 fn host_cursor_visible(status: &CursorImageStatus) -> bool {
@@ -3095,6 +3243,21 @@ fn send_frames_surface_tree(surface: &wl_surface::WlSurface, time: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rgb_channels_are_normalized_for_the_renderer() {
+        assert_eq!(
+            rgb_channels(Rgb::new(128, 64, 255)),
+            [128.0 / 255.0, 64.0 / 255.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn current_theme_generation_accepts_only_the_latest_result() {
+        assert!(is_current_theme_generation(4, 4));
+        assert!(!is_current_theme_generation(3, 4));
+        assert!(!is_current_theme_generation(5, 4));
+    }
 
     #[test]
     fn host_cursor_is_visible_only_for_named_fallback_shapes() {
