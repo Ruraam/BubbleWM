@@ -14,7 +14,7 @@ use smithay::{
         session::{Event as SessionEvent, Session, libseat::LibSeatSession},
         udev::UdevBackend,
     },
-    reexports::rustix::fs::OFlags,
+    reexports::{calloop::EventLoop, rustix::fs::OFlags},
     utils::DeviceFd,
 };
 use std::{
