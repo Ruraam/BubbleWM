@@ -3105,7 +3105,7 @@ pub fn run_winit_with_theme(
             WinitEvent::Focus(_) | WinitEvent::Redraw | WinitEvent::Input(_) => {}
         });
 
-        if matches!(status, PumpStatus::Exit(_)) {
+        if matches!(status, PumpStatus::Exit(_)) || !running {
             break;
         }
 
@@ -3235,14 +3235,16 @@ pub fn run_winit_with_theme(
         thread::sleep(FRAME_INTERVAL);
     }
 
+    // Stop accepting IPC requests before shutting down the theme worker.
+    // The IPC worker may still be waiting for an in-flight compositor reply.
+    ipc_runtime
+        .shutdown()
+        .context("cannot shut down the BubbleWM IPC worker")?;
     if let Some(runtime) = state.theme_runtime.take() {
         runtime
             .shutdown()
             .map_err(|_| anyhow!("BubbleColor worker panicked during shutdown"))?;
     }
-    ipc_runtime
-        .shutdown()
-        .context("cannot shut down the BubbleWM IPC worker")?;
     info!("BubbleWM compositor is shutting down");
     Ok(())
 }
