@@ -67,9 +67,9 @@ impl SessionManager {
             SessionEnvironment::NestedDevelopment => format!(
                 "session action '{action_name}' is disabled in the nested Winit development backend"
             ),
-            SessionEnvironment::Native => format!(
-                "session action '{action_name}' has no initialized native provider"
-            ),
+            SessionEnvironment::Native => {
+                format!("session action '{action_name}' has no initialized native provider")
+            }
         };
 
         Response::Failure {
@@ -89,10 +89,7 @@ mod tests {
     fn nested_development_reports_its_environment_without_active_actions() {
         let manager = SessionManager::nested_development();
 
-        assert_eq!(
-            manager.environment(),
-            SessionEnvironment::NestedDevelopment
-        );
+        assert_eq!(manager.environment(), SessionEnvironment::NestedDevelopment);
         assert_eq!(
             manager.state(),
             SessionState {

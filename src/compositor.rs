@@ -2918,7 +2918,8 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
 
         // IPC commands are consumed on the compositor thread. No IPC worker
         // callback accesses Smithay state directly.
-        ipc_commands.dispatch_pending(|request| state.handle_ipc_request(request, &session_manager));
+        ipc_commands
+            .dispatch_pending(|request| state.handle_ipc_request(request, &session_manager));
 
         while let Some(stream) = wayland_listener
             .accept()
