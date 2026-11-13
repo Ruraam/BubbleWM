@@ -254,11 +254,12 @@ fn connect_wallpaper_picker(
     button: &gtk::Button,
     entry: &gtk::Entry,
 ) {
+    let parent = parent.clone();
     let entry = entry.clone();
     button.connect_clicked(move |_| {
         let dialog = gtk::FileChooserNative::new(
             Some("Choisir un fond d’écran"),
-            Some(parent),
+            Some(&parent),
             gtk::FileChooserAction::Open,
             Some("Ouvrir"),
             Some("Annuler"),
@@ -275,10 +276,13 @@ fn connect_wallpaper_picker(
             if response == gtk::ResponseType::Accept {
                 match dialog.file().and_then(|file| file.path()) {
                     Some(path) => match validate_wallpaper_path(&path.to_string_lossy()) {
-                        Ok(path) => entry.set_text(&path),
+                        Ok(path) => {
+                            entry.set_text(&path);
+                            entry.set_tooltip_text(None);
+                        }
                         Err(error) => {
                             entry.set_text("");
-                            eprintln!("BubbleSettings: wallpaper rejected: {error}");
+                            entry.set_tooltip_text(Some(&format!("Image refusée : {error}")));
                         }
                     },
                     None => {
