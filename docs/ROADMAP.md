@@ -133,4 +133,5 @@
 - [x] Poll results on the compositor thread and retain the accepted immutable `ThemeDocument` snapshot.
 - [x] Reject results whose generation does not match the current request.
 - [ ] Publish the shared snapshot to BubblePanel and BubbleSettings.
-- [ ] Apply semantic palette roles to server-side decorations and panel surfaces.
+- [x] Apply semantic palette roles to server-side window decorations.
+- [ ] Apply semantic palette roles to BubblePanel surfaces.

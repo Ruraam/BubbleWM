@@ -105,7 +105,7 @@ use tracing::info;
 
 use crate::layout::{MasterStackConfig, Rect as LayoutRect, master_stack};
 use crate::session::SessionManager;
-use crate::theme::{ThemeDocument, ThemeOptions};
+use crate::theme::{Rgb, ThemeDocument, ThemeOptions};
 use crate::theme_runtime::ThemeRuntime;
 
 use crate::ipc::IpcRuntime;
@@ -1265,11 +1265,31 @@ impl CompositorStateData {
                     .is_some_and(|surface| surface.wl_surface() == focused)
             });
 
-            let titlebar_color = if focused {
-                Color32F::new(0.16, 0.20, 0.29, 1.0)
-            } else {
-                Color32F::new(0.10, 0.12, 0.16, 1.0)
-            };
+            let palette = self.active_theme.as_deref();
+            let titlebar_color = palette
+                .map(|theme| {
+                    color32_from_rgb(if focused {
+                        theme.colors.primary_container
+                    } else {
+                        theme.colors.surface
+                    })
+                })
+                .unwrap_or_else(|| {
+                    if focused {
+                        Color32F::new(0.16, 0.20, 0.29, 1.0)
+                    } else {
+                        Color32F::new(0.10, 0.12, 0.16, 1.0)
+                    }
+                });
+            let title_color = palette
+                .map(|theme| {
+                    color32_from_rgb(if focused {
+                        theme.colors.on_primary_container
+                    } else {
+                        theme.colors.on_surface
+                    })
+                })
+                .unwrap_or(Color32F::new(0.88, 0.91, 0.96, 1.0));
             append_solid_decoration(
                 &mut elements,
                 entry.location,
@@ -1286,14 +1306,23 @@ impl CompositorStateData {
                         .and_then(|surface| toplevel_app_id(&surface))
                 })
             {
-                append_decoration_title(&mut elements, &title, entry.location, width, scale);
+                append_decoration_title(
+                    &mut elements,
+                    &title,
+                    entry.location,
+                    width,
+                    title_color,
+                    scale,
+                );
             }
             if focused {
                 append_solid_decoration(
                     &mut elements,
                     (entry.location.x, entry.location.y + TITLEBAR_HEIGHT - 2).into(),
                     (width, 2).into(),
-                    Color32F::new(0.25, 0.62, 0.95, 1.0),
+                    palette
+                        .map(|theme| color32_from_rgb(theme.colors.primary))
+                        .unwrap_or(Color32F::new(0.25, 0.62, 0.95, 1.0)),
                     scale,
                 );
             }
@@ -1308,21 +1337,27 @@ impl CompositorStateData {
                 &mut elements,
                 (minimize_x, button_y).into(),
                 (DECORATION_BUTTON_SIZE, DECORATION_BUTTON_SIZE).into(),
-                Color32F::new(0.86, 0.68, 0.24, 1.0),
+                palette
+                    .map(|theme| color32_from_rgb(theme.colors.warning))
+                    .unwrap_or(Color32F::new(0.86, 0.68, 0.24, 1.0)),
                 scale,
             );
             append_solid_decoration(
                 &mut elements,
                 (maximize_x, button_y).into(),
                 (DECORATION_BUTTON_SIZE, DECORATION_BUTTON_SIZE).into(),
-                Color32F::new(0.24, 0.68, 0.48, 1.0),
+                palette
+                    .map(|theme| color32_from_rgb(theme.colors.success))
+                    .unwrap_or(Color32F::new(0.24, 0.68, 0.48, 1.0)),
                 scale,
             );
             append_solid_decoration(
                 &mut elements,
                 (close_x, button_y).into(),
                 (DECORATION_BUTTON_SIZE, DECORATION_BUTTON_SIZE).into(),
-                Color32F::new(0.82, 0.28, 0.31, 1.0),
+                palette
+                    .map(|theme| color32_from_rgb(theme.colors.error))
+                    .unwrap_or(Color32F::new(0.82, 0.28, 0.31, 1.0)),
                 scale,
             );
         }
@@ -2253,6 +2288,7 @@ fn append_decoration_title(
     title: &str,
     window_location: Point<i32, Logical>,
     window_width: i32,
+    title_color: Color32F,
     scale: f64,
 ) {
     const GLYPH_WIDTH: i32 = 5;
@@ -2263,7 +2299,6 @@ fn append_decoration_title(
 
     let available_width = (window_width - TITLE_LEFT_PADDING - BUTTONS_RESERVED_WIDTH).max(0);
     let max_chars = (available_width / GLYPH_ADVANCE) as usize;
-    let title_color = Color32F::new(0.88, 0.91, 0.96, 1.0);
     let mut cursor_x = window_location.x + TITLE_LEFT_PADDING;
     let cursor_y = window_location.y + (TITLEBAR_HEIGHT - GLYPH_HEIGHT) / 2;
 
@@ -2354,6 +2389,15 @@ fn decoration_glyph(character: char) -> [u8; 7] {
         ' ' => [0; 7],
         _ => [14, 17, 1, 2, 4, 0, 4],
     }
+}
+
+fn color32_from_rgb(color: Rgb) -> Color32F {
+    Color32F::new(
+        color.r as f32 / 255.0,
+        color.g as f32 / 255.0,
+        color.b as f32 / 255.0,
+        1.0,
+    )
 }
 
 fn append_solid_decoration(
@@ -3129,7 +3173,7 @@ pub fn run_winit_with_theme(
     if let Some(runtime) = state.theme_runtime.take() {
         runtime
             .shutdown()
-            .context("cannot shut down the BubbleColor worker")?;
+            .map_err(|_| anyhow!("BubbleColor worker panicked during shutdown"))?;
     }
     ipc_runtime
         .shutdown()
@@ -3192,6 +3236,15 @@ fn send_frames_surface_tree(surface: &wl_surface::WlSurface, time: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semantic_rgb_is_converted_to_opaque_renderer_color() {
+        let color = color32_from_rgb(Rgb::new(128, 64, 255));
+        assert!((color.r - 128.0 / 255.0).abs() < f32::EPSILON);
+        assert!((color.g - 64.0 / 255.0).abs() < f32::EPSILON);
+        assert!((color.b - 1.0).abs() < f32::EPSILON);
+        assert_eq!(color.a, 1.0);
+    }
 
     #[test]
     fn current_theme_generation_accepts_only_the_latest_result() {

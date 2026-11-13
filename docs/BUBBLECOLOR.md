@@ -74,11 +74,15 @@ results whose generation is no longer current, and retains the accepted
 never run in the render loop. The legacy `run_winit()` entry point remains
 available and starts without a wallpaper request.
 
-This is not yet live wallpaper watching or visual application: decoration and
-panel adapters do not consume the snapshot yet, and no renderer state is
-accessed by the worker. The next integration step is to expose the same
-versioned snapshot to BubblePanel and BubbleSettings, then apply semantic roles
-to compositor decorations.
+The accepted snapshot now drives server-side decoration colors: focused and
+unfocused titlebars, title text, accent underline, and the minimize/maximize/
+close indicators use semantic palette roles. The previous fixed colors remain
+the fallback when no wallpaper palette is configured or generation fails.
+
+This is not yet live wallpaper watching, and BubblePanel/BubbleSettings do not
+consume the snapshot yet. The next integration step is to expose the same
+versioned snapshot to both consumers and add a supported update path for new
+wallpaper selections.
 
 ## Deliberately deferred
 
