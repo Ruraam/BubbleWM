@@ -3183,7 +3183,9 @@ pub fn run_winit_with_theme(
                         }
                         state.handle_decoration_action(&window, action);
                     } else if state.logo_modifier_pressed && event.button_code() == 0x110 {
-                        if let Some((window, _)) = state.space.element_under(state.pointer_location) {
+                        if let Some((window, _)) =
+                            state.space.element_under(state.pointer_location)
+                        {
                             let window = window.clone();
                             if state.windows.iter().any(|entry| {
                                 entry.window == window
