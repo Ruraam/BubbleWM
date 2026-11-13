@@ -1,6 +1,8 @@
 //! BubbleWM application entry point.
 
 mod config;
+#[cfg(feature = "native-backend")]
+mod backend;
 
 use anyhow::{Context, Result, bail};
 use tracing_subscriber::EnvFilter;
@@ -22,7 +24,31 @@ fn main() -> Result<()> {
     match config.core.backend.as_str() {
         "winit" => bubblewm::compositor::run_winit(&config.core.layout)
             .context("BubbleWM Winit compositor failed"),
-        "drm" => bail!("the DRM/KMS backend is not implemented yet; use core.backend = \"winit\""),
+        "drm" => {
+            #[cfg(feature = "native-backend")]
+            {
+                let probe = backend::native::probe()
+                    .context("could not initialize the native DRM discovery probe")?;
+                tracing::info!(
+                    seat = %probe.seat,
+                    session_active = probe.session_active,
+                    drm_devices = probe.drm_devices.len(),
+                    "Native session and DRM discovery completed"
+                );
+                for path in &probe.drm_devices {
+                    tracing::info!(device = %path.display(), "DRM device discovered");
+                }
+                bail!(
+                    "native session and DRM discovery succeeded, but DRM/KMS rendering is not implemented yet"
+                );
+            }
+            #[cfg(not(feature = "native-backend"))]
+            {
+                bail!(
+                    "DRM discovery support is not compiled in; rebuild with --features native-backend"
+                );
+            }
+        }
         backend => bail!("unsupported compositor backend: {backend}"),
     }
 }

@@ -36,7 +36,7 @@ WAYLAND_DISPLAY=wayland-1 <your-wayland-client>
 
 Replace `wayland-1` with the exact display name printed by BubbleWM. Close the Winit window to stop the nested compositor.
 
-The Winit backend uses the host session's EGL/OpenGL environment. The native DRM/KMS runtime backend is not implemented yet; selecting `core.backend = drm` exits with an explicit error.
+The Winit backend uses the host session's EGL/OpenGL environment. The native DRM/KMS renderer and output lifecycle are not implemented yet. Selecting `core.backend = "drm"` with the optional native feature now performs a read-only discovery step: it acquires a libseat session and lists DRM card nodes assigned to that seat, then exits explicitly. It does not open a DRM device, change a display mode, or start a native compositor.
 
 ### Current compositor capabilities
 
@@ -72,7 +72,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Named cursor-theme rendering, touch input, and a complete focus/grab policy. Named cursor requests currently use the nested Winit window's default arrow as a fallback.
 - Polished decorations: the current server-side titlebar is a basic prototype with colored controls, not yet a themed titlebar with title text, icons, borders or full accessibility behavior.
 - Workspace names, per-workspace layout configuration and dynamic workspace counts.
-- Output-management protocols, multiple outputs and native DRM/KMS runtime support.
+- Output-management protocols, multiple outputs and native DRM/KMS rendering, connector/mode management and hotplug handling.
 - Real system status modules, task-list integration and user-facing panel configuration.
 
 ## Terminal control
@@ -111,7 +111,7 @@ See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANE
 
 ### Optional native backend build dependencies
 
-The `native-backend` Cargo feature enables Smithay's DRM, GBM, libinput, udev and libseat dependencies. It is a compile-time foundation only: it does not yet provide a runnable DRM/KMS compositor.
+The `native-backend` Cargo feature enables Smithay's DRM, GBM, libinput, udev and libseat dependencies. It also enables a diagnostic libseat/udev discovery probe; it is not yet a runnable DRM/KMS compositor.
 
 On Debian 13, install the development packages before checking this feature:
 
