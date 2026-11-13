@@ -2137,6 +2137,25 @@ impl XdgShellHandler for CompositorStateData {
         }) {
             let entry = self.windows.remove(index);
             self.space.unmap_elem(&entry.window);
+
+            // A compositor-owned move/resize grab holds a clone of its window.
+            // Cancel it immediately when that toplevel is destroyed instead
+            // of waiting for the next pointer event to notice the dead window.
+            let has_window_grab = self
+                .pointer
+                .as_ref()
+                .and_then(|pointer| {
+                    pointer.with_grab(|_, grab| {
+                        grab.downcast_ref::<WindowPointerGrab>()
+                            .is_some_and(|grab| grab.window == entry.window)
+                    })
+                })
+                .unwrap_or(false);
+            if has_window_grab {
+                if let Some(pointer) = self.pointer.clone() {
+                    pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), 0);
+                }
+            }
         }
 
         if self
