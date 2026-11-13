@@ -207,6 +207,7 @@ struct CompositorStateData {
     keyboard: Option<KeyboardHandle<Self>>,
     pointer: Option<PointerHandle<Self>>,
     pointer_location: smithay::utils::Point<f64, smithay::utils::Logical>,
+    logo_modifier_pressed: bool,
     pointer_cursor_status: CursorImageStatus,
     output: Output,
     output_manager_state: OutputManagerState,
@@ -2982,6 +2983,7 @@ pub fn run_winit_with_theme(
         keyboard: None,
         pointer: None,
         pointer_location: (0.0, 0.0).into(),
+        logo_modifier_pressed: false,
         pointer_cursor_status: CursorImageStatus::default_named(),
         output: output.clone(),
         output_manager_state,
@@ -3064,6 +3066,7 @@ pub fn run_winit_with_theme(
                         serial,
                         (event.time() / 1000) as u32,
                         |compositor, modifiers, key| {
+                            compositor.logo_modifier_pressed = modifiers.logo;
                             let keysym = key.modified_sym();
                             if event.state() == smithay::backend::input::KeyState::Pressed {
                                 if let Some(action) = compositor_shortcut(*modifiers, keysym) {
@@ -3157,6 +3160,7 @@ pub fn run_winit_with_theme(
                 }
 
                 let mut decoration_move = None;
+                let mut modifier_move = None;
                 if event.state() == ButtonState::Pressed {
                     let hit = state.decoration_hit_test(state.pointer_location);
                     info!(
@@ -3176,6 +3180,26 @@ pub fn run_winit_with_theme(
                             decoration_move = Some(window.clone());
                         }
                         state.handle_decoration_action(&window, action);
+                    } else if state.logo_modifier_pressed
+                        && event.button_code() == 0x110
+                    {
+                        if let Some((window, _)) = state.space.element_under(state.pointer_location)
+                            && state.windows.iter().any(|entry| {
+                                entry.window == window
+                                    && !entry.minimized
+                                    && entry.workspace == state.active_workspace
+                            })
+                        {
+                            let title = window
+                                .toplevel()
+                                .and_then(|surface| toplevel_title(&surface))
+                                .unwrap_or_else(|| "<untitled>".into());
+                            info!("Modifier move grab requested title={title}");
+                            state.focus_window_under_pointer(serial);
+                            modifier_move = Some(window);
+                        } else {
+                            state.focus_window_under_pointer(serial);
+                        }
                     } else {
                         state.focus_window_under_pointer(serial);
                     }
@@ -3192,6 +3216,41 @@ pub fn run_winit_with_theme(
                         },
                     );
                     pointer.frame(&mut state);
+
+                    if let Some(window) = modifier_move {
+                        if event.state() == ButtonState::Pressed && event.button_code() == 0x110 {
+                            if let Some(location) = state
+                                .windows
+                                .iter()
+                                .find(|entry| entry.window == window)
+                                .map(|entry| entry.location)
+                            {
+                                let start_data = GrabStartData {
+                                    focus: None,
+                                    button: event.button_code(),
+                                    location: state.pointer_location,
+                                };
+                                info!(
+                                    "Starting modifier move grab at ({}, {}) initial=({}, {})",
+                                    state.pointer_location.x,
+                                    state.pointer_location.y,
+                                    location.x,
+                                    location.y
+                                );
+                                pointer.set_grab(
+                                    &mut state,
+                                    WindowPointerGrab {
+                                        start_data,
+                                        window,
+                                        initial_location: location,
+                                        kind: WindowGrabKind::Move,
+                                    },
+                                    serial,
+                                    Focus::Clear,
+                                );
+                            }
+                        }
+                    }
 
                     if let Some(window) = decoration_move {
                         if event.state() == ButtonState::Pressed && event.button_code() == 0x110 {
