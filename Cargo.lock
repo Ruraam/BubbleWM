@@ -312,6 +312,7 @@ name = "bubblesettings"
 version = "0.1.0"
 dependencies = [
  "bubble-ipc",
+ "bubblewm",
  "glib",
  "gtk4",
 ]
