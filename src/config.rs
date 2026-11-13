@@ -474,7 +474,10 @@ mod tests {
         let loaded = load(Some(path.to_str().expect("UTF-8 config path")))
             .expect("saved appearance preferences should reload");
 
-        assert_eq!(loaded.appearance.wallpaper.as_deref(), Some("/home/test/Pictures/wallpaper.webp"));
+        assert_eq!(
+            loaded.appearance.wallpaper.as_deref(),
+            Some("/home/test/Pictures/wallpaper.webp")
+        );
         assert_eq!(loaded.appearance.wallpaper_mode, "cover");
         assert_eq!(loaded.appearance.icon_theme, "Bubble-Neon");
         assert_eq!(loaded.appearance.cursor_theme, "Bibata-Modern-Ice");
