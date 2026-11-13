@@ -1,0 +1,34 @@
+name: BubbleColor one-shot formatter
+
+on:
+  push:
+    branches:
+      - feature/bubblecolor-native-engine
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: "!startsWith(github.event.head_commit.message, 'style(bubblecolor): format native theme engine')"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bubblecolor-native-engine
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Apply rustfmt
+        run: cargo fmt --all
+      - name: Commit formatting when needed
+        run: |
+          if git diff --quiet; then
+            echo "Formatting is already clean."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -u
+          git commit -m "style(bubblecolor): format native theme engine"
+          git push
