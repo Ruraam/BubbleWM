@@ -2675,7 +2675,7 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
 
     let keyboard = state
         .seat
-        .add_keyboard(Default::default(), 25, 600)
+        .add_keyboard(Default::default(), 600, 25)
         .context("cannot initialize the virtual keyboard")?;
     let pointer = state.seat.add_pointer();
     state.keyboard = Some(keyboard);
