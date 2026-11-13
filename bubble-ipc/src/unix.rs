@@ -639,10 +639,11 @@ mod tests {
         drop(server);
         let mut response_byte = [0_u8; 1];
         let read_result = std::io::Read::read(&mut queued_client, &mut response_byte);
-        assert!(
-            matches!(read_result, Ok(0) | Err(ref error) if error.kind() == ErrorKind::ConnectionReset),
-            "queued client must be disconnected without a response, got {read_result:?}"
-        );
+        match read_result {
+            Ok(0) => {}
+            Err(error) if error.kind() == ErrorKind::ConnectionReset => {}
+            other => panic!("queued client must be disconnected without a response, got {other:?}"),
+        }
         assert_eq!(
             handler_calls.load(Ordering::Relaxed),
             0,
