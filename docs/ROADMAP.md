@@ -95,7 +95,8 @@
 - [x] Add a read-only systemd-logind probe over the system D-Bus.
 - [x] Parse logind's explicit yes/no/challenge/na capability responses conservatively.
 - [x] Validate the current logind session ID, owner UID, Wayland type, user class and active state.
-- [ ] Integrate native session detection through a dedicated worker outside the compositor event loop.
+- [x] Add a one-shot logind worker with a bounded result channel and non-blocking polling.
+- [ ] Integrate native session detection into the native backend through the worker, outside the compositor event loop.
 - [ ] Add per-session lock/logout provider discovery.
 - [ ] Add authorization, confirmation and action execution flows.
 - [ ] Add an independent graphical Session Menu with keyboard accessibility and BubbleColor styling.

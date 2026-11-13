@@ -6,6 +6,7 @@
 //! host session, so power and logout actions are always rejected.
 
 pub mod logind;
+pub mod worker;
 
 use bubble_ipc::{
     ErrorCode, ErrorResponse, Response, SessionAction, SessionCapabilities, SessionEnvironment,
