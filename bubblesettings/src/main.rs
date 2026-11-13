@@ -7,6 +7,7 @@
 use std::{
     cell::RefCell,
     fs::File,
+    io::Read,
     path::Path,
     rc::Rc,
     sync::mpsc::{self, TryRecvError},
@@ -305,7 +306,10 @@ fn validate_wallpaper_path(value: &str) -> Result<String, String> {
     let canonical = path
         .canonicalize()
         .map_err(|error| format!("impossible d’accéder au fichier : {error}"))?;
-    let metadata = std::fs::metadata(&canonical)
+    let mut file = File::open(&canonical)
+        .map_err(|error| format!("fichier non lisible : {error}"))?;
+    let metadata = file
+        .metadata()
         .map_err(|error| format!("impossible de lire les informations du fichier : {error}"))?;
     if !metadata.is_file() {
         return Err("la sélection n’est pas un fichier régulier".into());
@@ -322,7 +326,26 @@ fn validate_wallpaper_path(value: &str) -> Result<String, String> {
     if !["png", "jpg", "jpeg", "webp"].contains(&extension.as_str()) {
         return Err("formats acceptés : PNG, JPEG et WebP".into());
     }
-    File::open(&canonical).map_err(|error| format!("fichier non lisible : {error}"))?;
+
+    // Reject obvious extension spoofing without decoding image data in GTK.
+    // Full decoding and decompression limits remain the compositor's job.
+    let mut header = Vec::with_capacity(12);
+    file.by_ref()
+        .take(12)
+        .read_to_end(&mut header)
+        .map_err(|error| format!("impossible de lire l’en-tête de l’image : {error}"))?;
+    let valid_signature = match extension.as_str() {
+        "png" => header.starts_with(b"\\x89PNG\\r\\n\\x1a\\n"),
+        "jpg" | "jpeg" => header.starts_with(b"\\xff\\xd8\\xff"),
+        "webp" => {
+            header.len() >= 12 && &header[0..4] == b"RIFF" && &header[8..12] == b"WEBP"
+        }
+        _ => false,
+    };
+    if !valid_signature {
+        return Err("le contenu du fichier ne correspond pas à son extension".into());
+    }
+
     Ok(canonical.to_string_lossy().into_owned())
 }
 
@@ -450,3 +473,98 @@ fn render_palette(grid: &gtk::Grid, palette: &ThemePalette) {
         grid.attach(&frame, (index % 2) as i32, (index / 2) as i32, 1, 1);
     }
 }
+\n#[cfg(test)]
+mod wallpaper_validation_tests {
+    use super::*;
+    use std::{
+        fs,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
+
+    struct TestDir(std::path::PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "bubble-settings-wallpaper-{}-{}",
+                std::process::id(),
+                NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir(&path).expect("create test directory");
+            Self(path)
+        }
+
+        fn file(&self, name: &str, bytes: &[u8]) -> std::path::PathBuf {
+            let path = self.0.join(name);
+            fs::write(&path, bytes).expect("write test image");
+            path
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    const PNG_HEADER: &[u8] = b"\\x89PNG\\r\\n\\x1a\\n";
+    const JPEG_HEADER: &[u8] = b"\\xff\\xd8\\xff\\xe0\\x00\\x10JFIF";
+    const WEBP_HEADER: &[u8] = b"RIFF\\x00\\x00\\x00\\x00WEBP";
+
+    #[test]
+    fn accepts_supported_image_signatures_and_case_insensitive_extensions() {
+        let dir = TestDir::new();
+        for (name, header) in [
+            ("wallpaper.PNG", PNG_HEADER),
+            ("wallpaper.jpg", JPEG_HEADER),
+            ("wallpaper.jpeg", JPEG_HEADER),
+            ("wallpaper.webp", WEBP_HEADER),
+        ] {
+            let path = dir.file(name, header);
+            assert_eq!(
+                validate_wallpaper_path(path.to_str().expect("UTF-8 path")).unwrap(),
+                path.canonicalize().unwrap().to_string_lossy()
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_relative_and_missing_paths() {
+        assert!(validate_wallpaper_path("wallpaper.png").is_err());
+        let dir = TestDir::new();
+        let missing = dir.0.join("missing.png");
+        assert!(validate_wallpaper_path(missing.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn rejects_directories_and_unsupported_extensions() {
+        let dir = TestDir::new();
+        assert!(validate_wallpaper_path(dir.0.to_str().unwrap()).is_err());
+        let path = dir.file("wallpaper.png.txt", PNG_HEADER);
+        assert!(validate_wallpaper_path(path.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn rejects_extension_spoofing_and_truncated_headers() {
+        let dir = TestDir::new();
+        let spoofed = dir.file("wallpaper.png", b"not a PNG image");
+        assert!(validate_wallpaper_path(spoofed.to_str().unwrap()).is_err());
+        let truncated = dir.file("truncated.webp", b"RIFF");
+        assert!(validate_wallpaper_path(truncated.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn rejects_files_larger_than_64_mib() {
+        let dir = TestDir::new();
+        let path = dir.0.join("oversized.png");
+        let file = File::create(&path).expect("create sparse file");
+        file.set_len(64 * 1024 * 1024 + 1)
+            .expect("size sparse file");
+        assert!(validate_wallpaper_path(path.to_str().unwrap())
+            .unwrap_err()
+            .contains("64 Mio"));
+    }
+}
+
