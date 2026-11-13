@@ -89,7 +89,8 @@
 - [x] Open, validate and close one seat-assigned DRM card node through libseat without modesetting.
 - [x] Initialize and drop Smithay's DrmDevice while returning its descriptor through libseat; do not disable connectors or create DRM surfaces.
 - [x] Add a hardware-independent, idempotent policy state machine for libseat pause/activation events and test device-access gating.
-- [x] Register the real libseat notifier in a separate, explicit diagnostic calloop monitor and test lifecycle policy without DRM hardware.\n- [ ] Integrate session events into the native compositor and pause/drop/reopen live DRM resources on session events.
+- [x] Register the real libseat notifier in a separate, explicit diagnostic calloop monitor and test lifecycle policy without DRM hardware.
+- [ ] Integrate session events into the native compositor and pause/drop/reopen live DRM resources on session events.
 - [ ] DRM/KMS surface creation, connector/mode management and output lifecycle.
 - [ ] Multi-output and per-monitor settings.
 - [ ] Robustness, accessibility and performance testing.
@@ -111,12 +112,12 @@
 ## 1.0.0 — BubbleOS integration
 - [ ] Packaging, session integration, documentation and release hardening.
 
-
-## Bubble Icons — initial foundation
+## Bubble Icons — initial coverage expansion
 - [x] Add an original freedesktop-compatible `Bubble` icon theme with scalable SVG directories.
 - [x] Add first-party BubbleWM, BubblePanel and BubbleSettings artwork plus starter system icons.
 - [x] Add a standard-library validator for theme metadata, declared directories and SVG structure.
-- [ ] Expand application aliases and desktop-entry coverage using an auditable inventory.
+- [x] Add original generic desktop icon names for common applications and system settings.
+- [ ] Expand desktop-entry aliases and audit coverage against installed applications.
 - [ ] Design and validate Bubble Dark, Bubble Light, Bubble Neon and Bubble Glass variants.
 - [ ] Add missing-icon reporting against installed desktop entries.
 - [ ] Integrate icon-theme selection and previews into BubbleSettings.

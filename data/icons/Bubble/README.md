@@ -14,7 +14,9 @@ Then select **Bubble** in the desktop environment's icon-theme setting. The them
 
 ## Current coverage
 
-The first seed contains original scalable SVG icons for BubbleWM, BubblePanel, BubbleSettings, Terminal, system preferences, folders and information status. This is a deliberately small starting set, not a claim of complete application coverage.
+The original scalable SVG set includes BubbleWM, BubblePanel and BubbleSettings, plus generic desktop icon names for a file manager, web browser, text editor, calculator, software installation, system monitoring, display settings, appearance settings, wireless networking and audio volume. Starter category, place and status icons are also included.
+
+This is a growing foundation, not a claim of complete coverage for every installed application. Themes should provide generic names and common desktop-entry aliases before adding application-specific artwork.
 
 ## Validation
 
@@ -24,4 +26,4 @@ From the repository root:
 python3 tools/check-icons.py
 ```
 
-The validator checks the theme metadata, declared directories and SVG XML/viewBox. Desktop-entry name coverage and visual variant previews will be added as the icon inventory grows.
+The validator checks theme metadata, declared directories and SVG XML/viewBox. Desktop-entry coverage auditing, missing-icon reporting and visual variant previews remain planned work.
