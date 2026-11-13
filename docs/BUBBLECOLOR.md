@@ -76,13 +76,16 @@ available and starts without a wallpaper request.
 
 The accepted snapshot now drives server-side decoration colors: focused and
 unfocused titlebars, title text, accent underline, and the minimize/maximize/
-close indicators use semantic palette roles. The previous fixed colors remain
-the fallback when no wallpaper palette is configured or generation fails.
+close indicators use semantic palette roles. The compositor also exposes a
+small versioned semantic-color snapshot through `GetThemePalette`; BubblePanel
+consumes it over the existing authenticated per-user IPC channel. The panel
+never decodes wallpaper images or runs palette analysis itself. The previous
+fixed colors remain the fallback when no wallpaper palette is available or
+generation fails.
 
-This is not yet live wallpaper watching, and BubblePanel/BubbleSettings do not
-consume the snapshot yet. The next integration step is to expose the same
-versioned snapshot to both consumers and add a supported update path for new
-wallpaper selections.
+This is not yet live wallpaper watching or BubbleSettings integration. A
+future wallpaper selection flow must request a new compositor-owned generation
+and publish its accepted snapshot through the same IPC response.
 
 ## Deliberately deferred
 

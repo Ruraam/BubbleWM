@@ -81,6 +81,18 @@ fn print_response(client: &mut UnixIpcClient, response: Response) -> Result<()> 
             println!("Active workspace: {} / {count}", active + 1);
         }
         Response::Success {
+            data: ResponseData::ThemePalette { palette },
+        } => {
+            println!(
+                "BubbleColor palette: {}",
+                if palette.is_some() {
+                    "available"
+                } else {
+                    "unavailable"
+                }
+            );
+        }
+        Response::Success {
             data: ResponseData::SessionCapabilities { capabilities },
         } => {
             println!("Session actions:");

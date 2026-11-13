@@ -25,6 +25,7 @@ The event-loop handler must remain quick and must not perform blocking I/O. It m
 
 - GetCapabilities reports workspace_control = true.
 - GetWorkspaceState returns the active zero-based workspace index and the current workspace count.
+- GetThemePalette returns the optional, versioned semantic BubbleColor snapshot (RGB roles plus generation); it is read-only and never triggers image decoding.
 - WorkspacePrevious and WorkspaceNext switch to the adjacent workspace and wrap at either end.
 - ActivateWorkspace validates the requested zero-based index and switches to that workspace.
 - Successful state-changing requests return Acknowledged; invalid indices return InvalidRequest.

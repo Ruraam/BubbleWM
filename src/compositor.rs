@@ -13,7 +13,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow};
-use bubble_ipc::{ErrorCode, ErrorResponse, Request, Response, ResponseData};
+use bubble_ipc::{ErrorCode, ErrorResponse, Request, Response, ResponseData, ThemePalette};
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, ButtonState, Event as BackendInputEvent, InputEvent,
@@ -1139,6 +1139,64 @@ impl CompositorStateData {
                 data: ResponseData::WorkspaceState {
                     active: self.active_workspace,
                     count: self.workspace_count,
+                },
+            },
+            Request::GetThemePalette => Response::Success {
+                data: ResponseData::ThemePalette {
+                    palette: self.active_theme.as_ref().map(|theme| ThemePalette {
+                        schema_version: theme.schema_version,
+                        generation: self.theme_generation,
+                        primary: [
+                            theme.colors.primary.r,
+                            theme.colors.primary.g,
+                            theme.colors.primary.b,
+                        ],
+                        primary_container: [
+                            theme.colors.primary_container.r,
+                            theme.colors.primary_container.g,
+                            theme.colors.primary_container.b,
+                        ],
+                        on_primary_container: [
+                            theme.colors.on_primary_container.r,
+                            theme.colors.on_primary_container.g,
+                            theme.colors.on_primary_container.b,
+                        ],
+                        surface: [
+                            theme.colors.surface.r,
+                            theme.colors.surface.g,
+                            theme.colors.surface.b,
+                        ],
+                        on_surface: [
+                            theme.colors.on_surface.r,
+                            theme.colors.on_surface.g,
+                            theme.colors.on_surface.b,
+                        ],
+                        surface_variant: [
+                            theme.colors.surface_variant.r,
+                            theme.colors.surface_variant.g,
+                            theme.colors.surface_variant.b,
+                        ],
+                        outline: [
+                            theme.colors.outline.r,
+                            theme.colors.outline.g,
+                            theme.colors.outline.b,
+                        ],
+                        warning: [
+                            theme.colors.warning.r,
+                            theme.colors.warning.g,
+                            theme.colors.warning.b,
+                        ],
+                        success: [
+                            theme.colors.success.r,
+                            theme.colors.success.g,
+                            theme.colors.success.b,
+                        ],
+                        error: [
+                            theme.colors.error.r,
+                            theme.colors.error.g,
+                            theme.colors.error.b,
+                        ],
+                    }),
                 },
             },
             Request::WorkspacePrevious => {
