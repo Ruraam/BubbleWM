@@ -3246,7 +3246,10 @@ mod tests {
 
     #[test]
     fn rgb_channels_are_normalized_for_the_renderer() {
-        assert_eq!(rgb_channels(Rgb::new(128, 64, 255)), [128.0 / 255.0, 64.0 / 255.0, 1.0]);
+        assert_eq!(
+            rgb_channels(Rgb::new(128, 64, 255)),
+            [128.0 / 255.0, 64.0 / 255.0, 1.0]
+        );
     }
 
     #[test]
