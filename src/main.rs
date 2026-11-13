@@ -5,8 +5,8 @@ mod backend;
 mod config;
 
 use anyhow::{Context, Result, bail};
-use tracing_subscriber::EnvFilter;
 use bubblewm::theme::{ColorMode, PaletteStyle, ThemeOptions};
+use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -66,7 +66,7 @@ fn main() -> Result<()> {
                 theme_options,
             )
             .context("BubbleWM Winit compositor failed")
-        },
+        }
         "drm" => {
             #[cfg(feature = "native-backend")]
             {

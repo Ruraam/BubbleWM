@@ -2757,7 +2757,10 @@ pub fn run_winit_with_theme(
                     Ok(()) => {
                         theme_generation = generation;
                         theme_runtime = Some(runtime);
-                        info!(wallpaper, generation, "Queued initial BubbleColor palette generation");
+                        info!(
+                            wallpaper,
+                            generation, "Queued initial BubbleColor palette generation"
+                        );
                     }
                     Err(error) => {
                         tracing::warn!(%error, "Could not queue initial BubbleColor palette generation");
