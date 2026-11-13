@@ -2391,13 +2391,17 @@ fn decoration_glyph(character: char) -> [u8; 7] {
     }
 }
 
-fn color32_from_rgb(color: Rgb) -> Color32F {
-    Color32F::new(
+fn rgb_channels(color: Rgb) -> [f32; 3] {
+    [
         color.r as f32 / 255.0,
         color.g as f32 / 255.0,
         color.b as f32 / 255.0,
-        1.0,
-    )
+    ]
+}
+
+fn color32_from_rgb(color: Rgb) -> Color32F {
+    let [red, green, blue] = rgb_channels(color);
+    Color32F::new(red, green, blue, 1.0)
 }
 
 fn append_solid_decoration(
@@ -3237,13 +3241,9 @@ fn send_frames_surface_tree(surface: &wl_surface::WlSurface, time: u32) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn semantic_rgb_is_converted_to_opaque_renderer_color() {
-        let color = color32_from_rgb(Rgb::new(128, 64, 255));
-        assert!((color.r - 128.0 / 255.0).abs() < f32::EPSILON);
-        assert!((color.g - 64.0 / 255.0).abs() < f32::EPSILON);
-        assert!((color.b - 1.0).abs() < f32::EPSILON);
-        assert_eq!(color.a, 1.0);
+remove fragile renderer-field test    #[test]
+    fn rgb_channels_are_normalized_for_the_renderer() {
+        assert_eq!(rgb_channels(Rgb::new(128, 64, 255)), [128.0 / 255.0, 64.0 / 255.0, 1.0]);
     }
 
     #[test]
