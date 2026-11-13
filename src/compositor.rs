@@ -3168,7 +3168,9 @@ pub fn run_winit_with_theme(
                         event.button_code(),
                         state.pointer_location.x,
                         state.pointer_location.y,
-                        hit.as_ref().map(|(_, action)| format!("{action:?}")).unwrap_or_else(|| "none".into())
+                        hit.as_ref()
+                            .map(|(_, action)| format!("{action:?}"))
+                            .unwrap_or_else(|| "none".into())
                     );
                     if let Some((window, action)) = hit {
                         let title = window
@@ -3180,23 +3182,24 @@ pub fn run_winit_with_theme(
                             decoration_move = Some(window.clone());
                         }
                         state.handle_decoration_action(&window, action);
-                    } else if state.logo_modifier_pressed
-                        && event.button_code() == 0x110
-                    {
-                        if let Some((window, _)) = state.space.element_under(state.pointer_location)
-                            && state.windows.iter().any(|entry| {
+                    } else if state.logo_modifier_pressed && event.button_code() == 0x110 {
+                        if let Some((window, _)) = state.space.element_under(state.pointer_location) {
+                            let window = window.clone();
+                            if state.windows.iter().any(|entry| {
                                 entry.window == window
                                     && !entry.minimized
                                     && entry.workspace == state.active_workspace
-                            })
-                        {
-                            let title = window
-                                .toplevel()
-                                .and_then(|surface| toplevel_title(&surface))
-                                .unwrap_or_else(|| "<untitled>".into());
-                            info!("Modifier move grab requested title={title}");
-                            state.focus_window_under_pointer(serial);
-                            modifier_move = Some(window);
+                            }) {
+                                let title = window
+                                    .toplevel()
+                                    .and_then(|surface| toplevel_title(&surface))
+                                    .unwrap_or_else(|| "<untitled>".into());
+                                info!("Modifier move grab requested title={title}");
+                                state.focus_window_under_pointer(serial);
+                                modifier_move = Some(window);
+                            } else {
+                                state.focus_window_under_pointer(serial);
+                            }
                         } else {
                             state.focus_window_under_pointer(serial);
                         }
