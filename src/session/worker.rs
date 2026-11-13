@@ -11,7 +11,7 @@ use std::{
 
 use anyhow::{Context, Result};
 
-use super::logind::{ActionAvailability, LogindAvailability, LogindProbe, LogindSession};
+use super::logind::{LogindAvailability, LogindProbe, LogindSession};
 
 /// A read-only snapshot collected from systemd-logind.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,6 +95,7 @@ fn collect_snapshot() -> Result<LogindSnapshot> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::logind::ActionAvailability;
     use std::sync::mpsc;
 
     fn worker_with_result(result: Result<LogindSnapshot>) -> LogindWorker {
