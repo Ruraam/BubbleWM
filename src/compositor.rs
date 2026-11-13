@@ -3141,9 +3141,20 @@ pub fn run_winit_with_theme(
 
                 let mut decoration_move = None;
                 if event.state() == ButtonState::Pressed {
-                    if let Some((window, action)) =
-                        state.decoration_hit_test(state.pointer_location)
-                    {
+                    let hit = state.decoration_hit_test(state.pointer_location);
+                    info!(
+                        "Pointer press button={:#x} location=({}, {}) decoration_hit={}",
+                        event.button_code(),
+                        state.pointer_location.x,
+                        state.pointer_location.y,
+                        hit.as_ref().map(|(_, action)| format!("{action:?}")).unwrap_or_else(|| "none".into())
+                    );
+                    if let Some((window, action)) = hit {
+                        let title = window
+                            .toplevel()
+                            .and_then(|surface| toplevel_title(&surface))
+                            .unwrap_or_else(|| "<untitled>".into());
+                        info!("Decoration action={action:?} target={title}");
                         if action == DecorationAction::Move {
                             decoration_move = Some(window.clone());
                         }
@@ -3178,6 +3189,13 @@ pub fn run_winit_with_theme(
                                     button: event.button_code(),
                                     location: state.pointer_location,
                                 };
+                                info!(
+                                    "Starting decoration move grab at ({}, {}) initial=({}, {})",
+                                    state.pointer_location.x,
+                                    state.pointer_location.y,
+                                    location.x,
+                                    location.y
+                                );
                                 pointer.set_grab(
                                     &mut state,
                                     WindowPointerGrab {
