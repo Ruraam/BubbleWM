@@ -301,7 +301,6 @@ mod tests {
     }
 }
 
-
 /// Runs an explicit, diagnostic-only calloop monitor for libseat session events.
 ///
 /// This is intentionally separate from the Winit compositor loop. It does not
