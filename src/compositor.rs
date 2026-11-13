@@ -1155,6 +1155,30 @@ impl CompositorStateData {
             self.space.map_element(window, content_location, false);
         }
 
+        // Rebuild transient stacking after all workspace members have been
+        // mapped. Mapping in stacking_order alone is not sufficient: Space
+        // may otherwise leave a transient child below its parent.
+        let mut transient_roots = self
+            .windows
+            .iter()
+            .filter(|entry| {
+                entry.workspace == index
+                    && !entry.minimized
+                    && entry.parent_surface.is_none()
+                    && entry.window.toplevel().is_some_and(|toplevel| {
+                        with_renderer_surface_state(toplevel.wl_surface(), |state| {
+                            state.buffer().is_some()
+                        })
+                        .unwrap_or(false)
+                    })
+            })
+            .map(|entry| (entry.stacking_order, entry.window.clone()))
+            .collect::<Vec<_>>();
+        transient_roots.sort_by_key(|(order, _)| *order);
+        for (_, root) in transient_roots {
+            self.raise_window_family(&root);
+        }
+
         self.arrange_tiled_windows();
         self.focus_topmost_window();
         self.refresh_exclusive_layer_focus();
