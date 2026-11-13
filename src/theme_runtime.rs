@@ -6,7 +6,10 @@
 
 use std::{
     path::{Path, PathBuf},
-    sync::{\n        Arc, Mutex,\n        mpsc::{self, SyncSender, TrySendError},\n    },
+    sync::{
+        Arc, Mutex,
+        mpsc::{self, SyncSender, TrySendError},
+    },
     thread::{self, JoinHandle},
 };
 
@@ -57,7 +60,8 @@ impl ThemeRuntime {
     /// Starts the dedicated BubbleColor worker.
     pub fn start() -> std::io::Result<Self> {
         let (request_tx, request_rx) = mpsc::sync_channel::<ThemeRequest>(1);
-        let updates = Arc::new(Mutex::new(None));\n        let worker_updates = Arc::clone(&updates);
+        let updates = Arc::new(Mutex::new(None));
+        let worker_updates = Arc::clone(&updates);
         let worker = thread::Builder::new()
             .name("bubblecolor-worker".into())
             .spawn(move || {
@@ -74,11 +78,10 @@ impl ThemeRuntime {
                         result,
                     };
 
-                    // Never block the worker if the compositor has not polled
-                    // the previous result. A newer result supersedes it.
-                    match update_tx.try_send(update) {
-                        Ok(()) | Err(TrySendError::Disconnected(_)) => {}
-                        Err(TrySendError::Full(_)) => {}
+                    // Keep only the newest completed result. The worker never
+                    // blocks if the compositor has not polled the previous one.
+                    if let Ok(mut slot) = worker_updates.lock() {
+                        *slot = Some(update);
                     }
                 }
             })?;
@@ -114,10 +117,7 @@ impl ThemeRuntime {
 
     /// Returns a completed palette if one is ready; never waits.
     pub fn try_take_update(&self) -> Option<ThemeUpdate> {
-        match self.updates.try_recv() {
-            Ok(update) => Some(update),
-            Err(TryRecvError::Empty | TryRecvError::Disconnected) => None,
-        }
+        self.updates.lock().ok()?.take()
     }
 
     /// Stops the worker and waits for any in-flight bounded image decode to finish.
@@ -149,7 +149,11 @@ mod tests {
     fn invalid_wallpaper_returns_a_non_blocking_error_update() {
         let runtime = ThemeRuntime::start().expect("worker should start");
         runtime
-            .request(7, "/definitely/not/a/bubblewm-wallpaper.png", ThemeOptions::default())
+            .request(
+                7,
+                "/definitely/not/a/bubblewm-wallpaper.png",
+                ThemeOptions::default(),
+            )
             .expect("request should be queued");
 
         let deadline = Instant::now() + Duration::from_secs(2);
