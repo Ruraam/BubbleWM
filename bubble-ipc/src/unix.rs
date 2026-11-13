@@ -642,7 +642,9 @@ mod tests {
         match read_result {
             Ok(0) => {}
             Err(error) if error.kind() == ErrorKind::ConnectionReset => {}
-            other => panic!("queued client must be disconnected without a response, got {other:?}"),
+            other => panic!(
+                "queued client must be disconnected without a response, got {other:?}"
+            ),
         }
         assert_eq!(
             handler_calls.load(Ordering::Relaxed),
