@@ -424,7 +424,7 @@ mod tests {
     use std::{
         io::BufReader,
         os::unix::fs::PermissionsExt,
-        sync::{Arc, atomic::AtomicBool},
+        sync::{Arc, atomic::{AtomicBool, AtomicUsize}},
         time::{Duration, Instant},
     };
 
@@ -595,6 +595,59 @@ mod tests {
 
         drop(server);
         assert!(!socket_path.exists(), "IPC socket should be removed");
+    }
+
+    #[test]
+    fn shutdown_does_not_accept_queued_clients_after_current_client_finishes() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let socket_path = private_test_directory(directory.path()).join("control.sock");
+        let server = Arc::new(UnixIpcServer::bind(&socket_path).expect("bind server"));
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let handler_calls = Arc::new(AtomicUsize::new(0));
+
+        let worker_server = Arc::clone(&server);
+        let worker_shutdown = Arc::clone(&shutdown);
+        let worker_handler_calls = Arc::clone(&handler_calls);
+        let worker = thread::spawn(move || {
+            worker_server.serve_until(&worker_shutdown, move |_| {
+                worker_handler_calls.fetch_add(1, Ordering::Relaxed);
+                Response::Success {
+                    data: ResponseData::Capabilities {
+                        workspace_control: false,
+                    },
+                }
+            })
+        });
+
+        let _current_client =
+            UnixStream::connect(server.path()).expect("connect current stalled client");
+        // Ensure the server has accepted this client and is waiting for its frame.
+        thread::sleep(Duration::from_millis(50));
+
+        let mut queued_client =
+            UnixStream::connect(server.path()).expect("connect queued client");
+        queued_client
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .expect("set queued client read timeout");
+
+        shutdown.store(true, Ordering::Release);
+        worker
+            .join()
+            .expect("join server worker")
+            .expect("server should stop after the active client's bounded read");
+
+        drop(server);
+        let mut response_byte = [0_u8; 1];
+        let read_result = std::io::Read::read(&mut queued_client, &mut response_byte);
+        assert!(
+            matches!(read_result, Ok(0) | Err(ref error) if error.kind() == ErrorKind::ConnectionReset),
+            "queued client must be disconnected without a response, got {read_result:?}"
+        );
+        assert_eq!(
+            handler_calls.load(Ordering::Relaxed),
+            0,
+            "queued requests must not be dispatched after shutdown"
+        );
     }
 
     #[test]
