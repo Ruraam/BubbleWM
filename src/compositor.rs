@@ -1090,7 +1090,10 @@ impl CompositorStateData {
         }
 
         self.arrange_tiled_windows();
-        if let Some(window) = self.managed_window_for_surface(&root) {
+        // Restore and focus the originally minimized toplevel, not the
+        // family root. When restoring a transient child, raising the root
+        // would put its parent above the child and hide the restored dialog.
+        if let Some(window) = self.managed_window_for_surface(&target) {
             self.raise_window_family(&window);
             if let Some(toplevel) = window.toplevel() {
                 self.set_keyboard_focus(
