@@ -425,6 +425,7 @@ mod tests {
         io::BufReader,
         os::unix::fs::PermissionsExt,
         sync::{Arc, atomic::AtomicBool},
+        time::{Duration, Instant},
     };
 
     fn private_test_directory(base: &Path) -> PathBuf {
@@ -552,6 +553,48 @@ mod tests {
 
         shutdown.store(true, Ordering::Release);
         worker.join().expect("join server worker");
+    }
+
+    #[test]
+    fn shutdown_completes_when_client_stalls_before_sending_request() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let socket_path = private_test_directory(directory.path()).join("control.sock");
+        let server = Arc::new(UnixIpcServer::bind(&socket_path).expect("bind server"));
+        let shutdown = Arc::new(AtomicBool::new(false));
+
+        let worker_server = Arc::clone(&server);
+        let worker_shutdown = Arc::clone(&shutdown);
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+
+        let worker = thread::spawn(move || {
+            let result = worker_server.serve_until(&worker_shutdown, |_| {
+                panic!("handler must not run without a complete request");
+            });
+            let _ = finished_tx.send(result.map_err(|error| error.to_string()));
+        });
+
+        let _client = UnixStream::connect(server.path()).expect("connect stalled client");
+
+        // Give the server time to accept the connection and enter request reading.
+        thread::sleep(Duration::from_millis(50));
+
+        let started = Instant::now();
+        shutdown.store(true, Ordering::Release);
+
+        finished_rx
+            .recv_timeout(CLIENT_IO_TIMEOUT + Duration::from_secs(1))
+            .expect("server shutdown must remain bounded")
+            .expect("server should stop cleanly");
+
+        worker.join().expect("join IPC worker");
+
+        assert!(
+            started.elapsed() <= CLIENT_IO_TIMEOUT + Duration::from_secs(1),
+            "shutdown exceeded the expected bounded duration"
+        );
+
+        drop(server);
+        assert!(!socket_path.exists(), "IPC socket should be removed");
     }
 
     #[test]
