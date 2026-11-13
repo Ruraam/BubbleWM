@@ -58,11 +58,13 @@
 - [ ] Per-setting restart requirements.
 
 ## 0.6.0 — BubbleSettings
-- [ ] Dedicated graphical settings application.
+- [x] Independent GTK4 settings application foundation with Appearance and About pages.
+- [x] Read-only BubbleColor semantic palette preview through authenticated IPC.
+- [x] Keep IPC polling off the GTK main thread and expose unavailable/empty states.
 - [ ] Searchable categories, descriptions, presets and reset controls.
-- [ ] Live previews and clear apply/restart feedback.
+- [ ] Validated configuration editing, persistence and clear apply/restart feedback.
 - [ ] Panel settings and module-management interface.
-- [ ] The compositor remains functional without the settings app.
+- [x] The compositor remains functional without the settings app.
 
 ## 0.7.0 — BubbleColor
 - [x] Native wallpaper palette engine with bounded image decoding.
