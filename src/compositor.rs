@@ -850,6 +850,11 @@ impl CompositorStateData {
                 })
                 .map(|entry| (entry.location, entry.workspace))
         });
+        info!(
+            "Transient parent update parent_present={} parent_managed={}",
+            parent.is_some(),
+            parent_info.is_some()
+        );
 
         let Some(index) = self.windows.iter().position(|entry| {
             entry
@@ -862,6 +867,7 @@ impl CompositorStateData {
 
         self.windows[index].parent_surface = parent;
         let Some((parent_location, parent_workspace)) = parent_info else {
+            info!("Transient parent not managed yet; deferring child placement");
             return;
         };
 
@@ -1693,6 +1699,14 @@ impl CompositorStateData {
         let window = self.windows[index].window.clone();
         let has_buffer =
             with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false);
+        info!(
+            "Toplevel commit state workspace={} active_workspace={} minimized={} has_buffer={} mapped={}",
+            self.windows[index].workspace,
+            self.active_workspace,
+            self.windows[index].minimized,
+            has_buffer,
+            self.space.element_location(&window).is_some()
+        );
 
         if !has_buffer {
             if self.space.element_location(&window).is_some() {
