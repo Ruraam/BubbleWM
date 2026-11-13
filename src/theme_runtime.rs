@@ -117,7 +117,10 @@ impl ThemeRuntime {
 
     /// Returns a completed palette if one is ready; never waits.
     pub fn try_take_update(&self) -> Option<ThemeUpdate> {
-        self.updates.lock().ok()?.take()
+        match self.updates.try_lock() {
+            Ok(mut slot) => slot.take(),
+            Err(_) => None,
+        }
     }
 
     /// Stops the worker and waits for any in-flight bounded image decode to finish.
