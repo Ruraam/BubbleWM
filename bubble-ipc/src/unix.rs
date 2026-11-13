@@ -424,7 +424,10 @@ mod tests {
     use std::{
         io::BufReader,
         os::unix::fs::PermissionsExt,
-        sync::{Arc, atomic::{AtomicBool, AtomicUsize}},
+        sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicUsize},
+        },
         time::{Duration, Instant},
     };
 
@@ -624,8 +627,7 @@ mod tests {
         // Ensure the server has accepted this client and is waiting for its frame.
         thread::sleep(Duration::from_millis(50));
 
-        let mut queued_client =
-            UnixStream::connect(server.path()).expect("connect queued client");
+        let mut queued_client = UnixStream::connect(server.path()).expect("connect queued client");
         queued_client
             .set_read_timeout(Some(Duration::from_secs(1)))
             .expect("set queued client read timeout");
@@ -642,9 +644,7 @@ mod tests {
         match read_result {
             Ok(0) => {}
             Err(error) if error.kind() == ErrorKind::ConnectionReset => {}
-            other => panic!(
-                "queued client must be disconnected without a response, got {other:?}"
-            ),
+            other => panic!("queued client must be disconnected without a response, got {other:?}"),
         }
         assert_eq!(
             handler_calls.load(Ordering::Relaxed),
