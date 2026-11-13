@@ -272,13 +272,19 @@ pub fn default_path() -> Result<PathBuf> {
 }
 
 pub fn load(path: Option<&str>) -> Result<Config> {
-    let Some(path) = path else {
-        return Ok(Config::default());
+    let path = match path {
+        Some(path) => PathBuf::from(path),
+        None => default_path()?,
     };
-    let raw = fs::read_to_string(Path::new(path))
-        .with_context(|| format!("cannot read configuration file: {path}"))?;
+    if !path.exists() {
+        return Ok(Config::default());
+    }
+
+    let display_path = path.display().to_string();
+    let raw = fs::read_to_string(&path)
+        .with_context(|| format!("cannot read configuration file: {display_path}"))?;
     let config: Config =
-        toml::from_str(&raw).with_context(|| format!("invalid TOML configuration: {path}"))?;
+        toml::from_str(&raw).with_context(|| format!("invalid TOML configuration: {display_path}"))?;
     config.validate()?;
     Ok(config)
 }
