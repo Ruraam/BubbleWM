@@ -72,6 +72,22 @@ fn print_response(client: &mut UnixIpcClient, response: Response) -> Result<()> 
             println!("Active workspace: {} / {count}", active + 1);
         }
         Response::Success {
+            data: ResponseData::SessionCapabilities { capabilities },
+        } => {
+            println!("Session actions:");
+            println!("  Lock: {}", enabled(capabilities.lock));
+            println!("  Logout: {}", enabled(capabilities.logout));
+            println!("  Suspend: {}", enabled(capabilities.suspend));
+            println!("  Reboot: {}", enabled(capabilities.reboot));
+            println!("  Power off: {}", enabled(capabilities.power_off));
+        }
+        Response::Success {
+            data: ResponseData::SessionState { state },
+        } => {
+            println!("Session environment: {:?}", state.environment);
+            println!("Session action in progress: {}", state.action_in_progress);
+        }
+        Response::Success {
             data: ResponseData::Acknowledged,
         } => {
             let state = client
@@ -81,6 +97,10 @@ fn print_response(client: &mut UnixIpcClient, response: Response) -> Result<()> 
         }
     }
     Ok(())
+}
+
+fn enabled(value: bool) -> &'static str {
+    if value { "enabled" } else { "disabled" }
 }
 
 fn print_help() {
