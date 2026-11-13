@@ -73,3 +73,26 @@ The GUI edits a candidate configuration. The owning component validates the cand
 3. Versioned IPC with structured acknowledgements.
 4. Settings UI and searchable categories, including Panel.
 5. Live previews and per-setting restart indicators.
+
+
+## Appearance foundation
+
+The initial persisted schema reserves stable settings for the desktop appearance:
+
+- Wallpaper path and placement mode (center, contain, cover, zoom or tile).
+- Icon theme name, cursor theme and cursor size.
+- Interface and monospace font families, plus the base font size.
+- Dark, light or system color scheme and a validated hexadecimal accent color.
+- Bubble Color engine selection, palette source, palette variant and contrast enforcement.
+
+The default icon theme identifier is `Bubble`. Bubble Icons is intended to follow the freedesktop icon-theme layout and naming conventions, with scalable SVG assets, application aliases and inherited fallback themes. The first implementation must include an inventory/test tool that reports unresolved desktop-entry icon names rather than silently claiming full coverage.
+
+Bubble Color owns palette generation. Its planned inputs are the selected wallpaper or a manually chosen accent; its outputs must be shared theme tokens consumed by BubbleWM, BubblePanel and BubbleSettings. Contrast enforcement must check foreground/background pairs before a generated palette is accepted.
+
+These keys are configuration foundations only. Wallpaper rendering, font application, icon-theme installation/selection and palette generation must be integrated by their owning services before the corresponding controls are advertised as active in the GUI.
+
+## Configuration persistence milestone
+
+The compositor configuration uses schema version 1. Missing appearance sections in existing configuration files receive defaults, preserving compatibility with the pre-appearance configuration format. Unknown keys and unsupported schema versions are rejected rather than guessed.
+
+Saving is validate-first and uses a temporary file in the destination directory followed by an atomic rename. On Unix, the temporary file is created with owner-only permissions. A failed validation or temporary-file write must leave the active configuration untouched.
