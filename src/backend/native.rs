@@ -8,13 +8,13 @@
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use smithay::{
-    reexports::calloop::EventLoop,
     backend::{
         drm::{DrmDevice, DrmDeviceFd},
         session::{Event as SessionEvent, Session, libseat::LibSeatSession},
         udev::UdevBackend,
     },
-    reexports::{calloop::EventLoop, rustix::fs::OFlags},
+    reexports::calloop::EventLoop,
+    reexports::rustix::fs::OFlags,
     utils::DeviceFd,
 };
 use std::{
