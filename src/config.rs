@@ -445,8 +445,7 @@ mod tests {
         config.appearance.icon_theme = "Bubble-Neon".into();
 
         save_atomic(&path, &config).expect("save should succeed");
-        let loaded: Config =
-            toml::from_str(&fs::read_to_string(path).expect("saved file"))
+        let loaded: Config = toml::from_str(&fs::read_to_string(path).expect("saved file"))
             .expect("saved TOML should parse");
         assert_eq!(loaded.appearance.icon_theme, "Bubble-Neon");
     }
