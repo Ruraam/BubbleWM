@@ -6,6 +6,8 @@
 
 use std::{
     cell::RefCell,
+    fs::File,
+    path::Path,
     rc::Rc,
     sync::mpsc::{self, TryRecvError},
     thread,
@@ -44,7 +46,7 @@ fn build_ui(application: &gtk::Application) {
         .width_request(190)
         .build();
 
-    let appearance = build_appearance_page();
+    let appearance = build_appearance_page(&window);
     stack.add_titled(&appearance.page, Some("appearance"), "Apparence");
 
     let about = gtk::Box::new(gtk::Orientation::Vertical, 12);
@@ -73,7 +75,7 @@ struct AppearancePage {
     palette_status: gtk::Label,
 }
 
-fn build_appearance_page() -> AppearancePage {
+fn build_appearance_page(parent: &gtk::Window) -> AppearancePage {
     let page = gtk::Box::new(gtk::Orientation::Vertical, 16);
     page.set_margin_top(28);
     page.set_margin_bottom(28);
@@ -136,11 +138,17 @@ fn build_appearance_page() -> AppearancePage {
     wallpaper_path.set_placeholder_text(Some("/chemin/vers/fond-ecran.png"));
     wallpaper_path.set_text(initial_config.appearance.wallpaper.as_deref().unwrap_or(""));
 
+    let wallpaper_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    let browse_wallpaper = gtk::Button::with_label("Parcourir…");
+    wallpaper_row.append(&wallpaper_path);
+    wallpaper_row.append(&browse_wallpaper);
+    connect_wallpaper_picker(parent, &browse_wallpaper, &wallpaper_path);
+
     attach_setting(&settings_grid, 0, "Schéma de couleurs", &color_scheme);
     attach_setting(&settings_grid, 1, "Style de palette", &palette_variant);
     settings_grid.attach(&bubble_color_enabled, 1, 2, 1, 1);
     settings_grid.attach(&enforce_contrast, 1, 3, 1, 1);
-    attach_setting(&settings_grid, 4, "Fond d’écran (chemin)", &wallpaper_path);
+    attach_setting(&settings_grid, 4, "Fond d’écran", &wallpaper_row);
     page.append(&settings_grid);
 
     let restart_note = gtk::Label::new(Some(
@@ -187,7 +195,13 @@ fn build_appearance_page() -> AppearancePage {
                 updated.appearance.wallpaper = if wallpaper.is_empty() {
                     None
                 } else {
-                    Some(wallpaper.to_owned())
+                    match validate_wallpaper_path(wallpaper) {
+                        Ok(path) => Some(path),
+                        Err(error) => {
+                            save_status.set_text(&format!("Fond d’écran invalide : {error}"));
+                            return;
+                        }
+                    }
                 };
 
                 match config::save_atomic(&path, &updated) {
@@ -233,6 +247,82 @@ fn build_appearance_page() -> AppearancePage {
         palette_grid,
         palette_status,
     }
+}
+
+fn connect_wallpaper_picker(
+    parent: &gtk::Window,
+    button: &gtk::Button,
+    entry: &gtk::Entry,
+) {
+    let entry = entry.clone();
+    button.connect_clicked(move |_| {
+        let dialog = gtk::FileChooserNative::new(
+            Some("Choisir un fond d’écran"),
+            Some(parent),
+            gtk::FileChooserAction::Open,
+            Some("Ouvrir"),
+            Some("Annuler"),
+        );
+        let filter = gtk::FileFilter::new();
+        filter.set_name(Some("Images PNG, JPEG et WebP"));
+        filter.add_mime_type("image/png");
+        filter.add_mime_type("image/jpeg");
+        filter.add_mime_type("image/webp");
+        dialog.add_filter(&filter);
+
+        let entry = entry.clone();
+        dialog.connect_response(move |dialog, response| {
+            if response == gtk::ResponseType::Accept {
+                match dialog.file().and_then(|file| file.path()) {
+                    Some(path) => match validate_wallpaper_path(&path.to_string_lossy()) {
+                        Ok(path) => entry.set_text(&path),
+                        Err(error) => {
+                            entry.set_text("");
+                            eprintln!("BubbleSettings: wallpaper rejected: {error}");
+                        }
+                    },
+                    None => {
+                        entry.set_text("");
+                    }
+                }
+            }
+            dialog.destroy();
+        });
+        dialog.show();
+    });
+}
+
+/// Accept only existing, readable, bounded local images supported by BubbleColor.
+/// The compositor's image decoder performs the full format/decompression checks
+/// later on its bounded worker thread, never in the GTK event loop.
+fn validate_wallpaper_path(value: &str) -> Result<String, String> {
+    let path = Path::new(value.trim());
+    if !path.is_absolute() {
+        return Err("le chemin doit être absolu".into());
+    }
+
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| format!("impossible d’accéder au fichier : {error}"))?;
+    let metadata = std::fs::metadata(&canonical)
+        .map_err(|error| format!("impossible de lire les informations du fichier : {error}"))?;
+    if !metadata.is_file() {
+        return Err("la sélection n’est pas un fichier régulier".into());
+    }
+    if metadata.len() > 64 * 1024 * 1024 {
+        return Err("l’image dépasse la limite de 64 Mio".into());
+    }
+
+    let extension = canonical
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !["png", "jpg", "jpeg", "webp"].contains(&extension.as_str()) {
+        return Err("formats acceptés : PNG, JPEG et WebP".into());
+    }
+    File::open(&canonical).map_err(|error| format!("fichier non lisible : {error}"))?;
+    Ok(canonical.to_string_lossy().into_owned())
 }
 
 fn attach_setting(grid: &gtk::Grid, row: i32, label: &str, control: &impl IsA<gtk::Widget>) {
