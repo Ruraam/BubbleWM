@@ -1,8 +1,8 @@
 //! BubbleWM application entry point.
 
-mod config;
 #[cfg(feature = "native-backend")]
 mod backend;
+mod config;
 
 use anyhow::{Context, Result, bail};
 use tracing_subscriber::EnvFilter;
