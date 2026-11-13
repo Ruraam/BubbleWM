@@ -1341,7 +1341,7 @@ impl CompositorStateData {
                 entry.location.y,
                 window.geometry().size
             );
-            if decoration_mode != Some(DecorationMode::ServerSide) {
+            if decoration_mode != Some(Some(DecorationMode::ServerSide)) {
                 continue;
             }
             let width = window.geometry().size.w;
