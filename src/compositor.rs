@@ -467,6 +467,12 @@ impl CompositorStateData {
             layer
         };
 
+        tracing::info!(
+            found = layer.is_some(),
+            surface = ?surface,
+            "DEBUG: handle_layer_commit lookup"
+        );
+
         if let Some(layer) = layer {
             // Send the initial configure after the client's first commit;
             // arrange() handles subsequent size changes.
@@ -1806,6 +1812,11 @@ impl CompositorHandler for CompositorStateData {
             }
         }
 
+        tracing::info!(
+            surface = ?surface,
+            root_surface = ?root_surface,
+            "DEBUG: compositor commit"
+        );
         self.handle_layer_commit(&root_surface);
         self.popups.cleanup();
         self.space.refresh();
@@ -2096,6 +2107,7 @@ impl WlrLayerShellHandler for CompositorStateData {
         _layer: Layer,
         namespace: String,
     ) {
+        tracing::info!(namespace = %namespace, "DEBUG: new_layer_surface called");
         let output = requested_output
             .as_ref()
             .and_then(Output::from_resource)
