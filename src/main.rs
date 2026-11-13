@@ -28,7 +28,7 @@ fn main() -> Result<()> {
             #[cfg(feature = "native-backend")]
             {
                 let probe = backend::native::probe()
-                    .context("could not initialize the native DRM discovery probe")?;
+                    .context("could not initialize the native DRM device probe")?;
                 tracing::info!(
                     seat = %probe.seat,
                     session_active = probe.session_active,
@@ -38,8 +38,16 @@ fn main() -> Result<()> {
                 for path in &probe.drm_devices {
                     tracing::info!(device = %path.display(), "DRM device discovered");
                 }
+                if let Some(path) = &probe.opened_device {
+                    tracing::info!(
+                        device = %path.display(),
+                        "DRM device successfully opened and closed through libseat"
+                    );
+                } else {
+                    tracing::warn!("No DRM card device is available on the active seat");
+                }
                 bail!(
-                    "native session and DRM discovery succeeded, but DRM/KMS rendering is not implemented yet"
+                    "native session and DRM device probe completed, but DRM/KMS rendering is not implemented yet"
                 );
             }
             #[cfg(not(feature = "native-backend"))]

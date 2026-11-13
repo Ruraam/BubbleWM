@@ -36,7 +36,7 @@ WAYLAND_DISPLAY=wayland-1 <your-wayland-client>
 
 Replace `wayland-1` with the exact display name printed by BubbleWM. Close the Winit window to stop the nested compositor.
 
-The Winit backend uses the host session's EGL/OpenGL environment. The native DRM/KMS renderer and output lifecycle are not implemented yet. Selecting `core.backend = "drm"` with the optional native feature now performs a read-only discovery step: it acquires a libseat session and lists DRM card nodes assigned to that seat, then exits explicitly. It does not open a DRM device, change a display mode, or start a native compositor.
+The Winit backend uses the host session's EGL/OpenGL environment. The native DRM/KMS renderer and output lifecycle are not implemented yet. Selecting `core.backend = "drm"` with the optional native feature acquires a libseat session, enumerates DRM card nodes assigned to that seat, then opens at most one node through `Session::open`. It validates the opened file descriptor against the udev device identity and closes it through `Session::close`. It exits explicitly afterwards. It does not initialize a DRM device, inspect or change display modes, or start a native compositor.
 
 ### Current compositor capabilities
 
@@ -111,7 +111,7 @@ See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANE
 
 ### Optional native backend build dependencies
 
-The `native-backend` Cargo feature enables Smithay's DRM, GBM, libinput, udev and libseat dependencies. It also enables a diagnostic libseat/udev discovery probe; it is not yet a runnable DRM/KMS compositor.
+The `native-backend` Cargo feature enables Smithay's DRM, GBM, libinput, udev and libseat dependencies. It also enables a diagnostic libseat/udev probe that opens and closes at most one seat-assigned DRM card node; it is not yet a runnable DRM/KMS compositor.
 
 On Debian 13, install the development packages before checking this feature:
 
