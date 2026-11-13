@@ -1313,10 +1313,19 @@ impl CompositorStateData {
     }
 
     fn close_focused_window(&self) {
-        if let Some(window) = self.space.elements().last()
+        let focused = self
+            .keyboard
+            .as_ref()
+            .and_then(|keyboard| keyboard.current_focus());
+        if let Some(surface) = focused
+            && let Some(window) = self.managed_window_for_surface(&surface)
             && let Some(toplevel) = window.toplevel()
         {
+            let title = toplevel_title(&toplevel).unwrap_or_else(|| "<untitled>".into());
+            info!("Sending close request to focused toplevel title={title}");
             toplevel.send_close();
+        } else {
+            info!("Close shortcut ignored because no managed toplevel has keyboard focus");
         }
     }
 
