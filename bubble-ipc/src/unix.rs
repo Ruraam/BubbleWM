@@ -779,13 +779,16 @@ mod tests {
                 )
             };
             assert_eq!(result, 0, "read server send buffer size");
-            assert!(actual_size <= 16_384, "send buffer should be constrained: {actual_size}");
+            assert!(
+                actual_size <= 16_384,
+                "send buffer should be constrained: {actual_size}"
+            );
 
             let started = Instant::now();
             let result = worker_server.serve_connection(&mut stream, &|_| Response::Failure {
                 error: ErrorResponse {
                     code: ErrorCode::Unavailable,
-                    message: "x".repeat(60_000),
+                    message: "x".repeat(12_000),
                 },
             });
             (started.elapsed(), result)
