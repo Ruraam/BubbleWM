@@ -87,7 +87,8 @@
 - [x] Add CI compile coverage for the optional native backend dependencies.
 - [x] Add a read-only libseat/udev probe for seat-assigned DRM card nodes.
 - [x] Open, validate and close one seat-assigned DRM card node through libseat without modesetting.
-- [ ] DRM/KMS device and connector initialization.
+- [x] Initialize and drop Smithay's DrmDevice while returning its descriptor through libseat; do not disable connectors or create DRM surfaces.
+- [ ] DRM/KMS surface creation, connector/mode management and output lifecycle.
 - [ ] Multi-output and per-monitor settings.
 - [ ] Robustness, accessibility and performance testing.
 

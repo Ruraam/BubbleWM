@@ -36,7 +36,7 @@ WAYLAND_DISPLAY=wayland-1 <your-wayland-client>
 
 Replace `wayland-1` with the exact display name printed by BubbleWM. Close the Winit window to stop the nested compositor.
 
-The Winit backend uses the host session's EGL/OpenGL environment. The native DRM/KMS renderer and output lifecycle are not implemented yet. Selecting `core.backend = "drm"` with the optional native feature acquires a libseat session, enumerates DRM card nodes assigned to that seat, then opens at most one node through `Session::open`. It validates the opened file descriptor against the udev device identity and closes it through `Session::close`. It exits explicitly afterwards. It does not initialize a DRM device, inspect or change display modes, or start a native compositor.
+The Winit backend uses the host session's EGL/OpenGL environment. The native DRM/KMS renderer and output lifecycle are not implemented yet. Selecting `core.backend = "drm"` with the optional native feature acquires a libseat session, enumerates DRM card nodes assigned to that seat, then opens at most one node through `Session::open`. It validates the opened descriptor against the udev device identity and initializes Smithay's `DrmDevice` using a reference-counted descriptor. The recovery handle ensures the descriptor is returned through `Session::close` after Smithay drops its device and notifier, including when initialization fails. Connector disabling is explicitly disabled during this probe. Smithay briefly attempts to acquire DRM master while initializing the device, but BubbleWM does not create a `DrmSurface`, select or change display modes, submit KMS commits, or start a native compositor. The diagnostic command exits afterwards.
 
 ### Current compositor capabilities
 
@@ -72,7 +72,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Named cursor-theme rendering, touch input, and a complete focus/grab policy. Named cursor requests currently use the nested Winit window's default arrow as a fallback.
 - Polished decorations: the current server-side titlebar is a basic prototype with colored controls, not yet a themed titlebar with title text, icons, borders or full accessibility behavior.
 - Workspace names, per-workspace layout configuration and dynamic workspace counts.
-- Output-management protocols, multiple outputs and native DRM/KMS rendering, connector/mode management and hotplug handling.
+- Output-management protocols, multiple outputs, native DRM/KMS surface creation, connector/mode management and hotplug handling.
 - Real system status modules, task-list integration and user-facing panel configuration.
 
 ## Terminal control
@@ -111,7 +111,7 @@ See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANE
 
 ### Optional native backend build dependencies
 
-The `native-backend` Cargo feature enables Smithay's DRM, GBM, libinput, udev and libseat dependencies. It also enables a diagnostic libseat/udev probe that opens and closes at most one seat-assigned DRM card node; it is not yet a runnable DRM/KMS compositor.
+The `native-backend` Cargo feature enables Smithay's DRM, GBM, libinput, udev and libseat dependencies. It also enables a diagnostic libseat/udev probe that initializes and releases one Smithay `DrmDevice` for a seat-assigned DRM card node; it is not yet a runnable DRM/KMS compositor.
 
 On Debian 13, install the development packages before checking this feature:
 

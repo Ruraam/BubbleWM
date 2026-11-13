@@ -38,16 +38,19 @@ fn main() -> Result<()> {
                 for path in &probe.drm_devices {
                     tracing::info!(device = %path.display(), "DRM device discovered");
                 }
-                if let Some(path) = &probe.opened_device {
+                if let Some(device) = &probe.initialized_device {
                     tracing::info!(
-                        device = %path.display(),
-                        "DRM device successfully opened and closed through libseat"
+                        device = %device.path.display(),
+                        device_id = device.device_id,
+                        atomic_modesetting = device.atomic_modesetting,
+                        crtcs = device.crtc_count,
+                        "Smithay DRM device initialized and released through libseat"
                     );
                 } else {
                     tracing::warn!("No DRM card device is available on the active seat");
                 }
                 bail!(
-                    "native session and DRM device probe completed, but DRM/KMS rendering is not implemented yet"
+                    "native session and Smithay DRM device initialization completed, but KMS output setup and rendering are not implemented yet"
                 );
             }
             #[cfg(not(feature = "native-backend"))]
