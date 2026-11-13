@@ -328,7 +328,7 @@ pub fn run_session_monitor() -> Result<()> {
                 "libseat session event"
             );
         })
-        .context("failed to register the libseat session notifier")?;
+        .map_err(|_| anyhow!("failed to register the libseat session notifier"))?;
 
     tracing::info!(
         seat = %seat,
