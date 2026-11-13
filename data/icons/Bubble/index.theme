@@ -1,0 +1,33 @@
+[Icon Theme]
+Name=Bubble
+Comment=Original BubbleOS icon theme
+Inherits=hicolor
+Directories=scalable/apps,scalable/categories,scalable/places,scalable/status
+
+[scalable/apps]
+Size=scalable
+Type=Scalable
+MinSize=16
+MaxSize=512
+Context=Applications
+
+[scalable/categories]
+Size=scalable
+Type=Scalable
+MinSize=16
+MaxSize=512
+Context=Categories
+
+[scalable/places]
+Size=scalable
+Type=Scalable
+MinSize=16
+MaxSize=512
+Context=Places
+
+[scalable/status]
+Size=scalable
+Type=Scalable
+MinSize=16
+MaxSize=512
+Context=Status
