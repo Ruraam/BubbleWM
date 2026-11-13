@@ -250,11 +250,7 @@ fn build_appearance_page(parent: &gtk::Window) -> AppearancePage {
     }
 }
 
-fn connect_wallpaper_picker(
-    parent: &gtk::Window,
-    button: &gtk::Button,
-    entry: &gtk::Entry,
-) {
+fn connect_wallpaper_picker(parent: &gtk::Window, button: &gtk::Button, entry: &gtk::Entry) {
     let parent = parent.clone();
     let entry = entry.clone();
     button.connect_clicked(move |_| {
