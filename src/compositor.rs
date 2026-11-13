@@ -1324,12 +1324,26 @@ impl CompositorStateData {
         location: Point<f64, Logical>,
     ) -> Option<(Window, DecorationAction)> {
         for window in self.space.elements().rev() {
-            if !Self::uses_server_decorations(window) {
-                continue;
-            }
+            let title = window
+                .toplevel()
+                .and_then(|surface| toplevel_title(&surface))
+                .unwrap_or_else(|| "<untitled>".into());
+            let decoration_mode = window
+                .toplevel()
+                .map(|surface| surface.current_state().decoration_mode);
             let Some(entry) = self.windows.iter().find(|entry| entry.window == *window) else {
+                info!("Decoration candidate title={title} mode={decoration_mode:?} managed=false");
                 continue;
             };
+            info!(
+                "Decoration candidate title={title} mode={decoration_mode:?} location=({}, {}) geometry={:?}",
+                entry.location.x,
+                entry.location.y,
+                window.geometry().size
+            );
+            if decoration_mode != Some(DecorationMode::ServerSide) {
+                continue;
+            }
             let width = window.geometry().size.w;
             if width <= 0
                 || location.x < entry.location.x as f64
