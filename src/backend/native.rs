@@ -245,9 +245,7 @@ fn open_validate_and_initialize(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        NativeSessionLifecycle, NativeSessionState, NativeSessionTransition,
-    };
+    use super::{NativeSessionLifecycle, NativeSessionState, NativeSessionTransition};
     use smithay::backend::session::Event as SessionEvent;
 
     #[test]
