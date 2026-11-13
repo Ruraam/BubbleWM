@@ -105,6 +105,8 @@ use tracing::info;
 
 use crate::layout::{MasterStackConfig, Rect as LayoutRect, master_stack};
 use crate::session::SessionManager;
+use crate::theme::{ThemeDocument, ThemeOptions};
+use crate::theme_runtime::ThemeRuntime;
 
 use crate::ipc::IpcRuntime;
 
@@ -216,6 +218,9 @@ struct CompositorStateData {
     workspace_count: u32,
     suppressed_keys: Vec<u32>,
     layout_mode: LayoutMode,
+    theme_runtime: Option<ThemeRuntime>,
+    theme_generation: u64,
+    active_theme: Option<Arc<ThemeDocument>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -269,6 +274,47 @@ fn consume_shortcut_release(suppressed: &mut Vec<u32>, key_code: u32) -> bool {
 }
 
 impl CompositorStateData {
+    fn poll_bubblecolor(&mut self) {
+        loop {
+            let update = self
+                .theme_runtime
+                .as_ref()
+                .and_then(ThemeRuntime::try_take_update);
+            let Some(update) = update else {
+                break;
+            };
+
+            if !is_current_theme_generation(update.generation, self.theme_generation) {
+                tracing::debug!(
+                    received_generation = update.generation,
+                    current_generation = self.theme_generation,
+                    "Ignoring stale BubbleColor result"
+                );
+                continue;
+            }
+
+            match update.result {
+                Ok(theme) => {
+                    tracing::info!(
+                        generation = update.generation,
+                        schema_version = theme.schema_version,
+                        source = %theme.source_file,
+                        sampled_pixels = theme.diagnostics.sampled_pixels,
+                        "BubbleColor palette snapshot accepted"
+                    );
+                    self.active_theme = Some(Arc::new(theme));
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        generation = update.generation,
+                        %error,
+                        "BubbleColor palette generation failed; keeping previous snapshot"
+                    );
+                }
+            }
+        }
+    }
+
     fn remember_input_serial(&mut self, serial: Serial, surface: Option<WlSurface>) {
         let Some(surface) = surface else {
             return;
@@ -2599,6 +2645,17 @@ delegate_layer_shell!(CompositorStateData);
 /// Starts the initial Winit-backed Wayland compositor and owns IPC for its
 /// complete lifetime.
 pub fn run_winit(initial_layout: &str) -> Result<()> {
+    run_winit_with_theme(initial_layout, None, ThemeOptions::default())
+}
+
+/// Starts the Winit compositor and optionally generates a wallpaper palette
+/// on the dedicated BubbleColor worker. Palette polling stays on the
+/// compositor thread and never waits for image decoding.
+pub fn run_winit_with_theme(
+    initial_layout: &str,
+    wallpaper: Option<&str>,
+    theme_options: ThemeOptions,
+) -> Result<()> {
     let (mut backend, mut winit_loop) =
         winit::init::<smithay::backend::renderer::gles::GlesRenderer>()
             .map_err(|error| anyhow!("cannot initialize the Winit/EGL backend: {error}"))?;
@@ -2642,6 +2699,30 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
     );
     output.create_global::<CompositorStateData>(&display_handle);
 
+    let mut theme_runtime = None;
+    let mut theme_generation = 0;
+    if let Some(wallpaper) = wallpaper.filter(|path| !path.trim().is_empty()) {
+        match ThemeRuntime::start() {
+            Ok(runtime) => {
+                let generation = 1;
+                match runtime.request(generation, wallpaper, theme_options) {
+                    Ok(()) => {
+                        theme_generation = generation;
+                        theme_runtime = Some(runtime);
+                        info!(wallpaper, generation, "Queued initial BubbleColor palette generation");
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "Could not queue initial BubbleColor palette generation");
+                        let _ = runtime.shutdown();
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "Could not start BubbleColor worker; continuing without wallpaper palette");
+            }
+        }
+    }
+
     let mut state = CompositorStateData {
         display_handle: display_handle.clone(),
         compositor_state,
@@ -2682,6 +2763,9 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
         } else {
             LayoutMode::Floating
         },
+        theme_runtime,
+        theme_generation,
+        active_theme: None,
     };
     state.space.map_output(&output, (0, 0));
 
@@ -2916,6 +3000,10 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
             break;
         }
 
+        // BubbleColor results are consumed on the compositor thread. Image
+        // decoding and palette generation remain isolated on its worker.
+        state.poll_bubblecolor();
+
         // IPC commands are consumed on the compositor thread. No IPC worker
         // callback accesses Smithay state directly.
         ipc_commands
@@ -3038,11 +3126,20 @@ pub fn run_winit(initial_layout: &str) -> Result<()> {
         thread::sleep(FRAME_INTERVAL);
     }
 
+    if let Some(runtime) = state.theme_runtime.take() {
+        runtime
+            .shutdown()
+            .context("cannot shut down the BubbleColor worker")?;
+    }
     ipc_runtime
         .shutdown()
         .context("cannot shut down the BubbleWM IPC worker")?;
     info!("BubbleWM compositor is shutting down");
     Ok(())
+}
+
+fn is_current_theme_generation(update_generation: u64, current_generation: u64) -> bool {
+    update_generation == current_generation
 }
 
 fn host_cursor_visible(status: &CursorImageStatus) -> bool {
@@ -3095,6 +3192,13 @@ fn send_frames_surface_tree(surface: &wl_surface::WlSurface, time: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn current_theme_generation_accepts_only_the_latest_result() {
+        assert!(is_current_theme_generation(4, 4));
+        assert!(!is_current_theme_generation(3, 4));
+        assert!(!is_current_theme_generation(5, 4));
+    }
 
     #[test]
     fn host_cursor_is_visible_only_for_named_fallback_shapes() {
