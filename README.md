@@ -117,7 +117,7 @@ See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANE
 - **Desktop:** surfaces, focus, placement, workspaces and optional tiling.
 - **BubbleDecor:** server-side titlebars, borders and controls.
 - **BubbleFX:** animation scheduler, effects and GPU shader pipeline.
-- **BubbleColor:** wallpaper-derived palettes and contrast validation.
+- **BubbleColor:** native wallpaper-derived semantic palettes, OKLab analysis and contrast validation. See [docs/BUBBLECOLOR.md](docs/BUBBLECOLOR.md).
 - **BubblePanel:** modular panel, task list, workspace indicators and system modules.
 - **BubbleSettings:** graphical configuration for compositor and desktop components.
 - **IPC:** versioned local control interface for shell/settings integration.
