@@ -4,8 +4,8 @@
 //! deterministic, versioned palette that the compositor, panel and settings
 //! application can consume through one shared contract.
 
-use anyhow::{bail, ensure, Context, Result};
-use image::{GenericImageView, ImageReader, Limits};
+use anyhow::{ensure, Context, Result};
+use image::{ImageReader, Limits};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -50,9 +50,6 @@ impl Rgb {
         format!("#{:02X}{:02X}{:02X}", self.r, self.g, self.b)
     }
 
-    fn channels(self) -> (u8, u8, u8) {
-        (self.r, self.g, self.b)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -219,8 +216,8 @@ fn validate_options(options: &ThemeOptions) -> Result<()> {
 
 fn build_semantic_colors(base: Hsl, options: &ThemeOptions) -> SemanticColors {
     let dark = options.mode == ColorMode::Dark;
-    let primary = base.with_lightness(if dark { 0.78 } else { 0.40 }).to_rgb();
-    let primary_container = base.with_lightness(if dark { 0.30 } else { 0.88 }).to_rgb();
+    let primary = accessible_tone(base, if dark { 0.78 } else { 0.40 }, options.contrast_target, dark);
+    let primary_container = accessible_tone(base, if dark { 0.30 } else { 0.88 }, options.contrast_target, !dark);
     let secondary_hsl = Hsl {
         hue: (base.hue + 36.0).rem_euclid(360.0),
         saturation: (base.saturation * 0.72).clamp(0.25, 0.68),
@@ -231,8 +228,8 @@ fn build_semantic_colors(base: Hsl, options: &ThemeOptions) -> SemanticColors {
         saturation: (base.saturation * 0.82).clamp(0.30, 0.78),
         lightness: base.lightness,
     };
-    let secondary = secondary_hsl.with_lightness(if dark { 0.76 } else { 0.42 }).to_rgb();
-    let tertiary = tertiary_hsl.with_lightness(if dark { 0.78 } else { 0.40 }).to_rgb();
+    let secondary = accessible_tone(secondary_hsl, if dark { 0.76 } else { 0.42 }, options.contrast_target, dark);
+    let tertiary = accessible_tone(tertiary_hsl, if dark { 0.78 } else { 0.40 }, options.contrast_target, dark);
     let background = if dark { Rgb::new(12, 14, 22) } else { Rgb::new(248, 247, 252) };
     let surface = if dark { Rgb::new(20, 23, 34) } else { Rgb::WHITE };
     let surface_variant = if dark { Rgb::new(39, 43, 58) } else { Rgb::new(231, 229, 239) };
@@ -267,6 +264,27 @@ fn build_semantic_colors(base: Hsl, options: &ThemeOptions) -> SemanticColors {
         neon_violet: Rgb::new(165, 95, 255),
         neon_lime: Rgb::new(180, 245, 70),
     }
+}
+
+/// Shift an accent's lightness only as far as needed to make either black
+/// or white text meet the requested contrast ratio.
+fn accessible_tone(base: Hsl, preferred: f32, target: f32, prefer_light: bool) -> Rgb {
+    let steps = 100;
+    for step in 0..=steps {
+        let delta = step as f32 / steps as f32;
+        let lightness = if prefer_light {
+            preferred + (1.0 - preferred) * delta
+        } else {
+            preferred * (1.0 - delta)
+        };
+        let candidate = base.with_lightness(lightness).to_rgb();
+        if contrast_ratio(Rgb::BLACK, candidate).max(contrast_ratio(Rgb::WHITE, candidate)) >= target {
+            return candidate;
+        }
+    }
+    // Black or white always provides at least 1:1 and the loop reaches both
+    // extremes in the requested direction; this is a defensive fallback.
+    base.with_lightness(if prefer_light { 1.0 } else { 0.0 }).to_rgb()
 }
 
 fn readable_foreground(background: Rgb, target: f32) -> Rgb {
