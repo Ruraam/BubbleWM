@@ -928,12 +928,22 @@ impl CompositorStateData {
             .collect::<Vec<_>>();
         family_windows.sort_by_key(|(order, _)| *order);
 
-        if let Some(position) = family_windows
+        let target_is_family_root = self
+            .windows
             .iter()
-            .position(|(_, member)| member == window)
-        {
-            let target = family_windows.remove(position);
-            family_windows.push(target);
+            .find(|entry| entry.window == *window)
+            .is_some_and(|entry| entry.parent_surface.is_none());
+
+        // Keep the root below its transient descendants when raising the
+        // complete family. An explicitly targeted child is still raised last.
+        if !target_is_family_root {
+            if let Some(position) = family_windows
+                .iter()
+                .position(|(_, member)| member == window)
+            {
+                let target = family_windows.remove(position);
+                family_windows.push(target);
+            }
         }
 
         // Reflow tiled windows before changing z-order. Mapping/configuring
