@@ -10,7 +10,7 @@ use anyhow::{Context, Result, anyhow, bail, ensure};
 use smithay::{
     backend::{
         drm::{DrmDevice, DrmDeviceFd},
-        session::{Session, libseat::LibSeatSession},
+        session::{Event as SessionEvent, Session, libseat::LibSeatSession},
         udev::UdevBackend,
     },
     reexports::rustix::fs::OFlags,
@@ -31,6 +31,74 @@ pub struct NativeDrmDevice {
     pub device_id: u64,
     pub atomic_modesetting: bool,
     pub crtc_count: usize,
+}
+
+/// Current access state reported by the libseat session notifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeSessionState {
+    /// The compositor currently owns the seat and may access its devices.
+    Active,
+    /// The seat has been revoked; device access must stop until activation.
+    Paused,
+}
+
+/// Result of applying a libseat session event to the lifecycle state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeSessionTransition {
+    /// The session was active and has now been paused.
+    Pause,
+    /// The session was paused and has now been activated.
+    Activate,
+    /// The event repeated the state already in effect.
+    Unchanged,
+}
+
+/// Small, deterministic state machine for libseat pause/activation events.
+///
+/// This policy is kept separate from device ownership so transitions can be
+/// tested without DRM hardware. The calloop notifier and device close/reopen
+/// integration are deliberately a later step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NativeSessionLifecycle {
+    state: NativeSessionState,
+}
+
+impl NativeSessionLifecycle {
+    /// Creates lifecycle state from the session's initial active flag.
+    pub fn new(active: bool) -> Self {
+        Self {
+            state: if active {
+                NativeSessionState::Active
+            } else {
+                NativeSessionState::Paused
+            },
+        }
+    }
+
+    /// Returns the current session state.
+    pub fn state(&self) -> NativeSessionState {
+        self.state
+    }
+
+    /// Returns whether opening or using seat devices is currently permitted.
+    pub fn permits_device_access(&self) -> bool {
+        self.state == NativeSessionState::Active
+    }
+
+    /// Applies a libseat event and reports whether the state changed.
+    pub fn apply(&mut self, event: SessionEvent) -> NativeSessionTransition {
+        match (self.state, event) {
+            (NativeSessionState::Active, SessionEvent::PauseSession) => {
+                self.state = NativeSessionState::Paused;
+                NativeSessionTransition::Pause
+            }
+            (NativeSessionState::Paused, SessionEvent::ActivateSession) => {
+                self.state = NativeSessionState::Active;
+                NativeSessionTransition::Activate
+            }
+            _ => NativeSessionTransition::Unchanged,
+        }
+    }
 }
 
 /// Snapshot of the active seat and DRM card nodes visible to that seat.
@@ -173,4 +241,62 @@ fn open_validate_and_initialize(
         atomic_modesetting,
         crtc_count,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        NativeSessionLifecycle, NativeSessionState, NativeSessionTransition,
+    };
+    use smithay::backend::session::Event as SessionEvent;
+
+    #[test]
+    fn initially_inactive_session_cannot_access_devices() {
+        let lifecycle = NativeSessionLifecycle::new(false);
+
+        assert_eq!(lifecycle.state(), NativeSessionState::Paused);
+        assert!(!lifecycle.permits_device_access());
+    }
+
+    #[test]
+    fn pause_revokes_device_access_and_activation_restores_it() {
+        let mut lifecycle = NativeSessionLifecycle::new(true);
+
+        assert!(lifecycle.permits_device_access());
+        assert_eq!(
+            lifecycle.apply(SessionEvent::PauseSession),
+            NativeSessionTransition::Pause
+        );
+        assert_eq!(lifecycle.state(), NativeSessionState::Paused);
+        assert!(!lifecycle.permits_device_access());
+
+        assert_eq!(
+            lifecycle.apply(SessionEvent::ActivateSession),
+            NativeSessionTransition::Activate
+        );
+        assert_eq!(lifecycle.state(), NativeSessionState::Active);
+        assert!(lifecycle.permits_device_access());
+    }
+
+    #[test]
+    fn duplicate_session_events_are_idempotent() {
+        let mut lifecycle = NativeSessionLifecycle::new(true);
+
+        assert_eq!(
+            lifecycle.apply(SessionEvent::PauseSession),
+            NativeSessionTransition::Pause
+        );
+        assert_eq!(
+            lifecycle.apply(SessionEvent::PauseSession),
+            NativeSessionTransition::Unchanged
+        );
+        assert_eq!(
+            lifecycle.apply(SessionEvent::ActivateSession),
+            NativeSessionTransition::Activate
+        );
+        assert_eq!(
+            lifecycle.apply(SessionEvent::ActivateSession),
+            NativeSessionTransition::Unchanged
+        );
+    }
 }

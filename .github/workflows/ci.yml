@@ -31,5 +31,7 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Test workspace
         run: cargo test --workspace --all-targets
+      - name: Test native backend lifecycle policy
+        run: cargo test -p bubblewm --features native-backend --bin bubblewm
       - name: Check optional native backend dependencies
         run: cargo check -p bubblewm --features native-backend
