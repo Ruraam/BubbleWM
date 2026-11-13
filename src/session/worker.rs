@@ -94,8 +94,8 @@ fn collect_snapshot() -> Result<LogindSnapshot> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::logind::ActionAvailability;
+    use super::*;
     use std::sync::mpsc;
 
     fn worker_with_result(result: Result<LogindSnapshot>) -> LogindWorker {
