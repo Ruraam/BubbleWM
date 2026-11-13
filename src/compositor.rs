@@ -886,6 +886,14 @@ impl CompositorStateData {
             if has_buffer {
                 let content_location = self.content_location(&window, location);
                 self.space.map_element(window, content_location, false);
+
+                // Parent changes can arrive after the child already has a buffer.
+                // Rebuild the complete family order now, not only on workspace switch.
+                let family_root = self.root_surface_for_toplevel(&root);
+                if let Some(root_window) = self.managed_window_for_surface(&family_root) {
+                    info!("Raising transient family after parent assignment");
+                    self.raise_window_family(&root_window);
+                }
             }
         }
     }
@@ -1840,7 +1848,12 @@ impl CompositorStateData {
             && !self.windows[index].minimized
             && self.windows[index].workspace == self.active_workspace
         {
-            self.raise_window_family(&window);
+            // Raise from the family root so parent and every transient
+            // descendant are ordered together, exactly as on workspace restore.
+            let family_root = self.root_surface_for_toplevel(surface);
+            if let Some(root_window) = self.managed_window_for_surface(&family_root) {
+                self.raise_window_family(&root_window);
+            }
         }
     }
 
