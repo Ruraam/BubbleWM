@@ -3244,7 +3244,7 @@ fn send_frames_surface_tree(surface: &wl_surface::WlSurface, time: u32) {
 mod tests {
     use super::*;
 
-remove fragile renderer-field test    #[test]
+    #[test]
     fn rgb_channels_are_normalized_for_the_renderer() {
         assert_eq!(rgb_channels(Rgb::new(128, 64, 255)), [128.0 / 255.0, 64.0 / 255.0, 1.0]);
     }
