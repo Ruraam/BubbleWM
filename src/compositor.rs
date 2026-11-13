@@ -1823,6 +1823,9 @@ impl CompositorStateData {
     }
 
     fn begin_move(&mut self, surface: &ToplevelSurface, seat: &Seat<Self>, serial: Serial) {
+        let title = toplevel_title(surface).unwrap_or_else(|| "<untitled>".into());
+        info!("XDG move request title={title} serial={serial:?}");
+
         let Some(pointer) = seat.get_pointer() else {
             return;
         };
