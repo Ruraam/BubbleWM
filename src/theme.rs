@@ -560,13 +560,11 @@ mod tests {
     use std::{io::Cursor, path::PathBuf};
 
     fn write_test_image(directory: &std::path::Path, name: &str, format: ImageFormat) -> PathBuf {
-        let image = DynamicImage::ImageRgb8(RgbImage::from_pixel(
-            8,
-            8,
-            ImageRgb([32, 128, 220]),
-        ));
+        let image = DynamicImage::ImageRgb8(RgbImage::from_pixel(8, 8, ImageRgb([32, 128, 220])));
         let mut encoded = Cursor::new(Vec::new());
-        image.write_to(&mut encoded, format).expect("encode test image");
+        image
+            .write_to(&mut encoded, format)
+            .expect("encode test image");
         let path = directory.join(name);
         std::fs::write(&path, encoded.into_inner()).expect("write test image");
         path
