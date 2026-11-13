@@ -568,4 +568,3 @@ mod wallpaper_validation_tests {
         );
     }
 }
-
