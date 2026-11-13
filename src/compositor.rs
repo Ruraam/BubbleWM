@@ -1004,6 +1004,28 @@ impl CompositorStateData {
             entry.minimized_order = Some(order);
         }
 
+        // A minimized window must not keep a compositor-owned move/resize
+        // grab alive. Otherwise restoring it before the next pointer event
+        // could reactivate the stale interaction.
+        let has_window_grab = self
+            .pointer
+            .as_ref()
+            .and_then(|pointer| {
+                pointer.with_grab(|_, grab| {
+                    grab.downcast_ref::<WindowPointerGrab>().is_some_and(|grab| {
+                        grab.window.toplevel().is_some_and(|toplevel| {
+                            family.contains(toplevel.wl_surface())
+                        })
+                    })
+                })
+            })
+            .unwrap_or(false);
+        if has_window_grab {
+            if let Some(pointer) = self.pointer.clone() {
+                pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), 0);
+            }
+        }
+
         if removed_any {
             self.focus_topmost_window();
             self.arrange_tiled_windows();
