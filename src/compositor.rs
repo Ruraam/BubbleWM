@@ -250,7 +250,7 @@ fn compositor_shortcut(modifiers: ModifiersState, keysym: Keysym) -> Option<Comp
 
     match keysym {
         Keysym::h => Some(CompositorShortcut::Minimize),
-        Keysym::Tab => Some(CompositorShortcut::Restore),
+        Keysym::r | Keysym::R => Some(CompositorShortcut::Restore),
         Keysym::q => Some(CompositorShortcut::Close),
         Keysym::Left => Some(CompositorShortcut::WorkspacePrevious),
         Keysym::Right => Some(CompositorShortcut::WorkspaceNext),
@@ -3425,7 +3425,7 @@ mod tests {
             ..ModifiersState::default()
         };
         assert_eq!(
-            compositor_shortcut(modifiers, Keysym::Tab),
+            compositor_shortcut(modifiers, Keysym::r),
             Some(CompositorShortcut::Restore)
         );
         assert_eq!(
