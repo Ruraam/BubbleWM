@@ -46,7 +46,8 @@ fn build_ui(application: &gtk::Application) {
         .width_request(190)
         .build();
 
-    let appearance = build_appearance_page(&window);
+    let parent_window: gtk::Window = window.clone().upcast();
+    let appearance = build_appearance_page(&parent_window);
     stack.add_titled(&appearance.page, Some("appearance"), "Apparence");
 
     let about = gtk::Box::new(gtk::Orientation::Vertical, 12);
