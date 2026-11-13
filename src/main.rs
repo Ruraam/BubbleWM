@@ -14,6 +14,20 @@ fn main() -> Result<()> {
         )
         .init();
 
+    let mut args = std::env::args().skip(1);
+    if args.next().as_deref() == Some("--native-session-monitor") {
+        #[cfg(feature = "native-backend")]
+        {
+            return backend::native::run_session_monitor();
+        }
+        #[cfg(not(feature = "native-backend"))]
+        {
+            bail!(
+                "native session monitoring is not compiled in; rebuild with --features native-backend"
+            );
+        }
+    }
+
     let config_path = std::env::args().nth(1);
     let config = config::load(config_path.as_deref())?;
 

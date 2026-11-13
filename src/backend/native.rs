@@ -8,6 +8,7 @@
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use smithay::{
+    reexports::calloop::EventLoop,
     backend::{
         drm::{DrmDevice, DrmDeviceFd},
         session::{Event as SessionEvent, Session, libseat::LibSeatSession},
@@ -22,6 +23,7 @@ use std::{
         io::OwnedFd,
     },
     path::PathBuf,
+    time::Duration,
 };
 
 /// Information collected while Smithay's DRM device is initialized.
@@ -296,5 +298,50 @@ mod tests {
             lifecycle.apply(SessionEvent::ActivateSession),
             NativeSessionTransition::Unchanged
         );
+    }
+}
+
+
+/// Runs an explicit, diagnostic-only calloop monitor for libseat session events.
+///
+/// This is intentionally separate from the Winit compositor loop. It does not
+/// initialize DRM devices or claim to run a native compositor; it only proves
+/// that the real libseat notifier is dispatched and that the tested lifecycle
+/// policy follows pause/activation events.
+pub fn run_session_monitor() -> Result<()> {
+    let (session, notifier) =
+        LibSeatSession::new().context("failed to acquire a libseat session")?;
+    let seat = session.seat();
+    let active = session.is_active();
+    let mut lifecycle = NativeSessionLifecycle::new(active);
+    let mut event_loop = EventLoop::<NativeSessionLifecycle>::try_new()
+        .context("failed to create the native calloop event loop")?;
+
+    event_loop
+        .handle()
+        .insert_source(notifier, |event, _, lifecycle| {
+            let transition = lifecycle.apply(event);
+            tracing::info!(
+                ?event,
+                ?transition,
+                state = ?lifecycle.state(),
+                device_access = lifecycle.permits_device_access(),
+                "libseat session event"
+            );
+        })
+        .context("failed to register the libseat session notifier")?;
+
+    tracing::info!(
+        seat = %seat,
+        session_active = active,
+        "Native libseat session monitor started; press Ctrl+C to stop"
+    );
+
+    // Keep the session handle alive for as long as its notifier is registered.
+    let _session = session;
+    loop {
+        event_loop
+            .dispatch(Some(Duration::from_secs(1)), &mut lifecycle)
+            .context("native libseat event loop failed")?;
     }
 }
