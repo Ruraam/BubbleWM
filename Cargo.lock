@@ -318,6 +318,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bubbleui"
+version = "0.1.0"
+dependencies = [
+ "glib",
+ "gtk4",
+]
+
+[[package]]
 name = "bubblewm"
 version = "0.1.0"
 dependencies = [

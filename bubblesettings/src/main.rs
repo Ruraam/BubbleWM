@@ -28,15 +28,31 @@ fn main() -> glib::ExitCode {
     application.run()
 }
 
+fn install_styles() {
+    let provider = gtk::CssProvider::new();
+    provider.load_from_data(include_str!("style.css"));
+
+    if let Some(display) = gtk::gdk::Display::default() {
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
+}
+
 fn build_ui(application: &gtk::Application) {
+    install_styles();
     let window = gtk::ApplicationWindow::builder()
         .application(application)
         .title("BubbleSettings")
         .default_width(900)
         .default_height(720)
         .build();
+    window.add_css_class("bubble-settings");
 
     let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    root.add_css_class("bubble-settings");
     let stack = gtk::Stack::builder()
         .hexpand(true)
         .vexpand(true)
@@ -46,12 +62,14 @@ fn build_ui(application: &gtk::Application) {
         .stack(&stack)
         .width_request(190)
         .build();
+    sidebar.add_css_class("bubble-sidebar");
 
     let parent_window: gtk::Window = window.clone().upcast();
     let appearance = build_appearance_page(&parent_window);
     stack.add_titled(&appearance.page, Some("appearance"), "Apparence");
 
     let about = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    about.add_css_class("bubble-page");
     about.set_margin_top(28);
     about.set_margin_bottom(28);
     about.set_margin_start(32);
@@ -79,15 +97,19 @@ struct AppearancePage {
 
 fn build_appearance_page(parent: &gtk::Window) -> AppearancePage {
     let page = gtk::Box::new(gtk::Orientation::Vertical, 16);
+    page.add_css_class("bubble-page");
     page.set_margin_top(28);
     page.set_margin_bottom(28);
     page.set_margin_start(32);
     page.set_margin_end(32);
 
     page.append(&heading("Apparence"));
-    page.append(&gtk::Label::new(Some(
+    let intro = gtk::Label::new(Some(
         "Configurez le schéma de couleurs et les paramètres de génération BubbleColor.",
-    )));
+    ));
+    intro.add_css_class("bubble-muted");
+    intro.set_halign(gtk::Align::Start);
+    page.append(&intro);
 
     let (initial_config, config_path, config_error) =
         match (config::load(None), config::default_path()) {
@@ -115,6 +137,7 @@ fn build_appearance_page(parent: &gtk::Window) -> AppearancePage {
         .row_spacing(10)
         .hexpand(true)
         .build();
+    settings_grid.add_css_class("bubble-card");
 
     let color_scheme = gtk::ComboBoxText::new();
     color_scheme.append(Some("dark"), "Sombre");
@@ -157,14 +180,17 @@ fn build_appearance_page(parent: &gtk::Window) -> AppearancePage {
         "Les modifications sont enregistrées de façon atomique. Elles seront prises en compte au prochain démarrage de BubbleWM ; aucun réglage n’est appliqué à chaud.",
     ));
     restart_note.set_wrap(true);
+    restart_note.add_css_class("bubble-muted");
     restart_note.set_halign(gtk::Align::Start);
     restart_note.add_css_class("dim-label");
     page.append(&restart_note);
 
     let save_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     let save_button = gtk::Button::with_label("Enregistrer les paramètres");
+    save_button.add_css_class("bubble-primary");
     save_button.set_sensitive(can_save);
     let save_status = gtk::Label::new(config_error.as_deref());
+    save_status.add_css_class("bubble-muted");
     save_status.set_wrap(true);
     save_status.set_halign(gtk::Align::Start);
     save_row.append(&save_button);
@@ -226,6 +252,7 @@ fn build_appearance_page(parent: &gtk::Window) -> AppearancePage {
     page.append(&palette_title);
 
     let palette_status = gtk::Label::new(Some("Connexion au compositeur BubbleWM…"));
+    palette_status.add_css_class("bubble-status");
     palette_status.set_halign(gtk::Align::Start);
     page.append(&palette_status);
 
@@ -240,6 +267,7 @@ fn build_appearance_page(parent: &gtk::Window) -> AppearancePage {
         "L’aperçu affiche la dernière palette publiée par BubbleWM. BubbleSettings ne décode pas le fond d’écran et ne lance pas le moteur BubbleColor.",
     ));
     note.set_wrap(true);
+    note.add_css_class("bubble-muted");
     note.set_halign(gtk::Align::Start);
     note.set_margin_top(8);
     page.append(&note);
@@ -443,6 +471,7 @@ fn clear_palette(grid: &gtk::Grid) {
 
 fn render_palette(grid: &gtk::Grid, palette: &ThemePalette) {
     clear_palette(grid);
+
     let entries = [
         ("Primaire", palette.primary),
         ("Conteneur primaire", palette.primary_container),
@@ -458,17 +487,33 @@ fn render_palette(grid: &gtk::Grid, palette: &ThemePalette) {
 
     for (index, (name, rgb)) in entries.iter().enumerate() {
         let hex = format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]);
-        let label = gtk::Label::new(None);
-        label.set_markup(&format!(
-            "<span background=\"{hex}\" foreground=\"#FFFFFF\">   {name}   </span>\n<small>{hex}</small>"
+
+        let card = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        card.add_css_class("bubble-palette-swatch");
+        card.set_hexpand(true);
+
+        let color_sample = gtk::Label::new(None);
+        color_sample.set_markup(&format!(
+            "<span background=\"{hex}\" foreground=\"{hex}\">                              </span>"
         ));
-        label.set_margin_top(12);
-        label.set_margin_bottom(12);
-        label.set_margin_start(8);
-        label.set_margin_end(8);
-        let frame = gtk::Frame::new(Some(name));
-        frame.set_child(Some(&label));
-        grid.attach(&frame, (index % 2) as i32, (index / 2) as i32, 1, 1);
+        color_sample.set_halign(gtk::Align::Fill);
+        color_sample.set_margin_top(8);
+        color_sample.set_margin_bottom(8);
+
+        let name_label = gtk::Label::new(Some(name));
+        name_label.set_halign(gtk::Align::Start);
+        name_label.add_css_class("heading");
+
+        let hex_label = gtk::Label::new(Some(&hex));
+        hex_label.set_halign(gtk::Align::Start);
+        hex_label.add_css_class("bubble-muted");
+        hex_label.add_css_class("monospace");
+
+        card.append(&color_sample);
+        card.append(&name_label);
+        card.append(&hex_label);
+
+        grid.attach(&card, (index % 2) as i32, (index / 2) as i32, 1, 1);
     }
 }
 

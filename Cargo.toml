@@ -10,7 +10,7 @@ readme = "README.md"
 default-run = "bubblewm"
 
 [workspace]
-members = ["bubble-ipc", "bubblepanel", "bubblesettings"]
+members = ["bubble-ipc", "bubblepanel", "bubblesettings", "bubbleui"]
 resolver = "3"
 
 [dependencies]
