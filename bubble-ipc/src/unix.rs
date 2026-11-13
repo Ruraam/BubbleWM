@@ -727,4 +727,72 @@ mod tests {
             Err(ServerError::UnsafeDirectory(_))
         ));
     }
+
+    #[test]
+    fn server_write_timeout_bounds_client_that_does_not_read_response() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let socket_path = private_test_directory(directory.path()).join("control.sock");
+        let server = Arc::new(UnixIpcServer::bind(&socket_path).expect("bind server"));
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let (handled_tx, handled_rx) = std::sync::mpsc::channel();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+
+        let worker_server = Arc::clone(&server);
+        let worker_shutdown = Arc::clone(&shutdown);
+        let worker = thread::spawn(move || {
+            let result = worker_server.serve_until(&worker_shutdown, move |_| {
+                let _ = handled_tx.send(());
+                Response::Failure {
+                    error: ErrorResponse {
+                        code: ErrorCode::Unavailable,
+                        message: "x".repeat(60_000),
+                    },
+                }
+            });
+            let _ = finished_tx.send(result.map_err(|error| error.to_string()));
+        });
+
+        let client = UnixStream::connect(server.path()).expect("connect non-reading client");
+        let receive_buffer_size: libc::c_int = 1_024;
+        // SAFETY: setsockopt reads the provided integer for the duration of the call.
+        let result = unsafe {
+            libc::setsockopt(
+                std::os::fd::AsRawFd::as_raw_fd(&client),
+                libc::SOL_SOCKET,
+                libc::SO_RCVBUF,
+                (&receive_buffer_size as *const libc::c_int).cast(),
+                std::mem::size_of_val(&receive_buffer_size) as libc::socklen_t,
+            )
+        };
+        assert_eq!(result, 0, "set small client receive buffer");
+
+        let request = RequestEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: 99,
+            request: Request::GetCapabilities,
+        };
+        let mut client = client;
+        write_frame(&mut client, &request).expect("send request");
+
+        handled_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("server should dispatch request");
+
+        let started = Instant::now();
+        shutdown.store(true, Ordering::Release);
+        finished_rx
+            .recv_timeout(CLIENT_IO_TIMEOUT + Duration::from_secs(1))
+            .expect("server write must time out instead of blocking indefinitely")
+            .expect("server should stop cleanly");
+        assert!(
+            started.elapsed() <= CLIENT_IO_TIMEOUT + Duration::from_secs(1),
+            "server exceeded the bounded write timeout"
+        );
+
+        worker.join().expect("join IPC worker");
+        drop(client);
+        drop(server);
+        assert!(!socket_path.exists(), "IPC socket should be removed");
+    }
+
 }
