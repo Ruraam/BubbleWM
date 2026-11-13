@@ -598,6 +598,71 @@ mod tests {
     }
 
     #[test]
+    fn server_continues_after_client_disconnects_mid_request() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let socket_path = private_test_directory(directory.path()).join("control.sock");
+        let server = Arc::new(UnixIpcServer::bind(&socket_path).expect("bind server"));
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let worker_server = Arc::clone(&server);
+        let worker_shutdown = Arc::clone(&shutdown);
+        let worker = thread::spawn(move || {
+            worker_server.serve_until(&worker_shutdown, |request| match request {
+                Request::GetCapabilities => Response::Success {
+                    data: ResponseData::Capabilities {
+                        workspace_control: false,
+                    },
+                },
+                _ => Response::Failure {
+                    error: ErrorResponse {
+                        code: ErrorCode::Unavailable,
+                        message: "unsupported test request".into(),
+                    },
+                },
+            })
+        });
+
+        {
+            let mut stalled_client =
+                UnixStream::connect(server.path()).expect("connect partial client");
+            let partial_request = [0_u8, 0_u8, 0_u8, 8, b'{'];
+            std::io::Write::write_all(&mut stalled_client, &partial_request)
+                .expect("send incomplete frame");
+        }
+
+        // Let the server accept the incomplete request and observe EOF.
+        thread::sleep(Duration::from_millis(50));
+
+        let mut valid_client =
+            UnixStream::connect(server.path()).expect("connect valid client");
+        let request = RequestEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: 42,
+            request: Request::GetCapabilities,
+        };
+        write_frame(&mut valid_client, &request).expect("send valid request");
+        let response: ResponseEnvelope =
+            read_frame(&mut BufReader::new(valid_client)).expect("read valid response");
+
+        assert_eq!(response.request_id, 42);
+        assert_eq!(
+            response.response,
+            Response::Success {
+                data: ResponseData::Capabilities {
+                    workspace_control: false,
+                },
+            }
+        );
+
+        shutdown.store(true, Ordering::Release);
+        worker
+            .join()
+            .expect("join server worker")
+            .expect("server should continue after incomplete client");
+        drop(server);
+        assert!(!socket_path.exists(), "IPC socket should be removed");
+    }
+
+    #[test]
     fn rejects_insecure_directory_permissions() {
         let directory = tempfile::tempdir().expect("temporary directory");
         fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o755))
