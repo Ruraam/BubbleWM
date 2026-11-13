@@ -784,8 +784,13 @@ mod tests {
             .recv_timeout(CLIENT_IO_TIMEOUT + Duration::from_secs(1))
             .expect("server write must time out instead of blocking indefinitely")
             .expect("server should stop cleanly");
+        let elapsed = started.elapsed();
         assert!(
-            started.elapsed() <= CLIENT_IO_TIMEOUT + Duration::from_secs(1),
+            elapsed >= Duration::from_secs(1),
+            "the non-reading client should keep the server blocked until its write timeout"
+        );
+        assert!(
+            elapsed <= CLIENT_IO_TIMEOUT + Duration::from_secs(1),
             "server exceeded the bounded write timeout"
         );
 
@@ -794,5 +799,4 @@ mod tests {
         drop(server);
         assert!(!socket_path.exists(), "IPC socket should be removed");
     }
-
 }
