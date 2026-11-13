@@ -85,19 +85,20 @@ fn build_appearance_page() -> AppearancePage {
         "Configurez le schéma de couleurs et les paramètres de génération BubbleColor.",
     )));
 
-    let (initial_config, config_path, config_error) = match (config::load(None), config::default_path()) {
-        (Ok(config), Ok(path)) => (config, Some(path), None),
-        (Err(error), path_result) => (
-            Config::default(),
-            path_result.ok(),
-            Some(format!("Configuration non chargée : {error}")),
-        ),
-        (Ok(config), Err(error)) => (
-            config,
-            None,
-            Some(format!("Chemin de configuration indisponible : {error}")),
-        ),
-    };
+    let (initial_config, config_path, config_error) =
+        match (config::load(None), config::default_path()) {
+            (Ok(config), Ok(path)) => (config, Some(path), None),
+            (Err(error), path_result) => (
+                Config::default(),
+                path_result.ok(),
+                Some(format!("Configuration non chargée : {error}")),
+            ),
+            (Ok(config), Err(error)) => (
+                config,
+                None,
+                Some(format!("Chemin de configuration indisponible : {error}")),
+            ),
+        };
     let can_save = config_path.is_some() && config_error.is_none();
     let config_state = Rc::new(RefCell::new(initial_config.clone()));
 
@@ -121,7 +122,8 @@ fn build_appearance_page() -> AppearancePage {
     palette_variant.append(Some("balanced"), "Équilibrée");
     palette_variant.append(Some("vivid"), "Vive");
     palette_variant.append(Some("neon"), "Néon");
-    let _ = palette_variant.set_active_id(Some(initial_config.bubble_color.palette_variant.as_str()));
+    let _ =
+        palette_variant.set_active_id(Some(initial_config.bubble_color.palette_variant.as_str()));
 
     let bubble_color_enabled = gtk::CheckButton::with_label("Activer la génération BubbleColor");
     bubble_color_enabled.set_active(initial_config.bubble_color.enabled);
@@ -252,17 +254,19 @@ fn start_palette_monitor(grid: gtk::Grid, status: gtk::Label) {
 
     // IPC is blocking by design (bounded socket timeout), so keep it off GTK's
     // main thread. The UI receives immutable palette snapshots only.
-    thread::spawn(move || loop {
-        let result = match UnixIpcClient::connect_default() {
-            Ok(mut client) => client.request(Request::GetThemePalette),
-            Err(error) => {
-                let _ = sender.try_send(Err(error));
-                thread::sleep(Duration::from_secs(1));
-                continue;
-            }
-        };
-        let _ = sender.try_send(result);
-        thread::sleep(Duration::from_secs(1));
+    thread::spawn(move || {
+        loop {
+            let result = match UnixIpcClient::connect_default() {
+                Ok(mut client) => client.request(Request::GetThemePalette),
+                Err(error) => {
+                    let _ = sender.try_send(Err(error));
+                    thread::sleep(Duration::from_secs(1));
+                    continue;
+                }
+            };
+            let _ = sender.try_send(result);
+            thread::sleep(Duration::from_secs(1));
+        }
     });
 
     let grid = RefCell::new(grid);
@@ -285,17 +289,21 @@ fn start_palette_monitor(grid: gtk::Grid, status: gtk::Label) {
                 data: ResponseData::ThemePalette { palette: None },
             })) => {
                 clear_palette(&grid.borrow());
-                status
-                    .borrow()
-                    .set_text("BubbleColor est actif, mais aucune palette n’est encore disponible.");
+                status.borrow().set_text(
+                    "BubbleColor est actif, mais aucune palette n’est encore disponible.",
+                );
             }
             Ok(Ok(Response::Failure { error })) => {
                 clear_palette(&grid.borrow());
-                status.borrow().set_text(&format!("BubbleWM : {}", error.message));
+                status
+                    .borrow()
+                    .set_text(&format!("BubbleWM : {}", error.message));
             }
             Ok(Ok(_)) => {
                 clear_palette(&grid.borrow());
-                status.borrow().set_text("Réponse IPC inattendue de BubbleWM.");
+                status
+                    .borrow()
+                    .set_text("Réponse IPC inattendue de BubbleWM.");
             }
             Ok(Err(error)) => {
                 clear_palette(&grid.borrow());
@@ -305,7 +313,9 @@ fn start_palette_monitor(grid: gtk::Grid, status: gtk::Label) {
             }
             Err(TryRecvError::Empty) => {}
             Err(TryRecvError::Disconnected) => {
-                status.borrow().set_text("Le service de palette est arrêté.");
+                status
+                    .borrow()
+                    .set_text("Le service de palette est arrêté.");
                 return glib::ControlFlow::Break;
             }
         }

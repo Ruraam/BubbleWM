@@ -4,7 +4,10 @@
 mod backend;
 
 use anyhow::{Context, Result, bail};
-use bubblewm::{config, theme::{ColorMode, PaletteStyle, ThemeOptions}};
+use bubblewm::{
+    config,
+    theme::{ColorMode, PaletteStyle, ThemeOptions},
+};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
