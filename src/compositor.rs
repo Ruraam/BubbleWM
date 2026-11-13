@@ -7,7 +7,10 @@
 //! multiple outputs and native DRM/KMS remain future work.
 
 use std::{
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -2721,9 +2724,18 @@ impl PointerGrab<CompositorStateData> for WindowPointerGrab {
     fn unset(&mut self, _data: &mut CompositorStateData) {}
 }
 
-#[derive(Default)]
 struct WaylandClientState {
     compositor_state: CompositorClientState,
+    connected: AtomicBool,
+}
+
+impl Default for WaylandClientState {
+    fn default() -> Self {
+        Self {
+            compositor_state: CompositorClientState::default(),
+            connected: AtomicBool::new(true),
+        }
+    }
 }
 
 impl ClientData for WaylandClientState {
@@ -2732,6 +2744,7 @@ impl ClientData for WaylandClientState {
     }
 
     fn disconnected(&self, _client_id: ClientId, reason: DisconnectReason) {
+        self.connected.store(false, Ordering::Release);
         info!(?reason, "Wayland client disconnected");
     }
 }
@@ -3137,6 +3150,14 @@ pub fn run_winit_with_theme(
         display
             .flush_clients()
             .context("cannot flush Wayland client events")?;
+
+        // Client handles keep their ClientData alive. Drop disconnected handles
+        // so repeated client connections cannot accumulate stale client state.
+        clients.retain(|client| {
+            client
+                .get_data::<WaylandClientState>()
+                .is_some_and(|data| data.connected.load(Ordering::Acquire))
+        });
 
         // Winit supplies the fallback named cursor. Hide it when a client asks
         // for a custom surface or explicitly hides the pointer; the custom
