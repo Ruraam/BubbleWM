@@ -27,6 +27,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+      - name: Validate Bubble icon theme
+        run: python3 tools/check-icons.py
       - name: Format
         run: cargo fmt --all -- --check
       - name: Test workspace

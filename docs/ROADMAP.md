@@ -110,3 +110,13 @@
 
 ## 1.0.0 — BubbleOS integration
 - [ ] Packaging, session integration, documentation and release hardening.
+
+
+## Bubble Icons — initial foundation
+- [x] Add an original freedesktop-compatible `Bubble` icon theme with scalable SVG directories.
+- [x] Add first-party BubbleWM, BubblePanel and BubbleSettings artwork plus starter system icons.
+- [x] Add a standard-library validator for theme metadata, declared directories and SVG structure.
+- [ ] Expand application aliases and desktop-entry coverage using an auditable inventory.
+- [ ] Design and validate Bubble Dark, Bubble Light, Bubble Neon and Bubble Glass variants.
+- [ ] Add missing-icon reporting against installed desktop entries.
+- [ ] Integrate icon-theme selection and previews into BubbleSettings.
