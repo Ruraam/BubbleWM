@@ -887,13 +887,6 @@ impl CompositorStateData {
                 let content_location = self.content_location(&window, location);
                 self.space.map_element(window, content_location, false);
 
-                // Parent changes can arrive after the child already has a buffer.
-                // Rebuild the complete family order now, not only on workspace switch.
-                let family_root = self.root_surface_for_toplevel(&root);
-                if let Some(root_window) = self.managed_window_for_surface(&family_root) {
-                    info!("Raising transient family after parent assignment");
-                    self.raise_window_family(&root_window);
-                }
             }
         }
     }
@@ -937,22 +930,12 @@ impl CompositorStateData {
             .collect::<Vec<_>>();
         family_windows.sort_by_key(|(order, _)| *order);
 
-        let target_is_family_root = self
-            .windows
+        if let Some(position) = family_windows
             .iter()
-            .find(|entry| entry.window == *window)
-            .is_some_and(|entry| entry.parent_surface.is_none());
-
-        // Keep the root below its transient descendants when raising the
-        // complete family. An explicitly targeted child is still raised last.
-        if !target_is_family_root {
-            if let Some(position) = family_windows
-                .iter()
-                .position(|(_, member)| member == window)
-            {
-                let target = family_windows.remove(position);
-                family_windows.push(target);
-            }
+            .position(|(_, member)| member == window)
+        {
+            let target = family_windows.remove(position);
+            family_windows.push(target);
         }
 
         // Reflow tiled windows before changing z-order. Mapping/configuring
@@ -1739,8 +1722,6 @@ impl CompositorStateData {
         };
 
         let window = self.windows[index].window.clone();
-        let was_mapped = self.space.element_location(&window).is_some();
-        let is_transient = self.windows[index].parent_surface.is_some();
         let has_buffer =
             with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false);
         info!(
@@ -1844,22 +1825,6 @@ impl CompositorStateData {
         // A newly mapped parent can be inserted above transient children
         // that were mapped earlier. Rebuild family stacking whenever either
         // a child or a parent with transient descendants is mapped.
-        let has_transient_children = self
-            .windows
-            .iter()
-            .any(|entry| entry.parent_surface.as_ref() == Some(surface));
-        if !was_mapped
-            && (is_transient || has_transient_children)
-            && !self.windows[index].minimized
-            && self.windows[index].workspace == self.active_workspace
-        {
-            // Raise from the family root so the parent stays below every
-            // mapped transient descendant, regardless of commit order.
-            let family_root = self.root_surface_for_toplevel(surface);
-            if let Some(root_window) = self.managed_window_for_surface(&family_root) {
-                self.raise_window_family(&root_window);
-            }
-        }
     }
 
     fn begin_move(&mut self, surface: &ToplevelSurface, seat: &Seat<Self>, serial: Serial) {
