@@ -3080,6 +3080,10 @@ pub fn run_winit_with_theme(
     let start_time = Instant::now();
     let mut clients = Vec::new();
     let mut running = true;
+    // Capture a small sample of the first frames after a client toplevel
+    // receives a real buffer. This distinguishes missing Space elements from
+    // elements that are present but omitted by output rendering.
+    let mut initial_render_diagnostics_remaining = 8;
 
     while running {
         let status = winit_loop.dispatch_new_events(|event| match event {
@@ -3411,6 +3415,51 @@ pub fn run_winit_with_theme(
                 .space
                 .render_elements_for_output(renderer, &state.output, 1.0)
                 .map_err(|error| anyhow!("cannot assemble output scene: {error}"))?;
+
+            if initial_render_diagnostics_remaining > 0
+                && state.windows.iter().any(|entry| {
+                    entry.window.toplevel().is_some_and(|toplevel| {
+                        with_renderer_surface_state(toplevel.wl_surface(), |surface_state| {
+                            surface_state.buffer().is_some()
+                        })
+                        .unwrap_or(false)
+                    })
+                })
+            {
+                let managed = state
+                    .windows
+                    .iter()
+                    .map(|entry| {
+                        let title = entry
+                            .window
+                            .toplevel()
+                            .and_then(|toplevel| toplevel_title(&toplevel))
+                            .unwrap_or_else(|| "<untitled>".into());
+                        let has_buffer = entry.window.toplevel().is_some_and(|toplevel| {
+                            with_renderer_surface_state(
+                                toplevel.wl_surface(),
+                                |surface_state| surface_state.buffer().is_some(),
+                            )
+                            .unwrap_or(false)
+                        });
+                        format!(
+                            "{title}:buffer={has_buffer},mapped={},workspace={},minimized={},location={:?}",
+                            state.space.element_location(&entry.window).is_some(),
+                            entry.workspace,
+                            entry.minimized,
+                            entry.location
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                info!(
+                    output_size = ?size,
+                    managed_windows = ?managed,
+                    space_elements = state.space.elements().count(),
+                    rendered_elements = elements.len(),
+                    "Initial output render diagnostic"
+                );
+                initial_render_diagnostics_remaining -= 1;
+            }
 
             let cursor_elements: Vec<
                 WaylandSurfaceRenderElement<smithay::backend::renderer::gles::GlesRenderer>,
