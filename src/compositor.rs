@@ -3379,6 +3379,32 @@ pub fn run_winit_with_theme(
         display
             .dispatch_clients(&mut state)
             .context("Wayland client dispatch failed")?;
+
+        // Some clients expose their committed buffer to the renderer only
+        // after the post-commit hook has run. Retry the normal toplevel
+        // mapping path once the client dispatch has completed, rather than
+        // waiting for a workspace switch to remap otherwise-ready windows.
+        let ready_unmapped_toplevels = state
+            .windows
+            .iter()
+            .filter(|entry| {
+                !entry.minimized
+                    && entry.workspace == state.active_workspace
+                    && state.space.element_location(&entry.window).is_none()
+            })
+            .filter_map(|entry| {
+                let surface = entry.window.toplevel()?.wl_surface().clone();
+                let has_buffer = with_renderer_surface_state(&surface, |surface_state| {
+                    surface_state.buffer().is_some()
+                })
+                .unwrap_or(false);
+                has_buffer.then_some(surface)
+            })
+            .collect::<Vec<_>>();
+        for surface in ready_unmapped_toplevels {
+            state.handle_toplevel_commit(&surface);
+        }
+
         state.popups.cleanup();
         state.space.refresh();
         display
