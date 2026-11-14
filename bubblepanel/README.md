@@ -11,12 +11,12 @@ The initial executable:
 - Creates a top-layer surface anchored to the bottom edge.
 - Reserves a 40-pixel exclusive zone.
 - Draws a compact three-zone prototype using shared-memory buffers.
-- Shows workspace placeholders, status placeholders and a local-time seven-segment clock.
+- Shows live workspace indicators when BubbleWM IPC is available, plus status placeholders and a local-time seven-segment clock.
 - Refreshes the clock when the displayed minute changes.
 - Tracks pointer hover and left-click press/release targets.
-- Detects vertical, horizontal and diagonal scroll gestures, including workspace navigation intent.
-
-The panel currently logs workspace navigation intent. It does not yet send commands to BubbleWM or switch workspaces.
+- Queries BubbleWM's authenticated local IPC endpoint for workspace capabilities and active state.
+- Sends workspace activation requests on click and previous/next requests when scrolling vertically over a workspace indicator.
+- Remains a visual-only panel when the host compositor does not expose BubbleWM's IPC endpoint.
 
 ## Build and run
 
@@ -27,14 +27,14 @@ cargo build -p bubblepanel
 cargo run -p bubblepanel
 ```
 
-Run it inside a Wayland session whose compositor supports wlr-layer-shell. BubbleWM's initial Winit server does not yet implement the compositor side of layer-shell, so use a compatible existing Wayland compositor for development and visual testing.
+Run it inside a Wayland session whose compositor supports wlr-layer-shell. BubbleWM implements the server side in its nested Winit backend, so it can be tested directly with BubblePanel.
 
 ## Current limitations
 
 - Software rendering through wl_shm; no GPU renderer.
 - Fixed bottom placement and 40-pixel height.
 - Single surface; multi-monitor lifecycle is not implemented.
-- No live workspace data, task list or IPC client yet. BubbleWM has a running authenticated IPC endpoint, but BubblePanel is not connected to it.
+- Four fixed workspace indicators; workspace names, dynamic counts and task-list integration are not implemented yet.
 - No real network, audio, Bluetooth, battery, notification or media modules.
 - No user-facing configuration, blur or transparency.
 

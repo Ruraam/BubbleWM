@@ -8,9 +8,11 @@
 use std::{
     num::NonZeroU32,
     os::fd::{AsFd, AsRawFd},
+    time::{Duration, Instant},
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
+use bubble_ipc::{Request, Response, ResponseData, ThemePalette, unix::UnixIpcClient};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_registry,
@@ -168,25 +170,35 @@ fn main() -> Result<()> {
         layer,
         width: INITIAL_WIDTH,
         height: PANEL_HEIGHT,
-        first_configure: true,
         closed: false,
         clock_minute: current_clock_minute(),
         pointer: None,
         pointer_interaction: PointerInteraction::default(),
+        workspace_client: WorkspaceIpcClient::from_environment(),
+        workspace_status: WorkspaceStatus::default(),
+        theme_palette: None,
     };
+    panel.refresh_workspace_status();
+    panel.refresh_theme_palette();
 
     info!("Waiting for the compositor to configure BubblePanel");
     let wayland_fd = connection.as_fd().as_raw_fd();
+    let mut next_workspace_refresh = Instant::now() + Duration::from_secs(1);
     while !panel.closed {
-        // Poll instead of blocking indefinitely so the clock can refresh without
-        // introducing a background thread or continuously requesting frames.
+        // Flush queued Wayland requests before waiting for readable events.
+        // Otherwise the client can wait for a configure that the compositor
+        // cannot send because get_layer_surface/commit are still buffered.
+        connection
+            .flush()
+            .context("cannot flush pending Wayland requests")?;
+
+        // Poll instead of blocking indefinitely so the clock and workspace
+        // indicators can refresh without a background thread or frame loop.
         let mut descriptor = libc::pollfd {
             fd: wayland_fd,
             events: libc::POLLIN,
             revents: 0,
         };
-        // A one-second timeout keeps the loop responsive while the clock itself
-        // is only redrawn when its displayed minute changes.
         let ready = unsafe { libc::poll(&mut descriptor, 1, 1_000) };
         if ready < 0 {
             let error = std::io::Error::last_os_error();
@@ -202,8 +214,22 @@ fn main() -> Result<()> {
             event_queue
                 .blocking_dispatch(&mut panel)
                 .context("Wayland event dispatch failed")?;
-        } else if panel.clock_minute != current_clock_minute() {
-            panel.draw().context("cannot refresh the panel clock")?;
+        }
+
+        let now = Instant::now();
+        let refresh_due = now >= next_workspace_refresh;
+        let (workspace_changed, theme_changed) = if refresh_due {
+            next_workspace_refresh = now + Duration::from_secs(1);
+            (
+                panel.refresh_workspace_status(),
+                panel.refresh_theme_palette(),
+            )
+        } else {
+            (false, false)
+        };
+        let clock_changed = panel.clock_minute != current_clock_minute();
+        if workspace_changed || theme_changed || clock_changed {
+            panel.draw().context("cannot refresh BubblePanel")?;
         }
     }
 
@@ -323,6 +349,83 @@ impl PointerInteraction {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WorkspaceStatus {
+    active: u32,
+    count: u32,
+    control: bool,
+}
+
+impl Default for WorkspaceStatus {
+    fn default() -> Self {
+        Self {
+            active: 0,
+            count: 4,
+            control: false,
+        }
+    }
+}
+
+struct WorkspaceIpcClient {
+    client: UnixIpcClient,
+}
+
+impl WorkspaceIpcClient {
+    fn from_environment() -> Option<Self> {
+        match UnixIpcClient::connect_default() {
+            Ok(client) => Some(Self { client }),
+            Err(error) => {
+                warn!(%error, "BubbleWM workspace IPC is unavailable");
+                None
+            }
+        }
+    }
+
+    fn request(&mut self, request: Request) -> Result<Response> {
+        self.client.request(request).map_err(|error| anyhow!(error))
+    }
+
+    fn query_theme_palette(&mut self) -> Result<Option<ThemePalette>> {
+        match self.request(Request::GetThemePalette)? {
+            Response::Success {
+                data: ResponseData::ThemePalette { palette },
+            } => Ok(palette.filter(|palette| palette.schema_version == 1)),
+            Response::Failure { error } => {
+                bail!("BubbleWM theme palette query failed: {}", error.message)
+            }
+            Response::Success { .. } => {
+                bail!("BubbleWM returned an invalid theme palette response")
+            }
+        }
+    }
+
+    fn query_status(&mut self) -> Result<WorkspaceStatus> {
+        let control = match self.request(Request::GetCapabilities)? {
+            Response::Success {
+                data: ResponseData::Capabilities { workspace_control },
+            } => workspace_control,
+            Response::Failure { error } => {
+                bail!("BubbleWM capability query failed: {}", error.message)
+            }
+            Response::Success { .. } => bail!("BubbleWM returned an invalid capability response"),
+        };
+
+        match self.request(Request::GetWorkspaceState)? {
+            Response::Success {
+                data: ResponseData::WorkspaceState { active, count },
+            } if count > 0 && active < count => Ok(WorkspaceStatus {
+                active,
+                count,
+                control,
+            }),
+            Response::Success { .. } => bail!("BubbleWM returned invalid workspace state"),
+            Response::Failure { error } => {
+                bail!("BubbleWM workspace query failed: {}", error.message)
+            }
+        }
+    }
+}
+
 struct BubblePanel {
     registry_state: RegistryState,
     output_state: OutputState,
@@ -332,14 +435,76 @@ struct BubblePanel {
     layer: LayerSurface,
     width: u32,
     height: u32,
-    first_configure: bool,
     closed: bool,
     clock_minute: String,
     pointer: Option<wl_pointer::WlPointer>,
     pointer_interaction: PointerInteraction,
+    workspace_client: Option<WorkspaceIpcClient>,
+    workspace_status: WorkspaceStatus,
+    theme_palette: Option<ThemePalette>,
 }
 
 impl BubblePanel {
+    fn refresh_workspace_status(&mut self) -> bool {
+        let Some(client) = self.workspace_client.as_mut() else {
+            return false;
+        };
+        match client.query_status() {
+            Ok(status) => {
+                let changed = self.workspace_status != status;
+                self.workspace_status = status;
+                changed
+            }
+            Err(error) => {
+                warn!(%error, "Cannot refresh BubbleWM workspace state");
+                false
+            }
+        }
+    }
+
+    fn refresh_theme_palette(&mut self) -> bool {
+        let Some(client) = self.workspace_client.as_mut() else {
+            return false;
+        };
+        match client.query_theme_palette() {
+            Ok(palette) => {
+                let changed = self.theme_palette != palette;
+                self.theme_palette = palette;
+                changed
+            }
+            Err(error) => {
+                tracing::debug!(%error, "Cannot refresh BubbleColor palette for BubblePanel");
+                false
+            }
+        }
+    }
+
+    fn send_workspace_request(&mut self, request: Request) {
+        if !self.workspace_status.control {
+            info!("Workspace control is not available from this compositor");
+            return;
+        }
+
+        let result = self
+            .workspace_client
+            .as_mut()
+            .ok_or_else(|| anyhow!("BubbleWM IPC client is unavailable"))
+            .and_then(|client| client.request(request));
+
+        match result {
+            Ok(Response::Success { .. }) => {
+                self.refresh_workspace_status();
+                if let Err(error) = self.draw() {
+                    warn!(%error, "Cannot redraw BubblePanel after workspace change");
+                }
+            }
+            Ok(Response::Failure { error }) => {
+                warn!(message = %error.message, ?error.code, "BubbleWM rejected workspace request");
+            }
+            Err(error) => warn!(%error, "BubblePanel workspace request failed"),
+        }
+    }
+
     fn draw(&mut self) -> Result<()> {
         let width = self.width.clamp(1, MAX_BUFFER_WIDTH);
         let height = self.height.clamp(1, PANEL_HEIGHT);
@@ -355,10 +520,19 @@ impl BubblePanel {
             .context("cannot create a shared-memory panel buffer")?;
 
         canvas.fill(0);
-        fill_rect(canvas, width, height, 0, 0, width, height, 0xFF1B202B);
-        draw_brand(canvas, width, height);
-        draw_workspaces(canvas, width, height);
-        draw_status_and_clock(canvas, width, height);
+        let palette = self.theme_palette.as_ref();
+        let background = palette.map_or(0xFF1B202B, |theme| argb(theme.surface));
+        fill_rect(canvas, width, height, 0, 0, width, height, background);
+        draw_brand(canvas, width, height, palette);
+        draw_workspaces(
+            canvas,
+            width,
+            height,
+            self.workspace_status.active,
+            self.workspace_status.count,
+            palette,
+        );
+        draw_status_and_clock(canvas, width, height, palette);
 
         self.layer
             .wl_surface()
@@ -465,9 +639,6 @@ impl LayerShellHandler for BubblePanel {
         self.width = NonZeroU32::new(configure.new_size.0).map_or(INITIAL_WIDTH, NonZeroU32::get);
         self.height = NonZeroU32::new(configure.new_size.1).map_or(PANEL_HEIGHT, NonZeroU32::get);
 
-        if self.first_configure {
-            self.first_configure = false;
-        }
         if let Err(error) = self.draw() {
             warn!(%error, "BubblePanel rendering failed");
             self.closed = true;
@@ -559,7 +730,14 @@ impl PointerHandler for BubblePanel {
                 }
                 PointerEventKind::Release { button, .. } if *button == BTN_LEFT => {
                     if let Some(action) = self.pointer_interaction.release(action) {
-                        info!(?action, x, y, "BubblePanel left-click completed");
+                        match action {
+                            PanelAction::Workspace(index) => {
+                                self.send_workspace_request(Request::ActivateWorkspace {
+                                    index: u32::from(index.saturating_sub(1)),
+                                });
+                            }
+                            _ => info!(?action, x, y, "BubblePanel left-click completed"),
+                        }
                     }
                 }
                 PointerEventKind::Axis {
@@ -571,13 +749,11 @@ impl PointerHandler for BubblePanel {
                         if let Some(workspace_direction) =
                             workspace_scroll_direction(action, directions)
                         {
-                            info!(
-                                ?workspace_direction,
-                                ?action,
-                                x,
-                                y,
-                                "BubblePanel workspace navigation requested"
-                            );
+                            let request = match workspace_direction {
+                                WorkspaceScrollDirection::Previous => Request::WorkspacePrevious,
+                                WorkspaceScrollDirection::Next => Request::WorkspaceNext,
+                            };
+                            self.send_workspace_request(request);
                         } else {
                             info!(
                                 ?directions,
@@ -656,28 +832,67 @@ fn fill_rect(
     }
 }
 
-fn draw_brand(canvas: &mut [u8], width: u32, height: u32) {
-    fill_rect(canvas, width, height, 16, 12, 16, 16, 0xFF62D6E8);
-    fill_rect(canvas, width, height, 20, 16, 8, 8, 0xFF1B202B);
-    fill_rect(canvas, width, height, 40, 18, 2, 4, 0xFFE7EDF5);
-    fill_rect(canvas, width, height, 47, 18, 2, 4, 0xFFE7EDF5);
-    fill_rect(canvas, width, height, 54, 18, 2, 4, 0xFFE7EDF5);
+fn argb(color: [u8; 3]) -> u32 {
+    0xFF00_0000 | (u32::from(color[0]) << 16) | (u32::from(color[1]) << 8) | u32::from(color[2])
 }
 
-fn draw_workspaces(canvas: &mut [u8], width: u32, height: u32) {
-    for index in 0..4 {
+fn draw_brand(canvas: &mut [u8], width: u32, height: u32, palette: Option<&ThemePalette>) {
+    let accent = palette.map_or(0xFF62D6E8, |theme| argb(theme.primary));
+    let foreground = palette.map_or(0xFFE7EDF5, |theme| argb(theme.on_surface));
+    let surface = palette.map_or(0xFF1B202B, |theme| argb(theme.surface));
+    fill_rect(canvas, width, height, 16, 12, 16, 16, accent);
+    fill_rect(canvas, width, height, 20, 16, 8, 8, surface);
+    fill_rect(canvas, width, height, 40, 18, 2, 4, foreground);
+    fill_rect(canvas, width, height, 47, 18, 2, 4, foreground);
+    fill_rect(canvas, width, height, 54, 18, 2, 4, foreground);
+}
+
+fn draw_workspaces(
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    active_workspace: u32,
+    workspace_count: u32,
+    palette: Option<&ThemePalette>,
+) {
+    for index in 0..4_u32 {
         let x = 82 + index * 24;
-        let color = if index == 0 { 0xFF62D6E8 } else { 0xFF465060 };
+        let visible = index < workspace_count;
+        let active = visible && index == active_workspace;
+        let color = if active {
+            palette.map_or(0xFF62D6E8, |theme| argb(theme.primary))
+        } else if visible {
+            palette.map_or(0xFF465060, |theme| argb(theme.surface_variant))
+        } else {
+            palette.map_or(0xFF303744, |theme| argb(theme.outline))
+        };
         fill_rect(canvas, width, height, x, 14, 16, 12, color);
-        if index != 0 {
-            fill_rect(canvas, width, height, x + 3, 17, 10, 6, 0xFF1B202B);
+        if !active {
+            fill_rect(
+                canvas,
+                width,
+                height,
+                x + 3,
+                17,
+                10,
+                6,
+                palette.map_or(0xFF1B202B, |theme| argb(theme.surface)),
+            );
         }
     }
 }
 
-fn draw_status_and_clock(canvas: &mut [u8], width: u32, height: u32) {
+fn draw_status_and_clock(
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    palette: Option<&ThemePalette>,
+) {
     let clock = chrono::Local::now().format("%H:%M").to_string();
     let origin = width.saturating_sub(106);
+    let accent = palette.map_or(0xFF62D6E8, |theme| argb(theme.primary));
+    let foreground = palette.map_or(0xFFE7EDF5, |theme| argb(theme.on_surface));
+    let outline = palette.map_or(0xFF657184, |theme| argb(theme.outline));
     fill_rect(
         canvas,
         width,
@@ -686,7 +901,7 @@ fn draw_status_and_clock(canvas: &mut [u8], width: u32, height: u32) {
         17,
         2,
         6,
-        0xFF657184,
+        outline,
     );
     fill_rect(
         canvas,
@@ -696,7 +911,7 @@ fn draw_status_and_clock(canvas: &mut [u8], width: u32, height: u32) {
         16,
         4,
         8,
-        0xFF62D6E8,
+        accent,
     );
     fill_rect(
         canvas,
@@ -706,23 +921,23 @@ fn draw_status_and_clock(canvas: &mut [u8], width: u32, height: u32) {
         13,
         4,
         11,
-        0xFF62D6E8,
+        accent,
     );
 
     let mut cursor = origin;
     for character in clock.chars() {
         if character == ':' {
-            fill_rect(canvas, width, height, cursor + 5, 15, 3, 3, 0xFFE7EDF5);
-            fill_rect(canvas, width, height, cursor + 5, 22, 3, 3, 0xFFE7EDF5);
+            fill_rect(canvas, width, height, cursor + 5, 15, 3, 3, foreground);
+            fill_rect(canvas, width, height, cursor + 5, 22, 3, 3, foreground);
             cursor += 12;
         } else if let Some(digit) = character.to_digit(10) {
-            draw_digit(canvas, width, height, cursor, digit);
+            draw_digit(canvas, width, height, cursor, digit, foreground);
             cursor += 18;
         }
     }
 }
 
-fn draw_digit(canvas: &mut [u8], width: u32, height: u32, x: u32, digit: u32) {
+fn draw_digit(canvas: &mut [u8], width: u32, height: u32, x: u32, digit: u32, color: u32) {
     const SEGMENTS: [u8; 10] = [
         0b0111111, 0b0000110, 0b1011011, 0b1001111, 0b1100110, 0b1101101, 0b1111101, 0b0000111,
         0b1111111, 0b1101111,
@@ -741,7 +956,7 @@ fn draw_digit(canvas: &mut [u8], width: u32, height: u32, x: u32, digit: u32) {
     ];
     for (index, (sx, sy, sw, sh)) in segments.into_iter().enumerate() {
         if mask & (1 << index) != 0 {
-            fill_rect(canvas, width, height, x + sx, sy + 8, sw, sh, 0xFFE7EDF5);
+            fill_rect(canvas, width, height, x + sx, sy + 8, sw, sh, color);
         }
     }
 }
@@ -759,9 +974,14 @@ mod tests {
     }
 
     #[test]
+    fn rgb_palette_colors_convert_to_opaque_argb() {
+        assert_eq!(argb([0x12, 0x34, 0x56]), 0xFF123456);
+    }
+
+    #[test]
     fn digit_drawing_ignores_invalid_values() {
         let mut canvas = vec![0; 40 * 40 * 4];
-        draw_digit(&mut canvas, 40, 40, 0, 99);
+        draw_digit(&mut canvas, 40, 40, 0, 99, 0xFFFFFFFF);
         assert!(canvas.iter().all(|byte| *byte == 0));
     }
 

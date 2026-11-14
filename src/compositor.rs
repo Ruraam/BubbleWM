@@ -1,18 +1,22 @@
-//! Initial nested Smithay compositor backend.
+//! Nested Smithay compositor backend.
 //!
-//! This milestone creates a Winit window, exports the core compositor, shm,
-//! seat, xdg-shell and wl_output globals, accepts clients, keeps a Smithay
-//! desktop space, routes pointer/keyboard events, and renders mapped windows.
-//! Decorations, workspaces, layer-shell and native DRM/KMS remain future work.
+//! The Winit development backend exports the core Wayland globals, xdg-shell,
+//! server-side decorations and wlr-layer-shell. It maps and renders windows,
+//! popups and desktop layers, routes pointer/keyboard events, and accounts for
+//! layer-shell exclusive zones when positioning maximized windows. Workspaces,
+//! multiple outputs and native DRM/KMS remain future work.
 
 use std::{
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, anyhow};
-use bubble_ipc::{ErrorCode, ErrorResponse, Request, Response, ResponseData};
+use bubble_ipc::{ErrorCode, ErrorResponse, Request, Response, ResponseData, ThemePalette};
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, ButtonState, Event as BackendInputEvent, InputEvent,
@@ -24,26 +28,29 @@ use smithay::{
             element::{
                 Kind,
                 solid::{SolidColorBuffer, SolidColorRenderElement},
+                surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
             },
             utils::{draw_render_elements, on_commit_buffer_handler, with_renderer_surface_state},
         },
         winit::{self, WinitEvent},
     },
-    delegate_compositor, delegate_data_device, delegate_output, delegate_seat, delegate_shm,
+    delegate_compositor, delegate_data_device, delegate_layer_shell, delegate_output,
+    delegate_primary_selection, delegate_seat, delegate_shm, delegate_xdg_activation,
     delegate_xdg_decoration, delegate_xdg_shell,
     desktop::{
-        PopupKeyboardGrab, PopupKind, PopupManager, PopupPointerGrab, PopupUngrabStrategy, Space,
-        Window, WindowSurfaceType, find_popup_root_surface, get_popup_toplevel_coords,
+        LayerSurface as DesktopLayerSurface, PopupKeyboardGrab, PopupKind, PopupManager,
+        PopupPointerGrab, PopupUngrabStrategy, Space, Window, WindowSurfaceType,
+        find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output,
     },
     input::{
         Seat, SeatHandler, SeatState,
         keyboard::{FilterResult, KeyboardHandle, Keysym, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent, CursorImageStatus, Focus, GestureHoldBeginEvent,
-            GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent,
-            GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
-            GestureSwipeUpdateEvent, GrabStartData, MotionEvent, PointerGrab, PointerHandle,
-            PointerInnerHandle, RelativeMotionEvent,
+            AxisFrame, ButtonEvent, CursorImageStatus, CursorImageSurfaceData, Focus,
+            GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+            GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+            GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData, MotionEvent, PointerGrab,
+            PointerHandle, PointerInnerHandle, RelativeMotionEvent,
         },
     },
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
@@ -70,7 +77,7 @@ use smithay::{
             TraversalAction, add_post_commit_hook, get_parent, with_states,
             with_surface_tree_downward,
         },
-        output::OutputHandler,
+        output::{OutputHandler, OutputManagerState},
         seat::WaylandFocus,
         selection::{
             SelectionHandler,
@@ -78,16 +85,31 @@ use smithay::{
                 ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
                 set_data_device_focus,
             },
+            primary_selection::{
+                PrimarySelectionHandler, PrimarySelectionState, set_primary_focus,
+            },
+        },
+        shell::wlr_layer::{
+            KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler,
+            WlrLayerShellState,
         },
         shell::xdg::{
             PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
-            XdgShellState,
+            XdgShellState, XdgToplevelSurfaceData,
             decoration::{XdgDecorationHandler, XdgDecorationState},
         },
         shm::{ShmHandler, ShmState},
+        xdg_activation::{
+            XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
+        },
     },
 };
 use tracing::info;
+
+use crate::layout::{MasterStackConfig, Rect as LayoutRect, master_stack};
+use crate::session::SessionManager;
+use crate::theme::{Rgb, ThemeDocument, ThemeOptions};
+use crate::theme_runtime::ThemeRuntime;
 
 use crate::ipc::IpcRuntime;
 
@@ -95,6 +117,7 @@ const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const OUTPUT_REFRESH_MILLIHZ: i32 = 60_000;
 const WINDOW_CASCADE_STEP: i32 = 32;
 const WINDOW_CASCADE_COUNT: u32 = 8;
+const WORKSPACE_COUNT: u32 = 4;
 const TITLEBAR_HEIGHT: i32 = 32;
 const DECORATION_BUTTON_SIZE: i32 = 16;
 const DECORATION_BUTTON_MARGIN: i32 = 8;
@@ -119,6 +142,20 @@ struct ManagedWindow {
     parent_surface: Option<WlSurface>,
     minimized: bool,
     minimized_order: Option<u64>,
+    workspace: u32,
+    /// Stable order used by the tiler; unlike stacking_order, focus changes never modify it.
+    tiling_order: u64,
+    stacking_order: u64,
+    tiling_restore: Option<RestoreGeometry>,
+    layout_override: WindowLayoutOverride,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum WindowLayoutOverride {
+    #[default]
+    Automatic,
+    Floating,
+    Tiled,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,23 +194,43 @@ struct WindowPointerGrab {
 struct CompositorStateData {
     display_handle: DisplayHandle,
     compositor_state: CompositorState,
+    layer_shell_state: WlrLayerShellState,
     xdg_shell_state: XdgShellState,
     _xdg_decoration_state: XdgDecorationState,
     shm_state: ShmState,
     data_device_state: DataDeviceState,
+    primary_selection_state: PrimarySelectionState,
+    xdg_activation_state: XdgActivationState,
+    recent_input_serials: Vec<(Serial, Instant, ClientId)>,
     seat_state: SeatState<Self>,
     seat: Seat<Self>,
     keyboard: Option<KeyboardHandle<Self>>,
     pointer: Option<PointerHandle<Self>>,
     pointer_location: smithay::utils::Point<f64, smithay::utils::Logical>,
+    logo_modifier_pressed: bool,
+    pointer_cursor_status: CursorImageStatus,
     output: Output,
+    output_manager_state: OutputManagerState,
     space: Space<Window>,
     windows: Vec<ManagedWindow>,
     popups: PopupManager,
     resize_session: Option<ResizeSession>,
     next_window_position: u32,
     next_minimized_order: u64,
-    suppressed_keys: Vec<Keysym>,
+    next_stacking_order: u64,
+    active_workspace: u32,
+    workspace_count: u32,
+    suppressed_keys: Vec<u32>,
+    layout_mode: LayoutMode,
+    theme_runtime: Option<ThemeRuntime>,
+    theme_generation: u64,
+    active_theme: Option<Arc<ThemeDocument>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LayoutMode {
+    Floating,
+    MasterStack,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -181,38 +238,175 @@ enum CompositorShortcut {
     Minimize,
     Restore,
     Close,
+    WorkspacePrevious,
+    WorkspaceNext,
+    ToggleLayout,
+    ToggleWindowLayout,
 }
 
 fn compositor_shortcut(modifiers: ModifiersState, keysym: Keysym) -> Option<CompositorShortcut> {
+    // Keep restore off the host's Super-based global shortcuts (XFCE uses
+    // Super+R for its application finder in common configurations).
+    if modifiers.ctrl && modifiers.alt && matches!(keysym, Keysym::r | Keysym::R) {
+        return Some(CompositorShortcut::Restore);
+    }
+
     if !modifiers.logo {
         return None;
     }
 
     match keysym {
         Keysym::h => Some(CompositorShortcut::Minimize),
-        Keysym::Tab => Some(CompositorShortcut::Restore),
         Keysym::q => Some(CompositorShortcut::Close),
+        Keysym::Left => Some(CompositorShortcut::WorkspacePrevious),
+        Keysym::Right => Some(CompositorShortcut::WorkspaceNext),
+        Keysym::t | Keysym::T => Some(CompositorShortcut::ToggleLayout),
+        Keysym::f | Keysym::F => Some(CompositorShortcut::ToggleWindowLayout),
         _ => None,
     }
 }
 
-fn suppress_shortcut_press(suppressed: &mut Vec<Keysym>, keysym: Keysym) -> bool {
-    if suppressed.contains(&keysym) {
+fn suppress_shortcut_press(suppressed: &mut Vec<u32>, key_code: u32) -> bool {
+    if suppressed.contains(&key_code) {
         return false;
     }
-    suppressed.push(keysym);
+    suppressed.push(key_code);
     true
 }
 
-fn consume_shortcut_release(suppressed: &mut Vec<Keysym>, keysym: Keysym) -> bool {
-    if !suppressed.contains(&keysym) {
+fn consume_shortcut_release(suppressed: &mut Vec<u32>, key_code: u32) -> bool {
+    if !suppressed.contains(&key_code) {
         return false;
     }
-    suppressed.retain(|key| *key != keysym);
+    suppressed.retain(|key| *key != key_code);
     true
 }
 
 impl CompositorStateData {
+    fn poll_bubblecolor(&mut self) {
+        loop {
+            let update = self
+                .theme_runtime
+                .as_ref()
+                .and_then(ThemeRuntime::try_take_update);
+            let Some(update) = update else {
+                break;
+            };
+
+            if !is_current_theme_generation(update.generation, self.theme_generation) {
+                tracing::debug!(
+                    received_generation = update.generation,
+                    current_generation = self.theme_generation,
+                    "Ignoring stale BubbleColor result"
+                );
+                continue;
+            }
+
+            match update.result {
+                Ok(theme) => {
+                    tracing::info!(
+                        generation = update.generation,
+                        schema_version = theme.schema_version,
+                        source = %theme.source_file,
+                        sampled_pixels = theme.diagnostics.sampled_pixels,
+                        "BubbleColor palette snapshot accepted"
+                    );
+                    self.active_theme = Some(Arc::new(theme));
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        generation = update.generation,
+                        %error,
+                        "BubbleColor palette generation failed; keeping previous snapshot"
+                    );
+                }
+            }
+        }
+    }
+
+    fn remember_input_serial(&mut self, serial: Serial, surface: Option<WlSurface>) {
+        let Some(surface) = surface else {
+            return;
+        };
+        let Some(client_id) = self
+            .display_handle
+            .get_client(surface.id())
+            .ok()
+            .map(|client| client.id())
+        else {
+            return;
+        };
+        let now = Instant::now();
+        self.recent_input_serials
+            .retain(|(_, timestamp, _)| now.duration_since(*timestamp) <= Duration::from_secs(5));
+        self.recent_input_serials.push((serial, now, client_id));
+        if self.recent_input_serials.len() > 64 {
+            self.recent_input_serials.remove(0);
+        }
+    }
+
+    fn activation_token_is_valid(&self, data: &XdgActivationTokenData) -> bool {
+        let Some((serial, seat)) = data.serial.as_ref() else {
+            return false;
+        };
+        let Some(source) = data.surface.as_ref() else {
+            return false;
+        };
+        let Some(requesting_client) = data.client_id.as_ref() else {
+            return false;
+        };
+        let source_client = self
+            .display_handle
+            .get_client(source.id())
+            .ok()
+            .map(|client| client.id());
+        if data.timestamp.elapsed() > Duration::from_secs(5)
+            || !self.seat.owns(seat)
+            || source_client.as_ref() != Some(requesting_client)
+        {
+            return false;
+        }
+        self.recent_input_serials
+            .iter()
+            .any(|(known, timestamp, client_id)| {
+                known == serial
+                    && client_id == requesting_client
+                    && timestamp.elapsed() <= Duration::from_secs(5)
+            })
+    }
+
+    fn layer_under_pointer(
+        &self,
+        location: Point<f64, Logical>,
+        layers: &[Layer],
+    ) -> Option<(DesktopLayerSurface, WlSurface, Point<f64, Logical>)> {
+        let output_geometry = self.space.output_geometry(&self.output)?;
+        let output_location = location - output_geometry.loc.to_f64();
+        let map = layer_map_for_output(&self.output);
+
+        for layer in layers {
+            let Some(layer_surface) = map.layer_under(*layer, output_location) else {
+                continue;
+            };
+            let Some(layer_geometry) = map.layer_geometry(layer_surface) else {
+                continue;
+            };
+            let layer_origin = layer_geometry.loc - layer_surface.bbox().loc;
+            let local_location = output_location - layer_origin.to_f64();
+            let Some((surface, surface_location)) =
+                layer_surface.surface_under(local_location, WindowSurfaceType::ALL)
+            else {
+                continue;
+            };
+
+            let absolute_location =
+                output_geometry.loc.to_f64() + layer_origin.to_f64() + surface_location.to_f64();
+            return Some((layer_surface.clone(), surface, absolute_location));
+        }
+
+        None
+    }
+
     fn pointer_focus(
         &self,
         location: smithay::utils::Point<f64, smithay::utils::Logical>,
@@ -220,14 +414,435 @@ impl CompositorStateData {
         WlSurface,
         smithay::utils::Point<f64, smithay::utils::Logical>,
     )> {
-        let (window, window_location) = self.space.element_under(location)?;
-        let local_location = location - window_location.to_f64();
-        let (surface, surface_location) =
-            window.surface_under(local_location, WindowSurfaceType::ALL)?;
-        Some((
-            surface,
-            window_location.to_f64() + surface_location.to_f64(),
-        ))
+        if let Some((_, surface, surface_location)) =
+            self.layer_under_pointer(location, &[Layer::Overlay, Layer::Top])
+        {
+            return Some((surface, surface_location));
+        }
+
+        if let Some((window, window_location)) = self.space.element_under(location) {
+            let local_location = location - window_location.to_f64();
+            if let Some((surface, surface_location)) =
+                window.surface_under(local_location, WindowSurfaceType::ALL)
+            {
+                return Some((
+                    surface,
+                    window_location.to_f64() + surface_location.to_f64(),
+                ));
+            }
+        }
+
+        self.layer_under_pointer(location, &[Layer::Bottom, Layer::Background])
+            .map(|(_, surface, surface_location)| (surface, surface_location))
+    }
+
+    fn exclusive_layer_focus(&self) -> Option<WlSurface> {
+        let map = layer_map_for_output(&self.output);
+        map.layers_on(Layer::Overlay)
+            .rev()
+            .chain(map.layers_on(Layer::Top).rev())
+            .find(|layer| {
+                layer.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
+                    && with_renderer_surface_state(layer.wl_surface(), |state| {
+                        state.buffer().is_some()
+                    })
+                    .unwrap_or(false)
+            })
+            .map(|layer| layer.wl_surface().clone())
+    }
+
+    fn set_keyboard_focus(&mut self, requested: Option<WlSurface>, serial: Serial) {
+        let surface_title = |surface: Option<&WlSurface>| {
+            surface
+                .and_then(|surface| {
+                    self.windows.iter().find_map(|entry| {
+                        entry.window.toplevel().and_then(|toplevel| {
+                            (toplevel.wl_surface() == surface)
+                                .then(|| toplevel_title(&toplevel))
+                                .flatten()
+                        })
+                    })
+                })
+                .unwrap_or_else(|| "<none-or-non-toplevel>".into())
+        };
+        let requested_title = surface_title(requested.as_ref());
+        let focus = self.exclusive_layer_focus().or(requested);
+        let effective_title = surface_title(focus.as_ref());
+        drop(surface_title);
+
+        if let Some(keyboard) = self.keyboard.clone() {
+            keyboard.set_focus(self, focus, serial);
+            let actual_focus = keyboard.current_focus();
+            let actual_title = actual_focus
+                .as_ref()
+                .and_then(|surface| {
+                    self.windows.iter().find_map(|entry| {
+                        entry.window.toplevel().and_then(|toplevel| {
+                            (toplevel.wl_surface() == surface)
+                                .then(|| toplevel_title(&toplevel))
+                                .flatten()
+                        })
+                    })
+                })
+                .unwrap_or_else(|| "<none-or-non-toplevel>".into());
+            info!(
+                requested = %requested_title,
+                effective = %effective_title,
+                actual = %actual_title,
+                "Keyboard focus transition"
+            );
+        } else {
+            info!(
+                requested = %requested_title,
+                effective = %effective_title,
+                "Keyboard focus transition skipped: no keyboard"
+            );
+        }
+    }
+
+    fn refresh_exclusive_layer_focus(&mut self) {
+        let Some(keyboard) = self.keyboard.clone() else {
+            return;
+        };
+        if let Some(surface) = self.exclusive_layer_focus() {
+            self.set_keyboard_focus(Some(surface), SERIAL_COUNTER.next_serial());
+            return;
+        }
+
+        let focused_layer = keyboard.current_focus().and_then(|focused| {
+            let map = layer_map_for_output(&self.output);
+            map.layer_for_surface(&focused, WindowSurfaceType::ALL)
+                .map(|layer| {
+                    let interactivity = layer.cached_state().keyboard_interactivity;
+                    let has_buffer = with_renderer_surface_state(layer.wl_surface(), |state| {
+                        state.buffer().is_some()
+                    })
+                    .unwrap_or(false);
+                    (interactivity, has_buffer)
+                })
+        });
+
+        if focused_layer.is_some_and(|(interactivity, has_buffer)| {
+            should_fallback_from_layer_focus(interactivity, has_buffer)
+        }) {
+            self.focus_topmost_window();
+        }
+    }
+
+    fn reconfigure_maximized_windows(&mut self) {
+        let windows = self
+            .windows
+            .iter()
+            .map(|entry| entry.window.clone())
+            .collect::<Vec<_>>();
+        let maximized = windows
+            .iter()
+            .filter_map(|window| {
+                window.toplevel().filter(|surface| {
+                    surface
+                        .current_state()
+                        .states
+                        .contains(xdg_toplevel::State::Maximized)
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for surface in maximized {
+            self.maximize_window(&surface);
+        }
+    }
+
+    fn handle_layer_commit(&mut self, surface: &WlSurface) {
+        let layer = {
+            let mut map = layer_map_for_output(&self.output);
+            let layer = map
+                .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
+                .cloned();
+            if layer.is_some() {
+                map.arrange();
+            }
+            layer
+        };
+
+        if let Some(layer) = layer {
+            // Send the initial configure after the client's first commit;
+            // arrange() handles subsequent size changes.
+            layer.layer_surface().send_pending_configure();
+            self.reconfigure_maximized_windows();
+            self.arrange_tiled_windows();
+            self.refresh_exclusive_layer_focus();
+            self.space.refresh();
+        }
+    }
+
+    fn work_area(&self) -> Option<Rectangle<i32, Logical>> {
+        let output_geometry = self.space.output_geometry(&self.output)?;
+        let zone = layer_map_for_output(&self.output).non_exclusive_zone();
+        Some(Rectangle::new(output_geometry.loc + zone.loc, zone.size))
+    }
+
+    fn arrange_tiled_windows(&mut self) {
+        self.arrange_tiled_windows_excluding(None);
+    }
+
+    fn arrange_tiled_windows_excluding(&mut self, excluded: Option<&Window>) {
+        if self.layout_mode != LayoutMode::MasterStack {
+            return;
+        }
+        let Some(area) = self.work_area() else {
+            return;
+        };
+
+        let mut tiled = self
+            .windows
+            .iter()
+            .filter(|entry| {
+                !entry.minimized
+                    && entry.workspace == self.active_workspace
+                    && entry.parent_surface.is_none()
+                    // A window can be temporarily absent from Space's location
+                    // lookup while a configure/map transition is in flight.
+                    // mapped_once is the compositor's stable eligibility marker;
+                    // using the transient Space lookup here could silently drop
+                    // one of three visible windows from the tiling calculation.
+                    && entry.mapped_once
+                    // A previously mapped toplevel may currently be unmapped
+                    // after committing a null buffer. Do not let that stale
+                    // handle consume a tile or get remapped by set_window_location.
+                    && entry.window.toplevel().is_some_and(|surface| {
+                        with_renderer_surface_state(surface.wl_surface(), |state| {
+                            state.buffer().is_some()
+                        })
+                        .unwrap_or(false)
+                    })
+                    && excluded != Some(&entry.window)
+                    && entry.layout_override != WindowLayoutOverride::Floating
+            })
+            .map(|entry| (entry.tiling_order, entry.window.clone()))
+            .collect::<Vec<_>>();
+        tiled.sort_by_key(|(order, _)| std::cmp::Reverse(*order));
+
+        for (_, window) in &tiled {
+            if let Some(entry) = self
+                .windows
+                .iter_mut()
+                .find(|entry| entry.window == *window)
+            {
+                if entry.tiling_restore.is_none() {
+                    entry.tiling_restore = Some(RestoreGeometry {
+                        location: entry.location,
+                        size: Some(window.geometry().size),
+                    });
+                }
+            }
+        }
+
+        let rectangles = master_stack(
+            LayoutRect::new(area.loc.x, area.loc.y, area.size.w, area.size.h),
+            tiled.len(),
+            MasterStackConfig::default(),
+        );
+
+        for ((_, window), rectangle) in tiled.into_iter().zip(rectangles) {
+            let Some(toplevel) = window.toplevel() else {
+                continue;
+            };
+            let client_height = if Self::uses_server_decorations(&window) {
+                (rectangle.height - TITLEBAR_HEIGHT).max(1)
+            } else {
+                rectangle.height.max(1)
+            };
+            let requested_size = (rectangle.width.max(1), client_height).into();
+            if toplevel.current_state().size != Some(requested_size) {
+                toplevel.with_pending_state(|state| {
+                    state.size = Some(requested_size);
+                });
+                toplevel.send_pending_configure();
+            }
+            self.set_window_location(&window, (rectangle.x, rectangle.y).into(), false);
+        }
+    }
+
+    fn toggle_focused_window_layout(&mut self) {
+        if self.layout_mode != LayoutMode::MasterStack {
+            return;
+        }
+
+        // Resolve the actual keyboard-focused toplevel. Space element order is
+        // stacking order, which can differ from keyboard focus after floating,
+        // workspace changes, or client-side activation requests.
+        let Some(focused_surface) = self
+            .keyboard
+            .as_ref()
+            .and_then(|keyboard| keyboard.current_focus())
+        else {
+            return;
+        };
+        let Some(window) = self.managed_window_for_surface(&focused_surface) else {
+            return;
+        };
+        let Some(toplevel) = window.toplevel() else {
+            return;
+        };
+        if toplevel
+            .current_state()
+            .states
+            .contains(xdg_toplevel::State::Maximized)
+        {
+            return;
+        }
+
+        let Some(index) = self.windows.iter().position(|entry| {
+            entry.window == window
+                && entry.workspace == self.active_workspace
+                && !entry.minimized
+                && entry.parent_surface.is_none()
+        }) else {
+            return;
+        };
+
+        let currently_tiled = self.windows[index].tiling_restore.is_some()
+            && self.windows[index].layout_override != WindowLayoutOverride::Floating;
+
+        if currently_tiled {
+            let restore = self.windows[index].tiling_restore.take();
+            self.windows[index].layout_override = WindowLayoutOverride::Floating;
+            if let Some(restore) = restore {
+                toplevel.with_pending_state(|state| {
+                    state.size = restore.size;
+                });
+                toplevel.send_pending_configure();
+                self.set_window_location(&window, restore.location, false);
+            }
+            info!("Focused window switched to floating mode");
+        } else {
+            self.windows[index].layout_override = WindowLayoutOverride::Tiled;
+            // The arranger captures the floating geometry exactly once before
+            // applying the new tiled rectangle.
+            info!("Focused window switched to tiled mode");
+        }
+
+        // A window detached from the tiling set must also become visible
+        // above the remaining tiled windows. Re-raise its complete transient
+        // family after changing the override; this updates z-order only and
+        // leaves the stable tiling_order untouched.
+        self.raise_window_family(&window);
+        // Reflow the remaining tiled windows immediately and apply the newly
+        // tiled window's geometry without waiting for another compositor event.
+        self.arrange_tiled_windows();
+        self.space.refresh();
+    }
+
+    fn toggle_layout_mode(&mut self) {
+        match self.layout_mode {
+            LayoutMode::Floating => {
+                // A maximized xdg-toplevel is a different client state from a
+                // tiled window. Clear that state before handing the window to
+                // the tiler; otherwise it is permanently excluded from
+                // arrange_tiled_windows() and repeated Super+T transitions can
+                // leave windows stacked as full-screen maximized surfaces.
+                self.layout_mode = LayoutMode::MasterStack;
+                // Preserve the geometry saved when a client was maximized.
+                // Waiting for an asynchronous xdg configure acknowledgement here
+                // would let the still-fullscreen client geometry be captured as
+                // its tiling restore size.
+                let maximized = self
+                    .windows
+                    .iter()
+                    .filter(|entry| {
+                        !entry.minimized
+                            && entry.workspace == self.active_workspace
+                            && entry.parent_surface.is_none()
+                    })
+                    .filter_map(|entry| {
+                        entry.window.toplevel().and_then(|surface| {
+                            surface
+                                .current_state()
+                                .states
+                                .contains(xdg_toplevel::State::Maximized)
+                                .then(|| {
+                                    let restore =
+                                        entry.restore_geometry.unwrap_or(RestoreGeometry {
+                                            location: entry.location,
+                                            size: Some(entry.window.geometry().size),
+                                        });
+                                    (surface.clone(), entry.window.clone(), restore)
+                                })
+                        })
+                    })
+                    .collect::<Vec<_>>();
+
+                for (surface, window, restore) in maximized {
+                    if let Some(entry) =
+                        self.windows.iter_mut().find(|entry| entry.window == window)
+                    {
+                        entry.restore_geometry = None;
+                        if entry.tiling_restore.is_none() {
+                            entry.tiling_restore = Some(restore);
+                        }
+                    }
+                    surface.with_pending_state(|state| {
+                        state.states.unset(xdg_toplevel::State::Maximized);
+                        state.size = restore.size;
+                    });
+                    surface.send_pending_configure();
+                    self.set_window_location(&window, restore.location, false);
+                }
+
+                // Super+T is a global layout transition: windows previously
+                // detached with Super+F must rejoin the tiling set.
+                for entry in self.windows.iter_mut().filter(|entry| {
+                    !entry.minimized
+                        && entry.workspace == self.active_workspace
+                        && entry.parent_surface.is_none()
+                }) {
+                    entry.layout_override = WindowLayoutOverride::Tiled;
+                }
+
+                // Do not wait for clients to acknowledge the unmaximize
+                // configure before arranging: that acknowledgement is
+                // asynchronous, while arrange_tiled_windows() must include
+                // every eligible window immediately.
+                self.arrange_tiled_windows();
+                info!("Master/Stack layout enabled");
+            }
+            LayoutMode::MasterStack => {
+                self.layout_mode = LayoutMode::Floating;
+                let restores = self
+                    .windows
+                    .iter_mut()
+                    .filter_map(|entry| {
+                        entry
+                            .tiling_restore
+                            .take()
+                            .map(|restore| (entry.window.clone(), restore))
+                    })
+                    .collect::<Vec<_>>();
+                for (window, restore) in restores {
+                    // A layout transition must never preserve a compositor
+                    // maximized state. Clear it first, then restore the exact
+                    // pre-tiling geometry.
+                    if let Some(toplevel) = window.toplevel() {
+                        let maximized = toplevel
+                            .current_state()
+                            .states
+                            .contains(xdg_toplevel::State::Maximized);
+                        if maximized {
+                            toplevel.with_pending_state(|state| {
+                                state.states.unset(xdg_toplevel::State::Maximized);
+                            });
+                        }
+                        toplevel.with_pending_state(|state| {
+                            state.size = restore.size;
+                        });
+                        toplevel.send_pending_configure();
+                    }
+                    self.set_window_location(&window, restore.location, false);
+                }
+                info!("Floating layout enabled");
+            }
+        }
+        self.space.refresh();
     }
 
     fn configure_toplevels(&self) {
@@ -264,24 +879,25 @@ impl CompositorStateData {
         }
     }
 
-    fn managed_location_for_surface(&self, surface: &WlSurface) -> Option<Point<i32, Logical>> {
-        self.windows
-            .iter()
-            .find(|entry| {
-                entry
-                    .window
-                    .toplevel()
-                    .is_some_and(|toplevel| toplevel.wl_surface() == surface)
-            })
-            .map(|entry| entry.location)
-    }
-
     fn update_transient_parent(&mut self, surface: &ToplevelSurface) {
         let root = surface.wl_surface().clone();
         let parent = surface.parent();
-        let parent_location = parent
-            .as_ref()
-            .and_then(|parent| self.managed_location_for_surface(parent));
+        let parent_info = parent.as_ref().and_then(|parent| {
+            self.windows
+                .iter()
+                .find(|entry| {
+                    entry
+                        .window
+                        .toplevel()
+                        .is_some_and(|toplevel| toplevel.wl_surface() == parent)
+                })
+                .map(|entry| (entry.location, entry.workspace))
+        });
+        info!(
+            "Transient parent update parent_present={} parent_managed={}",
+            parent.is_some(),
+            parent_info.is_some()
+        );
 
         let Some(index) = self.windows.iter().position(|entry| {
             entry
@@ -293,16 +909,27 @@ impl CompositorStateData {
         };
 
         self.windows[index].parent_surface = parent;
-        let Some(parent_location) = parent_location else {
+        let Some((parent_location, parent_workspace)) = parent_info else {
+            info!("Transient parent not managed yet; deferring child placement");
             return;
         };
 
+        self.windows[index].workspace = parent_workspace;
         let location = parent_location + Size::from((WINDOW_CASCADE_STEP, WINDOW_CASCADE_STEP));
         self.windows[index].location = location;
         let window = self.windows[index].window.clone();
-        if self.space.element_location(&window).is_some() && !self.windows[index].minimized {
-            let content_location = self.content_location(&window, location);
-            self.space.map_element(window, content_location, false);
+        if parent_workspace != self.active_workspace {
+            self.space.unmap_elem(&window);
+        } else if !self.windows[index].minimized {
+            let has_buffer = window.toplevel().is_some_and(|toplevel| {
+                with_renderer_surface_state(toplevel.wl_surface(), |state| state.buffer().is_some())
+                    .unwrap_or(false)
+            });
+            if has_buffer {
+                let content_location = self.content_location(&window, location);
+                self.space.map_element(window, content_location, false);
+
+            }
         }
     }
 
@@ -330,22 +957,84 @@ impl CompositorStateData {
             index += 1;
         }
 
-        let family_windows = self
+        let mut family_windows = self
             .windows
             .iter()
             .filter(|entry| {
                 !entry.minimized
+                    && entry.workspace == self.active_workspace
                     && entry
                         .window
                         .toplevel()
                         .is_some_and(|surface| family.contains(surface.wl_surface()))
             })
-            .map(|entry| entry.window.clone())
+            .map(|entry| {
+                let surface = entry.window.toplevel()?.wl_surface();
+                let family_position = family.iter().position(|member| member == surface)?;
+                Some((family_position, entry.window.clone()))
+            })
+            .flatten()
             .collect::<Vec<_>>();
+        family_windows.sort_by_key(|(position, _)| *position);
 
-        for member in family_windows {
+        // Always raise a transient family from its root to its deepest
+        // descendants. Smithay's Space order is back-to-front, so this
+        // guarantees that children remain above their parent even when the
+        // parent itself receives focus.
+        let target_is_root = window
+            .toplevel()
+            .is_some_and(|surface| surface.wl_surface() == &family[0]);
+        if !target_is_root
+            && let Some(position) = family_windows
+                .iter()
+                .position(|(_, member)| member == window)
+        {
+            let target = family_windows.remove(position);
+            family_windows.push(target);
+        }
+
+        // Reflow tiled windows before changing z-order. Mapping/configuring
+        // their new rectangles can affect Space ordering, so the focused
+        // window family must be raised only after the layout pass is complete.
+        self.arrange_tiled_windows();
+
+        for (_, member) in family_windows {
+            if let Some(entry) = self.windows.iter_mut().find(|entry| entry.window == member) {
+                entry.stacking_order = self.next_stacking_order;
+                self.next_stacking_order = self.next_stacking_order.wrapping_add(1);
+            }
             self.space.raise_element(&member, member == *window);
         }
+
+        let managed_order = self
+            .windows
+            .iter()
+            .map(|entry| {
+                let title = entry
+                    .window
+                    .toplevel()
+                    .and_then(|toplevel| toplevel_title(&toplevel))
+                    .unwrap_or_else(|| "<untitled>".into());
+                let parent = entry.parent_surface.is_some();
+                format!("{title}:parent={parent}:stack={}", entry.stacking_order)
+            })
+            .collect::<Vec<_>>();
+        let space_order = self
+            .space
+            .elements()
+            .map(|member| {
+                member
+                    .toplevel()
+                    .and_then(|toplevel| toplevel_title(&toplevel))
+                    .unwrap_or_else(|| "<untitled>".into())
+            })
+            .collect::<Vec<_>>();
+        info!(
+            target = ?window.toplevel().and_then(|toplevel| toplevel_title(&toplevel)),
+            managed_order = ?managed_order,
+            space_back_to_front = ?space_order,
+            "Transient stacking diagnostic"
+        );
         self.configure_toplevels();
     }
 
@@ -413,8 +1102,32 @@ impl CompositorStateData {
             entry.minimized_order = Some(order);
         }
 
+        // A minimized window must not keep a compositor-owned move/resize
+        // grab alive. Otherwise restoring it before the next pointer event
+        // could reactivate the stale interaction.
+        let has_window_grab = self
+            .pointer
+            .as_ref()
+            .and_then(|pointer| {
+                pointer.with_grab(|_, grab| {
+                    grab.downcast_ref::<WindowPointerGrab>()
+                        .is_some_and(|grab| {
+                            grab.window
+                                .toplevel()
+                                .is_some_and(|toplevel| family.contains(toplevel.wl_surface()))
+                        })
+                })
+            })
+            .unwrap_or(false);
+        if has_window_grab {
+            if let Some(pointer) = self.pointer.clone() {
+                pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), 0);
+            }
+        }
+
         if removed_any {
             self.focus_topmost_window();
+            self.arrange_tiled_windows();
         }
     }
 
@@ -433,11 +1146,19 @@ impl CompositorStateData {
             .iter()
             .filter(|entry| entry.minimized)
             .max_by_key(|entry| entry.minimized_order)
-            .and_then(|entry| entry.window.toplevel().map(|s| s.wl_surface().clone()));
+            .and_then(|entry| {
+                entry
+                    .window
+                    .toplevel()
+                    .map(|surface| (surface.wl_surface().clone(), entry.workspace))
+            });
 
-        let Some(target) = target else {
+        let Some((target, workspace)) = target else {
             return;
         };
+        if workspace != self.active_workspace && self.activate_workspace(workspace).is_err() {
+            return;
+        }
         let root = self.root_surface_for_toplevel(&target);
         let family = self.window_family_surfaces(&root);
         let mut restored = Vec::new();
@@ -461,11 +1182,14 @@ impl CompositorStateData {
                 .map_element(window.clone(), content_location, false);
         }
 
-        if let Some(window) = self.managed_window_for_surface(&root) {
+        self.arrange_tiled_windows();
+        // Restore and focus the originally minimized toplevel, not the
+        // family root. When restoring a transient child, raising the root
+        // would put its parent above the child and hide the restored dialog.
+        if let Some(window) = self.managed_window_for_surface(&target) {
             self.raise_window_family(&window);
-            if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel()) {
-                keyboard.set_focus(
-                    self,
+            if let Some(toplevel) = window.toplevel() {
+                self.set_keyboard_focus(
                     Some(toplevel.wl_surface().clone()),
                     SERIAL_COUNTER.next_serial(),
                 );
@@ -473,11 +1197,211 @@ impl CompositorStateData {
         }
     }
 
+    fn activate_workspace(&mut self, index: u32) -> Result<(), Response> {
+        if index >= self.workspace_count {
+            return Err(Response::Failure {
+                error: ErrorResponse {
+                    code: ErrorCode::InvalidRequest,
+                    message: format!(
+                        "workspace index {index} is out of range (valid range: 0..{})",
+                        self.workspace_count
+                    ),
+                },
+            });
+        }
+
+        if index == self.active_workspace {
+            return Ok(());
+        }
+
+        let windows = self
+            .windows
+            .iter()
+            .map(|entry| (entry.window.clone(), entry.workspace, entry.minimized))
+            .collect::<Vec<_>>();
+        for (window, workspace, _) in &windows {
+            if *workspace != index && self.space.element_location(window).is_some() {
+                self.space.unmap_elem(window);
+            }
+        }
+
+        self.active_workspace = index;
+
+        let mut visible = self
+            .windows
+            .iter()
+            .filter(|entry| entry.workspace == index && !entry.minimized)
+            .filter_map(|entry| {
+                let has_buffer = entry.window.toplevel().is_some_and(|toplevel| {
+                    with_renderer_surface_state(toplevel.wl_surface(), |state| {
+                        state.buffer().is_some()
+                    })
+                    .unwrap_or(false)
+                });
+                has_buffer.then_some((entry.stacking_order, entry.window.clone(), entry.location))
+            })
+            .collect::<Vec<_>>();
+        visible.sort_by_key(|(order, _, _)| *order);
+
+        for (_, window, location) in visible {
+            let content_location = self.content_location(&window, location);
+            self.space.map_element(window, content_location, false);
+        }
+
+        // Rebuild transient stacking after all workspace members have been
+        // mapped. Mapping in stacking_order alone is not sufficient: Space
+        // may otherwise leave a transient child below its parent.
+        let mut transient_roots = self
+            .windows
+            .iter()
+            .filter(|entry| {
+                entry.workspace == index
+                    && !entry.minimized
+                    && entry.parent_surface.is_none()
+                    && entry.window.toplevel().is_some_and(|toplevel| {
+                        with_renderer_surface_state(toplevel.wl_surface(), |state| {
+                            state.buffer().is_some()
+                        })
+                        .unwrap_or(false)
+                    })
+            })
+            .map(|entry| (entry.stacking_order, entry.window.clone()))
+            .collect::<Vec<_>>();
+        transient_roots.sort_by_key(|(order, _)| *order);
+        for (_, root) in transient_roots {
+            self.raise_window_family(&root);
+        }
+
+        self.arrange_tiled_windows();
+        self.focus_topmost_window();
+        self.refresh_exclusive_layer_focus();
+        self.space.refresh();
+        Ok(())
+    }
+
+    fn handle_ipc_request(&mut self, request: Request, session: &SessionManager) -> Response {
+        match request {
+            Request::GetCapabilities => Response::Success {
+                data: ResponseData::Capabilities {
+                    workspace_control: true,
+                },
+            },
+            Request::GetWorkspaceState => Response::Success {
+                data: ResponseData::WorkspaceState {
+                    active: self.active_workspace,
+                    count: self.workspace_count,
+                },
+            },
+            Request::GetThemePalette => Response::Success {
+                data: ResponseData::ThemePalette {
+                    palette: self.active_theme.as_ref().map(|theme| ThemePalette {
+                        schema_version: theme.schema_version,
+                        generation: self.theme_generation,
+                        primary: [
+                            theme.colors.primary.r,
+                            theme.colors.primary.g,
+                            theme.colors.primary.b,
+                        ],
+                        primary_container: [
+                            theme.colors.primary_container.r,
+                            theme.colors.primary_container.g,
+                            theme.colors.primary_container.b,
+                        ],
+                        on_primary_container: [
+                            theme.colors.on_primary_container.r,
+                            theme.colors.on_primary_container.g,
+                            theme.colors.on_primary_container.b,
+                        ],
+                        surface: [
+                            theme.colors.surface.r,
+                            theme.colors.surface.g,
+                            theme.colors.surface.b,
+                        ],
+                        on_surface: [
+                            theme.colors.on_surface.r,
+                            theme.colors.on_surface.g,
+                            theme.colors.on_surface.b,
+                        ],
+                        surface_variant: [
+                            theme.colors.surface_variant.r,
+                            theme.colors.surface_variant.g,
+                            theme.colors.surface_variant.b,
+                        ],
+                        outline: [
+                            theme.colors.outline.r,
+                            theme.colors.outline.g,
+                            theme.colors.outline.b,
+                        ],
+                        warning: [
+                            theme.colors.warning.r,
+                            theme.colors.warning.g,
+                            theme.colors.warning.b,
+                        ],
+                        success: [
+                            theme.colors.success.r,
+                            theme.colors.success.g,
+                            theme.colors.success.b,
+                        ],
+                        error: [
+                            theme.colors.error.r,
+                            theme.colors.error.g,
+                            theme.colors.error.b,
+                        ],
+                    }),
+                },
+            },
+            Request::WorkspacePrevious => {
+                let index = previous_workspace(self.active_workspace, self.workspace_count);
+                match self.activate_workspace(index) {
+                    Ok(()) => Response::Success {
+                        data: ResponseData::Acknowledged,
+                    },
+                    Err(response) => response,
+                }
+            }
+            Request::WorkspaceNext => {
+                let index = next_workspace(self.active_workspace, self.workspace_count);
+                match self.activate_workspace(index) {
+                    Ok(()) => Response::Success {
+                        data: ResponseData::Acknowledged,
+                    },
+                    Err(response) => response,
+                }
+            }
+            Request::ActivateWorkspace { index } => match self.activate_workspace(index) {
+                Ok(()) => Response::Success {
+                    data: ResponseData::Acknowledged,
+                },
+                Err(response) => response,
+            },
+            Request::GetSessionState => Response::Success {
+                data: ResponseData::SessionState {
+                    state: session.state(),
+                },
+            },
+            Request::GetSessionCapabilities => Response::Success {
+                data: ResponseData::SessionCapabilities {
+                    capabilities: session.capabilities(),
+                },
+            },
+            Request::RequestSessionAction { action } => session.request_action(action),
+        }
+    }
+
     fn close_focused_window(&self) {
-        if let Some(window) = self.space.elements().last()
+        let focused = self
+            .keyboard
+            .as_ref()
+            .and_then(|keyboard| keyboard.current_focus());
+        if let Some(surface) = focused
+            && let Some(window) = self.managed_window_for_surface(&surface)
             && let Some(toplevel) = window.toplevel()
         {
+            let title = toplevel_title(&toplevel).unwrap_or_else(|| "<untitled>".into());
+            info!("Sending close request to focused toplevel title={title}");
             toplevel.send_close();
+        } else {
+            info!("Close shortcut ignored because no managed toplevel has keyboard focus");
         }
     }
 
@@ -486,12 +1410,26 @@ impl CompositorStateData {
         location: Point<f64, Logical>,
     ) -> Option<(Window, DecorationAction)> {
         for window in self.space.elements().rev() {
-            if !Self::uses_server_decorations(window) {
-                continue;
-            }
+            let title = window
+                .toplevel()
+                .and_then(|surface| toplevel_title(&surface))
+                .unwrap_or_else(|| "<untitled>".into());
+            let decoration_mode = window
+                .toplevel()
+                .map(|surface| surface.current_state().decoration_mode);
             let Some(entry) = self.windows.iter().find(|entry| entry.window == *window) else {
+                info!("Decoration candidate title={title} mode={decoration_mode:?} managed=false");
                 continue;
             };
+            info!(
+                "Decoration candidate title={title} mode={decoration_mode:?} location=({}, {}) geometry={:?}",
+                entry.location.x,
+                entry.location.y,
+                window.geometry().size
+            );
+            if decoration_mode != Some(Some(DecorationMode::ServerSide)) {
+                continue;
+            }
             let width = window.geometry().size.w;
             if width <= 0
                 || location.x < entry.location.x as f64
@@ -537,6 +1475,10 @@ impl CompositorStateData {
     fn decoration_render_elements(&self) -> Vec<SolidColorRenderElement> {
         let mut elements = Vec::new();
         let scale = self.output.current_scale().fractional_scale();
+        let focused_surface = self
+            .keyboard
+            .as_ref()
+            .and_then(|keyboard| keyboard.current_focus());
 
         for window in self.space.elements() {
             if !Self::uses_server_decorations(window) {
@@ -549,14 +1491,73 @@ impl CompositorStateData {
             if width <= 0 {
                 continue;
             }
+            let focused = focused_surface.as_ref().is_some_and(|focused| {
+                window
+                    .toplevel()
+                    .is_some_and(|surface| surface.wl_surface() == focused)
+            });
 
+            let palette = self.active_theme.as_deref();
+            let titlebar_color = palette
+                .map(|theme| {
+                    color32_from_rgb(if focused {
+                        theme.colors.primary_container
+                    } else {
+                        theme.colors.surface
+                    })
+                })
+                .unwrap_or_else(|| {
+                    if focused {
+                        Color32F::new(0.16, 0.20, 0.29, 1.0)
+                    } else {
+                        Color32F::new(0.10, 0.12, 0.16, 1.0)
+                    }
+                });
+            let title_color = palette
+                .map(|theme| {
+                    color32_from_rgb(if focused {
+                        theme.colors.on_primary_container
+                    } else {
+                        theme.colors.on_surface
+                    })
+                })
+                .unwrap_or(Color32F::new(0.88, 0.91, 0.96, 1.0));
             append_solid_decoration(
                 &mut elements,
                 entry.location,
                 (width, TITLEBAR_HEIGHT).into(),
-                Color32F::new(0.12, 0.14, 0.18, 1.0),
+                titlebar_color,
                 scale,
             );
+            if let Some(title) = window
+                .toplevel()
+                .and_then(|surface| toplevel_title(&surface))
+                .or_else(|| {
+                    window
+                        .toplevel()
+                        .and_then(|surface| toplevel_app_id(&surface))
+                })
+            {
+                append_decoration_title(
+                    &mut elements,
+                    &title,
+                    entry.location,
+                    width,
+                    title_color,
+                    scale,
+                );
+            }
+            if focused {
+                append_solid_decoration(
+                    &mut elements,
+                    (entry.location.x, entry.location.y + TITLEBAR_HEIGHT - 2).into(),
+                    (width, 2).into(),
+                    palette
+                        .map(|theme| color32_from_rgb(theme.colors.primary))
+                        .unwrap_or(Color32F::new(0.25, 0.62, 0.95, 1.0)),
+                    scale,
+                );
+            }
 
             let close_x =
                 entry.location.x + width - DECORATION_BUTTON_MARGIN - DECORATION_BUTTON_SIZE;
@@ -568,21 +1569,27 @@ impl CompositorStateData {
                 &mut elements,
                 (minimize_x, button_y).into(),
                 (DECORATION_BUTTON_SIZE, DECORATION_BUTTON_SIZE).into(),
-                Color32F::new(0.86, 0.68, 0.24, 1.0),
+                palette
+                    .map(|theme| color32_from_rgb(theme.colors.warning))
+                    .unwrap_or(Color32F::new(0.86, 0.68, 0.24, 1.0)),
                 scale,
             );
             append_solid_decoration(
                 &mut elements,
                 (maximize_x, button_y).into(),
                 (DECORATION_BUTTON_SIZE, DECORATION_BUTTON_SIZE).into(),
-                Color32F::new(0.24, 0.68, 0.48, 1.0),
+                palette
+                    .map(|theme| color32_from_rgb(theme.colors.success))
+                    .unwrap_or(Color32F::new(0.24, 0.68, 0.48, 1.0)),
                 scale,
             );
             append_solid_decoration(
                 &mut elements,
                 (close_x, button_y).into(),
                 (DECORATION_BUTTON_SIZE, DECORATION_BUTTON_SIZE).into(),
-                Color32F::new(0.82, 0.28, 0.31, 1.0),
+                palette
+                    .map(|theme| color32_from_rgb(theme.colors.error))
+                    .unwrap_or(Color32F::new(0.82, 0.28, 0.31, 1.0)),
                 scale,
             );
         }
@@ -632,7 +1639,7 @@ impl CompositorStateData {
             }
             return;
         };
-        let Some(bounds) = self.space.output_geometry(&self.output) else {
+        let Some(bounds) = self.work_area() else {
             if surface.is_initial_configure_sent() {
                 surface.send_configure();
             }
@@ -667,6 +1674,7 @@ impl CompositorStateData {
         if surface.is_initial_configure_sent() {
             surface.send_configure();
         }
+        self.arrange_tiled_windows_excluding(Some(&window));
     }
 
     fn unmaximize_window(&mut self, surface: &ToplevelSurface) {
@@ -703,6 +1711,7 @@ impl CompositorStateData {
         }
 
         surface.send_pending_configure();
+        self.arrange_tiled_windows();
     }
 
     fn unconstrain_popup(&self, popup: &PopupSurface) {
@@ -710,18 +1719,33 @@ impl CompositorStateData {
         let Ok(root) = find_popup_root_surface(&kind) else {
             return;
         };
-        let Some(window) = self.managed_window_for_surface(&root) else {
-            return;
-        };
-        let Some(window_geometry) = self.space.element_geometry(&window) else {
-            return;
-        };
         let Some(mut target) = self.space.output_geometry(&self.output) else {
             return;
         };
 
+        let parent_location = if let Some(window) = self.managed_window_for_surface(&root) {
+            let Some(window_geometry) = self.space.element_geometry(&window) else {
+                return;
+            };
+            window_geometry.loc
+        } else {
+            let Some(layer_location) = self.space.outputs().find_map(|output| {
+                let map = layer_map_for_output(output);
+                map.layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)
+                    .and_then(|layer| map.layer_geometry(layer))
+                    .and_then(|geometry| {
+                        self.space
+                            .output_geometry(output)
+                            .map(|output_geometry| output_geometry.loc + geometry.loc)
+                    })
+            }) else {
+                return;
+            };
+            layer_location
+        };
+
         target.loc -= get_popup_toplevel_coords(&kind);
-        target.loc -= window_geometry.loc;
+        target.loc -= parent_location;
         popup.with_pending_state(|state| {
             state.geometry = state.positioner.get_unconstrained_geometry(target);
         });
@@ -733,35 +1757,43 @@ impl CompositorStateData {
         location: Point<i32, Logical>,
         activate: bool,
     ) {
-        if let Some(entry) = self
+        let visible = if let Some(entry) = self
             .windows
             .iter_mut()
             .find(|entry| entry.window == *window)
         {
             entry.location = location;
+            !entry.minimized && entry.workspace == self.active_workspace
+        } else {
+            false
+        };
+        if visible {
+            let content_location = self.content_location(window, location);
+            self.space
+                .map_element(window.clone(), content_location, activate);
         }
-        let content_location = self.content_location(window, location);
-        self.space
-            .map_element(window.clone(), content_location, activate);
     }
 
     fn focus_topmost_window(&mut self) {
         let serial = SERIAL_COUNTER.next_serial();
+        let exclusive_layer = self.exclusive_layer_focus();
         let target = self.space.elements().last().cloned();
 
-        if let Some(window) = target.as_ref() {
-            self.space.raise_element(window, true);
-            self.configure_toplevels();
+        if exclusive_layer.is_none() {
+            if let Some(window) = target.as_ref() {
+                self.space.raise_element(window, true);
+                self.configure_toplevels();
+            }
         }
 
-        if let Some(keyboard) = self.keyboard.clone() {
-            let focus = target.and_then(|window| {
+        let focus = exclusive_layer.or_else(|| {
+            target.and_then(|window| {
                 window
                     .toplevel()
                     .map(|toplevel| toplevel.wl_surface().clone())
-            });
-            keyboard.set_focus(self, focus, serial);
-        }
+            })
+        });
+        self.set_keyboard_focus(focus, serial);
     }
 
     fn handle_toplevel_commit(&mut self, surface: &WlSurface) {
@@ -775,13 +1807,26 @@ impl CompositorStateData {
         };
 
         let window = self.windows[index].window.clone();
+        let was_mapped = self.space.element_location(&window).is_some();
         let has_buffer =
             with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false);
+        info!(
+            "Toplevel commit state workspace={} active_workspace={} minimized={} has_buffer={} mapped={}",
+            self.windows[index].workspace,
+            self.active_workspace,
+            self.windows[index].minimized,
+            has_buffer,
+            self.space.element_location(&window).is_some()
+        );
 
         if !has_buffer {
             if self.space.element_location(&window).is_some() {
                 self.space.unmap_elem(&window);
                 self.focus_topmost_window();
+                // Reflow the remaining windows immediately. The unmapped
+                // toplevel stays in the management list for a possible remap,
+                // but must not retain a tile while it has no buffer.
+                self.arrange_tiled_windows();
             }
             if self
                 .resize_session
@@ -795,25 +1840,36 @@ impl CompositorStateData {
 
         window.on_commit();
 
-        if self.space.element_location(&window).is_none() && !self.windows[index].minimized {
+        if self.space.element_location(&window).is_none()
+            && !self.windows[index].minimized
+            && self.windows[index].workspace == self.active_workspace
+        {
             let location = self.windows[index].location;
             let content_location = self.content_location(&window, location);
-            let activate =
-                !self.windows[index].mapped_once || self.space.elements().next().is_none();
+            let first_map = !self.windows[index].mapped_once;
+            let activate = first_map || self.space.elements().next().is_none();
             self.windows[index].mapped_once = true;
+            if activate {
+                let order = self.next_stacking_order;
+                self.windows[index].stacking_order = order;
+                if first_map {
+                    self.windows[index].tiling_order = order;
+                }
+                self.next_stacking_order = self.next_stacking_order.wrapping_add(1);
+            }
             self.space
                 .map_element(window.clone(), content_location, activate);
             if activate {
-                if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel())
-                {
-                    keyboard.set_focus(
-                        self,
+                if let Some(toplevel) = window.toplevel() {
+                    self.set_keyboard_focus(
                         Some(toplevel.wl_surface().clone()),
                         SERIAL_COUNTER.next_serial(),
                     );
                 }
             }
-        } else if !self.windows[index].minimized {
+        } else if !self.windows[index].minimized
+            && self.windows[index].workspace == self.active_workspace
+        {
             // Decoration mode can change after the client acknowledges a
             // configure. Keep the client surface below/without the titlebar.
             let expected = self.content_location(&window, self.windows[index].location);
@@ -850,9 +1906,62 @@ impl CompositorStateData {
                 self.resize_session = None;
             }
         }
+        self.arrange_tiled_windows();
+
+        // Mapping order is client-dependent: a parent may become visible
+        // after its transient child and otherwise cover it on the first frame.
+        // Rebuild the family stack exactly once for each newly mapped member.
+        if !was_mapped {
+            let is_transient = self.windows[index].parent_surface.is_some();
+            let has_transient_children = self.windows.iter().any(|entry| {
+                entry.parent_surface.as_ref() == Some(surface)
+                    && !entry.minimized
+                    && entry.workspace == self.active_workspace
+                    && self.space.element_location(&entry.window).is_some()
+            });
+            if is_transient || has_transient_children {
+                self.raise_window_family(&window);
+
+                // If the parent maps after its transient child, the parent
+                // mapping path may have taken keyboard focus. Keep the
+                // topmost mapped descendant focused along with the family.
+                if has_transient_children {
+                    let mut family = vec![surface.clone()];
+                    let mut position = 0;
+                    while position < family.len() {
+                        let parent = family[position].clone();
+                        for entry in &self.windows {
+                            if entry.parent_surface.as_ref() == Some(&parent)
+                                && !entry.minimized
+                                && entry.workspace == self.active_workspace
+                                && self.space.element_location(&entry.window).is_some()
+                                && let Some(child) = entry.window.toplevel()
+                                    .map(|toplevel| toplevel.wl_surface().clone())
+                                && !family.contains(&child)
+                            {
+                                family.push(child);
+                            }
+                        }
+                        position += 1;
+                    }
+
+                    if let Some(topmost) = family.last()
+                        && topmost != surface
+                    {
+                        self.set_keyboard_focus(
+                            Some(topmost.clone()),
+                            SERIAL_COUNTER.next_serial(),
+                        );
+                    }
+                }
+            }
+        }
     }
 
     fn begin_move(&mut self, surface: &ToplevelSurface, seat: &Seat<Self>, serial: Serial) {
+        let title = toplevel_title(surface).unwrap_or_else(|| "<untitled>".into());
+        info!("XDG move request title={title} serial={serial:?}");
+
         let Some(pointer) = seat.get_pointer() else {
             return;
         };
@@ -976,23 +2085,46 @@ impl CompositorStateData {
         self.output.set_preferred(mode);
         self.output
             .change_current_state(Some(mode), None, None, None);
+        layer_map_for_output(&self.output).arrange();
+        self.reconfigure_maximized_windows();
+        self.arrange_tiled_windows();
         self.space.refresh();
         info!(width = size.w, height = size.h, "Winit output mode changed");
     }
 
     fn focus_window_under_pointer(&mut self, serial: Serial) {
+        if let Some((layer, surface, _)) =
+            self.layer_under_pointer(self.pointer_location, &[Layer::Overlay, Layer::Top])
+        {
+            if layer.cached_state().keyboard_interactivity != KeyboardInteractivity::None {
+                self.set_keyboard_focus(Some(surface), serial);
+            }
+            return;
+        }
+
         let target = self
             .space
             .element_under(self.pointer_location)
             .map(|(window, _location)| window.clone());
-        let Some(window) = target else {
+        if let Some(window) = target {
+            self.raise_window_family(&window);
+
+            if let Some(toplevel) = window.toplevel() {
+                self.set_keyboard_focus(Some(toplevel.wl_surface().clone()), serial);
+            }
             return;
-        };
+        }
 
-        self.raise_window_family(&window);
-
-        if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel()) {
-            keyboard.set_focus(self, Some(toplevel.wl_surface().clone()), serial);
+        if let Some((layer, surface, _)) =
+            self.layer_under_pointer(self.pointer_location, &[Layer::Bottom, Layer::Background])
+            && layer.cached_state().keyboard_interactivity != KeyboardInteractivity::None
+        {
+            self.set_keyboard_focus(Some(surface), serial);
+        } else {
+            // Clicking empty desktop space must not leave keyboard focus on
+            // the previously focused toplevel. Exclusive layers are still
+            // enforced centrally by set_keyboard_focus().
+            self.set_keyboard_focus(None, serial);
         }
     }
 }
@@ -1048,6 +2180,7 @@ impl CompositorHandler for CompositorStateData {
             }
         }
 
+        self.handle_layer_commit(&root_surface);
         self.popups.cleanup();
         self.space.refresh();
     }
@@ -1090,6 +2223,52 @@ impl SelectionHandler for CompositorStateData {
     type SelectionUserData = ();
 }
 
+impl PrimarySelectionHandler for CompositorStateData {
+    fn primary_selection_state(&self) -> &PrimarySelectionState {
+        &self.primary_selection_state
+    }
+}
+
+impl XdgActivationHandler for CompositorStateData {
+    fn activation_state(&mut self) -> &mut XdgActivationState {
+        &mut self.xdg_activation_state
+    }
+
+    fn token_created(&mut self, _token: XdgActivationToken, data: XdgActivationTokenData) -> bool {
+        self.activation_token_is_valid(&data)
+    }
+
+    fn request_activation(
+        &mut self,
+        token: XdgActivationToken,
+        token_data: XdgActivationTokenData,
+        surface: WlSurface,
+    ) {
+        // Tokens are single-use in BubbleWM, including denied requests.
+        self.xdg_activation_state.remove_token(&token);
+
+        if !self.activation_token_is_valid(&token_data) {
+            return;
+        }
+
+        let Some(window) = self.managed_window_for_surface(&surface) else {
+            return;
+        };
+        let Some(entry) = self.windows.iter().find(|entry| entry.window == window) else {
+            return;
+        };
+        if entry.minimized
+            || entry.workspace != self.active_workspace
+            || self.space.element_location(&window).is_none()
+        {
+            return;
+        }
+
+        self.raise_window_family(&window);
+        self.set_keyboard_focus(Some(surface), SERIAL_COUNTER.next_serial());
+    }
+}
+
 impl ClientDndGrabHandler for CompositorStateData {}
 
 impl ServerDndGrabHandler for CompositorStateData {}
@@ -1118,6 +2297,8 @@ impl XdgShellHandler for CompositorStateData {
 
         // Keep a stable handle and its last position even while the client
         // temporarily unmaps the surface with a null buffer.
+        let stacking_order = self.next_stacking_order;
+        self.next_stacking_order = self.next_stacking_order.wrapping_add(1);
         self.windows.push(ManagedWindow {
             window,
             location,
@@ -1126,6 +2307,11 @@ impl XdgShellHandler for CompositorStateData {
             parent_surface: surface.parent(),
             minimized: false,
             minimized_order: None,
+            workspace: self.active_workspace,
+            tiling_order: stacking_order,
+            stacking_order,
+            tiling_restore: None,
+            layout_override: WindowLayoutOverride::Automatic,
         });
         self.update_transient_parent(&surface);
 
@@ -1183,6 +2369,25 @@ impl XdgShellHandler for CompositorStateData {
         }) {
             let entry = self.windows.remove(index);
             self.space.unmap_elem(&entry.window);
+
+            // A compositor-owned move/resize grab holds a clone of its window.
+            // Cancel it immediately when that toplevel is destroyed instead
+            // of waiting for the next pointer event to notice the dead window.
+            let has_window_grab = self
+                .pointer
+                .as_ref()
+                .and_then(|pointer| {
+                    pointer.with_grab(|_, grab| {
+                        grab.downcast_ref::<WindowPointerGrab>()
+                            .is_some_and(|grab| grab.window == entry.window)
+                    })
+                })
+                .unwrap_or(false);
+            if has_window_grab {
+                if let Some(pointer) = self.pointer.clone() {
+                    pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), 0);
+                }
+            }
         }
 
         if self
@@ -1193,6 +2398,7 @@ impl XdgShellHandler for CompositorStateData {
             self.resize_session = None;
         }
 
+        self.arrange_tiled_windows();
         self.focus_topmost_window();
         self.space.refresh();
     }
@@ -1212,10 +2418,15 @@ impl XdgShellHandler for CompositorStateData {
         let Some(root) = find_popup_root_surface(&kind).ok() else {
             return;
         };
-        let Some(window) = self.managed_window_for_surface(&root) else {
-            return;
-        };
-        if self.space.element_location(&window).is_none() {
+        let mapped_window = self
+            .managed_window_for_surface(&root)
+            .is_some_and(|window| self.space.element_location(&window).is_some());
+        let mapped_layer = self.space.outputs().any(|output| {
+            layer_map_for_output(output)
+                .layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)
+                .is_some()
+        });
+        if !mapped_window && !mapped_layer {
             return;
         }
 
@@ -1266,6 +2477,84 @@ impl XdgShellHandler for CompositorStateData {
     }
 }
 
+impl WlrLayerShellHandler for CompositorStateData {
+    fn shell_state(&mut self) -> &mut WlrLayerShellState {
+        &mut self.layer_shell_state
+    }
+
+    fn new_layer_surface(
+        &mut self,
+        surface: WlrLayerSurface,
+        requested_output: Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput>,
+        _layer: Layer,
+        namespace: String,
+    ) {
+        let output = requested_output
+            .as_ref()
+            .and_then(Output::from_resource)
+            .or_else(|| self.space.outputs().next().cloned());
+
+        let Some(output) = output else {
+            tracing::warn!(
+                namespace,
+                "Ignoring layer surface because no output is available"
+            );
+            return;
+        };
+
+        let layer = DesktopLayerSurface::new(surface, namespace);
+        let mut map = layer_map_for_output(&output);
+        if let Err(error) = map.map_layer(&layer) {
+            tracing::warn!(?error, "Unable to map layer surface");
+            return;
+        }
+        drop(map);
+
+        self.refresh_exclusive_layer_focus();
+        self.space.refresh();
+    }
+
+    fn new_popup(&mut self, _parent: WlrLayerSurface, popup: PopupSurface) {
+        self.unconstrain_popup(&popup);
+        if let Err(error) = self.popups.track_popup(PopupKind::Xdg(popup)) {
+            tracing::warn!(?error, "Unable to track layer-shell popup");
+        }
+    }
+
+    fn layer_destroyed(&mut self, surface: WlrLayerSurface) {
+        let focused = self
+            .keyboard
+            .as_ref()
+            .and_then(|keyboard| keyboard.current_focus())
+            .is_some_and(|focused| {
+                let map = layer_map_for_output(&self.output);
+                map.layer_for_surface(&focused, WindowSurfaceType::ALL)
+                    .is_some_and(|layer| layer.layer_surface() == &surface)
+            });
+
+        {
+            let mut map = layer_map_for_output(&self.output);
+            let layer = map
+                .layers()
+                .find(|layer| layer.layer_surface() == &surface)
+                .cloned();
+            if let Some(layer) = layer {
+                map.unmap_layer(&layer);
+            }
+            map.cleanup();
+        }
+
+        if focused {
+            self.focus_topmost_window();
+        }
+        self.reconfigure_maximized_windows();
+        // Reclaim or release the layer's exclusive zone immediately so tiled
+        // windows do not keep geometry from the previous work area.
+        self.arrange_tiled_windows();
+        self.space.refresh();
+    }
+}
+
 impl SeatHandler for CompositorStateData {
     type KeyboardFocus = WlSurface;
     type PointerFocus = WlSurface;
@@ -1276,11 +2565,167 @@ impl SeatHandler for CompositorStateData {
     }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        let title = focused
+            .and_then(|surface| {
+                self.windows.iter().find_map(|entry| {
+                    entry.window.toplevel().and_then(|toplevel| {
+                        (toplevel.wl_surface() == surface)
+                            .then(|| toplevel_title(&toplevel))
+                            .flatten()
+                    })
+                })
+            })
+            .unwrap_or_else(|| "<none-or-non-toplevel>".into());
+        info!(focused = %title, has_surface = focused.is_some(), "Wayland seat focus_changed");
         let client = focused.and_then(|surface| self.display_handle.get_client(surface.id()).ok());
-        set_data_device_focus(&self.display_handle, seat, client);
+        set_data_device_focus(&self.display_handle, seat, client.clone());
+        set_primary_focus(&self.display_handle, seat, client);
     }
 
-    fn cursor_image(&mut self, _seat: &Seat<Self>, _image: CursorImageStatus) {}
+    fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
+        self.pointer_cursor_status = image;
+    }
+}
+
+fn toplevel_title(surface: &ToplevelSurface) -> Option<String> {
+    with_states(surface.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|data| data.lock().ok())
+            .and_then(|attributes| attributes.title.clone())
+    })
+}
+
+fn toplevel_app_id(surface: &ToplevelSurface) -> Option<String> {
+    with_states(surface.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|data| data.lock().ok())
+            .and_then(|attributes| attributes.app_id.clone())
+    })
+}
+
+fn append_decoration_title(
+    elements: &mut Vec<SolidColorRenderElement>,
+    title: &str,
+    window_location: Point<i32, Logical>,
+    window_width: i32,
+    title_color: Color32F,
+    scale: f64,
+) {
+    const GLYPH_WIDTH: i32 = 5;
+    const GLYPH_HEIGHT: i32 = 7;
+    const GLYPH_ADVANCE: i32 = 6;
+    const TITLE_LEFT_PADDING: i32 = 12;
+    const BUTTONS_RESERVED_WIDTH: i32 = 88;
+
+    let available_width = (window_width - TITLE_LEFT_PADDING - BUTTONS_RESERVED_WIDTH).max(0);
+    let max_chars = (available_width / GLYPH_ADVANCE) as usize;
+    let mut cursor_x = window_location.x + TITLE_LEFT_PADDING;
+    let cursor_y = window_location.y + (TITLEBAR_HEIGHT - GLYPH_HEIGHT) / 2;
+
+    for character in title
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(max_chars)
+    {
+        let rows = decoration_glyph(character);
+        for (row_index, bits) in rows.into_iter().enumerate() {
+            let mut column = 0;
+            while column < GLYPH_WIDTH {
+                if bits & (1 << (GLYPH_WIDTH - 1 - column)) == 0 {
+                    column += 1;
+                    continue;
+                }
+                let start = column;
+                while column < GLYPH_WIDTH && bits & (1 << (GLYPH_WIDTH - 1 - column)) != 0 {
+                    column += 1;
+                }
+                append_solid_decoration(
+                    elements,
+                    (cursor_x + start, cursor_y + row_index as i32).into(),
+                    (column - start, 1).into(),
+                    title_color,
+                    scale,
+                );
+            }
+        }
+        cursor_x += GLYPH_ADVANCE;
+    }
+}
+
+fn decoration_glyph(character: char) -> [u8; 7] {
+    match character.to_ascii_uppercase() {
+        'A' => [14, 17, 17, 31, 17, 17, 17],
+        'B' => [30, 17, 17, 30, 17, 17, 30],
+        'C' => [14, 17, 16, 16, 16, 17, 14],
+        'D' => [30, 17, 17, 17, 17, 17, 30],
+        'E' => [31, 16, 16, 30, 16, 16, 31],
+        'F' => [31, 16, 16, 30, 16, 16, 16],
+        'G' => [14, 17, 16, 23, 17, 17, 15],
+        'H' => [17, 17, 17, 31, 17, 17, 17],
+        'I' => [14, 4, 4, 4, 4, 4, 14],
+        'J' => [7, 2, 2, 2, 18, 18, 12],
+        'K' => [17, 18, 20, 24, 20, 18, 17],
+        'L' => [16, 16, 16, 16, 16, 16, 31],
+        'M' => [17, 27, 21, 21, 17, 17, 17],
+        'N' => [17, 25, 21, 19, 17, 17, 17],
+        'O' => [14, 17, 17, 17, 17, 17, 14],
+        'P' => [30, 17, 17, 30, 16, 16, 16],
+        'Q' => [14, 17, 17, 17, 21, 18, 13],
+        'R' => [30, 17, 17, 30, 20, 18, 17],
+        'S' => [15, 16, 16, 14, 1, 1, 30],
+        'T' => [31, 4, 4, 4, 4, 4, 4],
+        'U' => [17, 17, 17, 17, 17, 17, 14],
+        'V' => [17, 17, 17, 17, 17, 10, 4],
+        'W' => [17, 17, 17, 21, 21, 21, 10],
+        'X' => [17, 17, 10, 4, 10, 17, 17],
+        'Y' => [17, 17, 10, 4, 4, 4, 4],
+        'Z' => [31, 1, 2, 4, 8, 16, 31],
+        '0' => [14, 17, 19, 21, 25, 17, 14],
+        '1' => [4, 12, 4, 4, 4, 4, 14],
+        '2' => [14, 17, 1, 2, 4, 8, 31],
+        '3' => [30, 1, 1, 14, 1, 1, 30],
+        '4' => [2, 6, 10, 18, 31, 2, 2],
+        '5' => [31, 16, 16, 30, 1, 1, 30],
+        '6' => [14, 16, 16, 30, 17, 17, 14],
+        '7' => [31, 1, 2, 4, 8, 8, 8],
+        '8' => [14, 17, 17, 14, 17, 17, 14],
+        '9' => [14, 17, 17, 15, 1, 1, 14],
+        '.' => [0, 0, 0, 0, 0, 12, 12],
+        ',' => [0, 0, 0, 0, 4, 4, 8],
+        ':' => [0, 4, 4, 0, 4, 4, 0],
+        ';' => [0, 4, 4, 0, 4, 4, 8],
+        '-' => [0, 0, 0, 31, 0, 0, 0],
+        '_' => [0, 0, 0, 0, 0, 0, 31],
+        '+' => [0, 4, 4, 31, 4, 4, 0],
+        '/' => [1, 1, 2, 4, 8, 16, 16],
+        '\\' => [16, 16, 8, 4, 2, 1, 1],
+        '(' => [2, 4, 8, 8, 8, 4, 2],
+        ')' => [8, 4, 2, 2, 2, 4, 8],
+        '[' => [14, 8, 8, 8, 8, 8, 14],
+        ']' => [14, 2, 2, 2, 2, 2, 14],
+        '!' => [4, 4, 4, 4, 4, 0, 4],
+        '?' => [14, 17, 1, 2, 4, 0, 4],
+        '=' => [0, 31, 0, 31, 0, 0, 0],
+        ' ' => [0; 7],
+        _ => [14, 17, 1, 2, 4, 0, 4],
+    }
+}
+
+fn rgb_channels(color: Rgb) -> [f32; 3] {
+    [
+        color.r as f32 / 255.0,
+        color.g as f32 / 255.0,
+        color.b as f32 / 255.0,
+    ]
+}
+
+fn color32_from_rgb(color: Rgb) -> Color32F {
+    let [red, green, blue] = rgb_channels(color);
+    Color32F::new(red, green, blue, 1.0)
 }
 
 fn append_solid_decoration(
@@ -1302,6 +2747,13 @@ fn append_solid_decoration(
         1.0,
         Kind::Unspecified,
     ));
+}
+
+fn should_fallback_from_layer_focus(
+    interactivity: KeyboardInteractivity,
+    has_buffer: bool,
+) -> bool {
+    interactivity != KeyboardInteractivity::OnDemand || !has_buffer
 }
 
 fn calculate_resize_size(
@@ -1535,9 +2987,18 @@ impl PointerGrab<CompositorStateData> for WindowPointerGrab {
     fn unset(&mut self, _data: &mut CompositorStateData) {}
 }
 
-#[derive(Default)]
 struct WaylandClientState {
     compositor_state: CompositorClientState,
+    connected: AtomicBool,
+}
+
+impl Default for WaylandClientState {
+    fn default() -> Self {
+        Self {
+            compositor_state: CompositorClientState::default(),
+            connected: AtomicBool::new(true),
+        }
+    }
 }
 
 impl ClientData for WaylandClientState {
@@ -1546,6 +3007,7 @@ impl ClientData for WaylandClientState {
     }
 
     fn disconnected(&self, _client_id: ClientId, reason: DisconnectReason) {
+        self.connected.store(false, Ordering::Release);
         info!(?reason, "Wayland client disconnected");
     }
 }
@@ -1555,12 +3017,27 @@ delegate_output!(CompositorStateData);
 delegate_seat!(CompositorStateData);
 delegate_shm!(CompositorStateData);
 delegate_data_device!(CompositorStateData);
+delegate_primary_selection!(CompositorStateData);
+delegate_xdg_activation!(CompositorStateData);
 delegate_xdg_decoration!(CompositorStateData);
 delegate_xdg_shell!(CompositorStateData);
 
+delegate_layer_shell!(CompositorStateData);
+
 /// Starts the initial Winit-backed Wayland compositor and owns IPC for its
 /// complete lifetime.
-pub fn run_winit() -> Result<()> {
+pub fn run_winit(initial_layout: &str) -> Result<()> {
+    run_winit_with_theme(initial_layout, None, ThemeOptions::default())
+}
+
+/// Starts the Winit compositor and optionally generates a wallpaper palette
+/// on the dedicated BubbleColor worker. Palette polling stays on the
+/// compositor thread and never waits for image decoding.
+pub fn run_winit_with_theme(
+    initial_layout: &str,
+    wallpaper: Option<&str>,
+    theme_options: ThemeOptions,
+) -> Result<()> {
     let (mut backend, mut winit_loop) =
         winit::init::<smithay::backend::renderer::gles::GlesRenderer>()
             .map_err(|error| anyhow!("cannot initialize the Winit/EGL backend: {error}"))?;
@@ -1570,9 +3047,15 @@ pub fn run_winit() -> Result<()> {
         Display::new().context("cannot create the Wayland display")?;
     let display_handle = display.handle();
 
+    let output_manager_state =
+        OutputManagerState::new_with_xdg_output::<CompositorStateData>(&display_handle);
     let compositor_state = CompositorState::new::<CompositorStateData>(&display_handle);
+    let layer_shell_state = WlrLayerShellState::new::<CompositorStateData>(&display_handle);
     let shm_state = ShmState::new::<CompositorStateData>(&display_handle, vec![]);
     let data_device_state = DataDeviceState::new::<CompositorStateData>(&display_handle);
+    let primary_selection_state =
+        PrimarySelectionState::new::<CompositorStateData>(&display_handle);
+    let xdg_activation_state = XdgActivationState::new::<CompositorStateData>(&display_handle);
     let mut seat_state = SeatState::new();
     let seat = seat_state.new_wl_seat(&display_handle, "bubblewm");
 
@@ -1598,9 +3081,37 @@ pub fn run_winit() -> Result<()> {
     );
     output.create_global::<CompositorStateData>(&display_handle);
 
+    let mut theme_runtime = None;
+    let mut theme_generation = 0;
+    if let Some(wallpaper) = wallpaper.filter(|path| !path.trim().is_empty()) {
+        match ThemeRuntime::start() {
+            Ok(runtime) => {
+                let generation = 1;
+                match runtime.request(generation, wallpaper, theme_options) {
+                    Ok(()) => {
+                        theme_generation = generation;
+                        theme_runtime = Some(runtime);
+                        info!(
+                            wallpaper,
+                            generation, "Queued initial BubbleColor palette generation"
+                        );
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "Could not queue initial BubbleColor palette generation");
+                        let _ = runtime.shutdown();
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "Could not start BubbleColor worker; continuing without wallpaper palette");
+            }
+        }
+    }
+
     let mut state = CompositorStateData {
         display_handle: display_handle.clone(),
         compositor_state,
+        layer_shell_state,
         xdg_shell_state: XdgShellState::new_with_capabilities::<CompositorStateData>(
             &display_handle,
             [
@@ -1611,25 +3122,42 @@ pub fn run_winit() -> Result<()> {
         _xdg_decoration_state: XdgDecorationState::new::<CompositorStateData>(&display_handle),
         shm_state,
         data_device_state,
+        primary_selection_state,
+        xdg_activation_state,
+        recent_input_serials: Vec::new(),
         seat_state,
         seat,
         keyboard: None,
         pointer: None,
         pointer_location: (0.0, 0.0).into(),
+        logo_modifier_pressed: false,
+        pointer_cursor_status: CursorImageStatus::default_named(),
         output: output.clone(),
+        output_manager_state,
         space: Space::default(),
         windows: Vec::new(),
         popups: PopupManager::default(),
         resize_session: None,
         next_window_position: 0,
         next_minimized_order: 0,
+        next_stacking_order: 0,
+        active_workspace: 0,
+        workspace_count: WORKSPACE_COUNT,
         suppressed_keys: Vec::new(),
+        layout_mode: if initial_layout == "tiling" {
+            LayoutMode::MasterStack
+        } else {
+            LayoutMode::Floating
+        },
+        theme_runtime,
+        theme_generation,
+        active_theme: None,
     };
     state.space.map_output(&output, (0, 0));
 
     let keyboard = state
         .seat
-        .add_keyboard(Default::default(), 200, 200)
+        .add_keyboard(Default::default(), 600, 25)
         .context("cannot initialize the virtual keyboard")?;
     let pointer = state.seat.add_pointer();
     state.keyboard = Some(keyboard);
@@ -1644,6 +3172,9 @@ pub fn run_winit() -> Result<()> {
 
     // The socket is advertised before starting the IPC endpoint. If IPC setup
     // fails, dropping the listener closes the Wayland socket as startup unwinds.
+    // The Winit backend is a nested development compositor. Its session
+    // manager deliberately exposes no host power or logout actions.
+    let session_manager = SessionManager::nested_development();
     let (ipc_runtime, ipc_commands) =
         IpcRuntime::start_default().context("cannot initialize BubbleWM IPC")?;
 
@@ -1662,26 +3193,52 @@ pub fn run_winit() -> Result<()> {
     let start_time = Instant::now();
     let mut clients = Vec::new();
     let mut running = true;
+    // Capture a small sample of the first frames after a client toplevel
+    // receives a real buffer. This distinguishes missing Space elements from
+    // elements that are present but omitted by output rendering.
+    let mut initial_render_diagnostics_remaining = 8;
 
     while running {
         let status = winit_loop.dispatch_new_events(|event| match event {
             WinitEvent::CloseRequested => running = false,
             WinitEvent::Resized { size, .. } => state.update_output_mode(size),
             WinitEvent::Input(InputEvent::Keyboard { event }) => {
+                let key_code = event.key_code();
                 if let Some(keyboard) = state.keyboard.clone() {
+                    let focused_title = keyboard.current_focus().and_then(|focused| {
+                        state.windows.iter().find_map(|entry| {
+                            entry.window.toplevel().and_then(|toplevel| {
+                                (toplevel.wl_surface() == &focused)
+                                    .then(|| toplevel_title(&toplevel))
+                                    .flatten()
+                            })
+                        })
+                    }).unwrap_or_else(|| "<none-or-non-toplevel>".into());
+                    info!(
+                        key_code = ?key_code,
+                        state = ?event.state(),
+                        focused = %focused_title,
+                        "Winit keyboard event"
+                    );
+                    let serial = SERIAL_COUNTER.next_serial();
+                    if event.state() == smithay::backend::input::KeyState::Pressed {
+                        let focus = keyboard.current_focus();
+                        state.remember_input_serial(serial, focus);
+                    }
                     keyboard.input::<(), _>(
                         &mut state,
                         event.key_code(),
                         event.state(),
-                        SERIAL_COUNTER.next_serial(),
+                        serial,
                         (event.time() / 1000) as u32,
                         |compositor, modifiers, key| {
+                            compositor.logo_modifier_pressed = modifiers.logo;
                             let keysym = key.modified_sym();
                             if event.state() == smithay::backend::input::KeyState::Pressed {
                                 if let Some(action) = compositor_shortcut(*modifiers, keysym) {
                                     if suppress_shortcut_press(
                                         &mut compositor.suppressed_keys,
-                                        keysym,
+                                        key_code.into(),
                                     ) {
                                         match action {
                                             CompositorShortcut::Minimize => {
@@ -1693,6 +3250,26 @@ pub fn run_winit() -> Result<()> {
                                             CompositorShortcut::Close => {
                                                 compositor.close_focused_window();
                                             }
+                                            CompositorShortcut::WorkspacePrevious => {
+                                                let index = previous_workspace(
+                                                    compositor.active_workspace,
+                                                    compositor.workspace_count,
+                                                );
+                                                let _ = compositor.activate_workspace(index);
+                                            }
+                                            CompositorShortcut::WorkspaceNext => {
+                                                let index = next_workspace(
+                                                    compositor.active_workspace,
+                                                    compositor.workspace_count,
+                                                );
+                                                let _ = compositor.activate_workspace(index);
+                                            }
+                                            CompositorShortcut::ToggleLayout => {
+                                                compositor.toggle_layout_mode();
+                                            }
+                                            CompositorShortcut::ToggleWindowLayout => {
+                                                compositor.toggle_focused_window_layout();
+                                            }
                                         }
                                     }
                                     FilterResult::Intercept(())
@@ -1701,7 +3278,7 @@ pub fn run_winit() -> Result<()> {
                                 }
                             } else if consume_shortcut_release(
                                 &mut compositor.suppressed_keys,
-                                keysym,
+                                key_code.into(),
                             ) {
                                 FilterResult::Intercept(())
                             } else {
@@ -1741,16 +3318,58 @@ pub fn run_winit() -> Result<()> {
             WinitEvent::Input(InputEvent::PointerButton { event }) => {
                 let serial = SERIAL_COUNTER.next_serial();
                 let time = (event.time() / 1000) as u32;
+                if event.state() == ButtonState::Pressed {
+                    let focus = state
+                        .pointer_focus(state.pointer_location)
+                        .map(|(surface, _)| surface);
+                    state.remember_input_serial(serial, focus);
+                }
 
                 let mut decoration_move = None;
+                let mut modifier_move = None;
                 if event.state() == ButtonState::Pressed {
-                    if let Some((window, action)) =
-                        state.decoration_hit_test(state.pointer_location)
-                    {
+                    let hit = state.decoration_hit_test(state.pointer_location);
+                    info!(
+                        "Pointer press button={:#x} location=({}, {}) decoration_hit={}",
+                        event.button_code(),
+                        state.pointer_location.x,
+                        state.pointer_location.y,
+                        hit.as_ref()
+                            .map(|(_, action)| format!("{action:?}"))
+                            .unwrap_or_else(|| "none".into())
+                    );
+                    if let Some((window, action)) = hit {
+                        let title = window
+                            .toplevel()
+                            .and_then(|surface| toplevel_title(&surface))
+                            .unwrap_or_else(|| "<untitled>".into());
+                        info!("Decoration action={action:?} target={title}");
                         if action == DecorationAction::Move {
                             decoration_move = Some(window.clone());
                         }
                         state.handle_decoration_action(&window, action);
+                    } else if state.logo_modifier_pressed && event.button_code() == 0x110 {
+                        if let Some((window, _)) = state.space.element_under(state.pointer_location)
+                        {
+                            let window = window.clone();
+                            if state.windows.iter().any(|entry| {
+                                entry.window == window
+                                    && !entry.minimized
+                                    && entry.workspace == state.active_workspace
+                            }) {
+                                let title = window
+                                    .toplevel()
+                                    .and_then(|surface| toplevel_title(&surface))
+                                    .unwrap_or_else(|| "<untitled>".into());
+                                info!("Modifier move grab requested title={title}");
+                                state.focus_window_under_pointer(serial);
+                                modifier_move = Some(window);
+                            } else {
+                                state.focus_window_under_pointer(serial);
+                            }
+                        } else {
+                            state.focus_window_under_pointer(serial);
+                        }
                     } else {
                         state.focus_window_under_pointer(serial);
                     }
@@ -1768,6 +3387,41 @@ pub fn run_winit() -> Result<()> {
                     );
                     pointer.frame(&mut state);
 
+                    if let Some(window) = modifier_move {
+                        if event.state() == ButtonState::Pressed && event.button_code() == 0x110 {
+                            if let Some(location) = state
+                                .windows
+                                .iter()
+                                .find(|entry| entry.window == window)
+                                .map(|entry| entry.location)
+                            {
+                                let start_data = GrabStartData {
+                                    focus: None,
+                                    button: event.button_code(),
+                                    location: state.pointer_location,
+                                };
+                                info!(
+                                    "Starting modifier move grab at ({}, {}) initial=({}, {})",
+                                    state.pointer_location.x,
+                                    state.pointer_location.y,
+                                    location.x,
+                                    location.y
+                                );
+                                pointer.set_grab(
+                                    &mut state,
+                                    WindowPointerGrab {
+                                        start_data,
+                                        window,
+                                        initial_location: location,
+                                        kind: WindowGrabKind::Move,
+                                    },
+                                    serial,
+                                    Focus::Clear,
+                                );
+                            }
+                        }
+                    }
+
                     if let Some(window) = decoration_move {
                         if event.state() == ButtonState::Pressed && event.button_code() == 0x110 {
                             if let Some(location) = state
@@ -1781,6 +3435,13 @@ pub fn run_winit() -> Result<()> {
                                     button: event.button_code(),
                                     location: state.pointer_location,
                                 };
+                                info!(
+                                    "Starting decoration move grab at ({}, {}) initial=({}, {})",
+                                    state.pointer_location.x,
+                                    state.pointer_location.y,
+                                    location.x,
+                                    location.y
+                                );
                                 pointer.set_grab(
                                     &mut state,
                                     WindowPointerGrab {
@@ -1819,13 +3480,18 @@ pub fn run_winit() -> Result<()> {
             WinitEvent::Focus(_) | WinitEvent::Redraw | WinitEvent::Input(_) => {}
         });
 
-        if matches!(status, PumpStatus::Exit(_)) {
+        if matches!(status, PumpStatus::Exit(_)) || !running {
             break;
         }
 
+        // BubbleColor results are consumed on the compositor thread. Image
+        // decoding and palette generation remain isolated on its worker.
+        state.poll_bubblecolor();
+
         // IPC commands are consumed on the compositor thread. No IPC worker
         // callback accesses Smithay state directly.
-        ipc_commands.dispatch_pending(handle_ipc_request);
+        ipc_commands
+            .dispatch_pending(|request| state.handle_ipc_request(request, &session_manager));
 
         while let Some(stream) = wayland_listener
             .accept()
@@ -1841,11 +3507,52 @@ pub fn run_winit() -> Result<()> {
         display
             .dispatch_clients(&mut state)
             .context("Wayland client dispatch failed")?;
+
+        // Some clients expose their committed buffer to the renderer only
+        // after the post-commit hook has run. Retry the normal toplevel
+        // mapping path once the client dispatch has completed, rather than
+        // waiting for a workspace switch to remap otherwise-ready windows.
+        let ready_unmapped_toplevels = state
+            .windows
+            .iter()
+            .filter(|entry| {
+                !entry.minimized
+                    && entry.workspace == state.active_workspace
+                    && state.space.element_location(&entry.window).is_none()
+            })
+            .filter_map(|entry| {
+                let surface = entry.window.toplevel()?.wl_surface().clone();
+                let has_buffer = with_renderer_surface_state(&surface, |surface_state| {
+                    surface_state.buffer().is_some()
+                })
+                .unwrap_or(false);
+                has_buffer.then_some(surface)
+            })
+            .collect::<Vec<_>>();
+        for surface in ready_unmapped_toplevels {
+            state.handle_toplevel_commit(&surface);
+        }
+
         state.popups.cleanup();
         state.space.refresh();
         display
             .flush_clients()
             .context("cannot flush Wayland client events")?;
+
+        // Client handles keep their ClientData alive. Drop disconnected handles
+        // so repeated client connections cannot accumulate stale client state.
+        clients.retain(|client| {
+            client
+                .get_data::<WaylandClientState>()
+                .is_some_and(|data| data.connected.load(Ordering::Acquire))
+        });
+
+        // Winit supplies the fallback named cursor. Hide it when a client asks
+        // for a custom surface or explicitly hides the pointer; the custom
+        // surface is composited into BubbleWM's own scene below.
+        backend
+            .window()
+            .set_cursor_visible(host_cursor_visible(&state.pointer_cursor_status));
 
         let size = backend.window_size();
         if size.w <= 0 || size.h <= 0 {
@@ -1863,6 +3570,76 @@ pub fn run_winit() -> Result<()> {
                 .render_elements_for_output(renderer, &state.output, 1.0)
                 .map_err(|error| anyhow!("cannot assemble output scene: {error}"))?;
 
+            if initial_render_diagnostics_remaining > 0
+                && state.windows.iter().any(|entry| {
+                    entry.window.toplevel().is_some_and(|toplevel| {
+                        with_renderer_surface_state(toplevel.wl_surface(), |surface_state| {
+                            surface_state.buffer().is_some()
+                        })
+                        .unwrap_or(false)
+                    })
+                })
+            {
+                let managed = state
+                    .windows
+                    .iter()
+                    .map(|entry| {
+                        let title = entry
+                            .window
+                            .toplevel()
+                            .and_then(|toplevel| toplevel_title(&toplevel))
+                            .unwrap_or_else(|| "<untitled>".into());
+                        let has_buffer = entry.window.toplevel().is_some_and(|toplevel| {
+                            with_renderer_surface_state(
+                                toplevel.wl_surface(),
+                                |surface_state| surface_state.buffer().is_some(),
+                            )
+                            .unwrap_or(false)
+                        });
+                        format!(
+                            "{title}:buffer={has_buffer},mapped={},workspace={},minimized={},location={:?}",
+                            state.space.element_location(&entry.window).is_some(),
+                            entry.workspace,
+                            entry.minimized,
+                            entry.location
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                info!(
+                    output_size = ?size,
+                    managed_windows = ?managed,
+                    space_elements = state.space.elements().count(),
+                    rendered_elements = elements.len(),
+                    "Initial output render diagnostic"
+                );
+                initial_render_diagnostics_remaining -= 1;
+            }
+
+            let cursor_elements: Vec<
+                WaylandSurfaceRenderElement<smithay::backend::renderer::gles::GlesRenderer>,
+            > = match &state.pointer_cursor_status {
+                CursorImageStatus::Surface(surface) if surface.alive() => {
+                    let hotspot = with_states(surface, |states| {
+                        states
+                            .data_map
+                            .get::<CursorImageSurfaceData>()
+                            .and_then(|data| data.lock().ok().map(|attributes| attributes.hotspot))
+                    })
+                    .unwrap_or((0, 0).into());
+                    let scale = state.output.current_scale().fractional_scale();
+                    let location = (state.pointer_location - hotspot.to_f64())
+                        .to_physical_precise_round(scale);
+                    render_elements_from_surface_tree(
+                        renderer,
+                        surface,
+                        location,
+                        scale,
+                        1.0,
+                        Kind::Cursor,
+                    )
+                }
+                _ => Vec::new(),
+            };
             let mut frame = renderer
                 .render(&mut framebuffer, size, Transform::Flipped180)
                 .context("cannot begin a Winit frame")?;
@@ -1878,6 +3655,9 @@ pub fn run_winit() -> Result<()> {
                 SolidColorRenderElement,
             >(&mut frame, 1.0, &decorations, &[damage])
             .context("cannot render server-side decorations")?;
+            draw_render_elements(&mut frame, 1.0, &cursor_elements, &[damage])
+                .context("cannot render the pointer cursor")?;
+
             let sync_point = frame.finish().context("cannot finish the Winit frame")?;
             loop {
                 if sync_point.wait().is_ok() {
@@ -1886,11 +3666,17 @@ pub fn run_winit() -> Result<()> {
             }
         }
 
+        let frame_time = start_time.elapsed().as_millis() as u32;
         for surface in state.xdg_shell_state.toplevel_surfaces() {
-            send_frames_surface_tree(
-                surface.wl_surface(),
-                start_time.elapsed().as_millis() as u32,
-            );
+            send_frames_surface_tree(surface.wl_surface(), frame_time);
+        }
+        for surface in state.layer_shell_state.layer_surfaces() {
+            send_frames_layer_surface_tree(surface.wl_surface(), frame_time);
+        }
+        if let CursorImageStatus::Surface(surface) = &state.pointer_cursor_status
+            && surface.alive()
+        {
+            send_frames_surface_tree(surface, frame_time);
         }
 
         backend
@@ -1903,30 +3689,48 @@ pub fn run_winit() -> Result<()> {
         thread::sleep(FRAME_INTERVAL);
     }
 
+    // Stop accepting IPC requests before shutting down the theme worker.
+    // The IPC worker may still be waiting for an in-flight compositor reply.
     ipc_runtime
         .shutdown()
         .context("cannot shut down the BubbleWM IPC worker")?;
+    if let Some(runtime) = state.theme_runtime.take() {
+        runtime
+            .shutdown()
+            .map_err(|_| anyhow!("BubbleColor worker panicked during shutdown"))?;
+    }
     info!("BubbleWM compositor is shutting down");
     Ok(())
 }
 
-fn handle_ipc_request(request: Request) -> Response {
-    match request {
-        Request::GetCapabilities => Response::Success {
-            data: ResponseData::Capabilities {
-                workspace_control: false,
-            },
-        },
-        Request::GetWorkspaceState
-        | Request::WorkspacePrevious
-        | Request::WorkspaceNext
-        | Request::ActivateWorkspace { .. } => Response::Failure {
-            error: ErrorResponse {
-                code: ErrorCode::Unavailable,
-                message: "workspace management is not initialized yet".into(),
-            },
-        },
+fn is_current_theme_generation(update_generation: u64, current_generation: u64) -> bool {
+    update_generation == current_generation
+}
+
+fn host_cursor_visible(status: &CursorImageStatus) -> bool {
+    matches!(status, CursorImageStatus::Named(_))
+}
+
+fn previous_workspace(current: u32, count: u32) -> u32 {
+    if count == 0 {
+        return 0;
     }
+    (current + count - 1) % count
+}
+
+fn next_workspace(current: u32, count: u32) -> u32 {
+    if count == 0 {
+        return 0;
+    }
+    (current + 1) % count
+}
+
+/// Sends frame callbacks to a layer surface, its popups and their subsurfaces.
+fn send_frames_layer_surface_tree(surface: &wl_surface::WlSurface, time: u32) {
+    for (popup, _) in PopupManager::popups_for_surface(surface) {
+        send_frames_surface_tree(popup.wl_surface(), time);
+    }
+    send_frames_surface_tree(surface, time);
 }
 
 /// Sends frame callbacks to every surface in a tree after the nested frame.
@@ -1955,6 +3759,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rgb_channels_are_normalized_for_the_renderer() {
+        assert_eq!(
+            rgb_channels(Rgb::new(128, 64, 255)),
+            [128.0 / 255.0, 64.0 / 255.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn current_theme_generation_accepts_only_the_latest_result() {
+        assert!(is_current_theme_generation(4, 4));
+        assert!(!is_current_theme_generation(3, 4));
+        assert!(!is_current_theme_generation(5, 4));
+    }
+
+    #[test]
+    fn host_cursor_is_visible_only_for_named_fallback_shapes() {
+        assert!(host_cursor_visible(&CursorImageStatus::default_named()));
+        assert!(!host_cursor_visible(&CursorImageStatus::Hidden));
+    }
+
+    #[test]
     fn compositor_shortcuts_require_the_logo_modifier() {
         assert_eq!(
             compositor_shortcut(ModifiersState::default(), Keysym::h),
@@ -1975,12 +3800,13 @@ mod tests {
     #[test]
     fn held_shortcut_repeats_do_not_repeat_compositor_actions() {
         let mut suppressed = Vec::new();
-        assert!(suppress_shortcut_press(&mut suppressed, Keysym::Tab));
-        assert!(!suppress_shortcut_press(&mut suppressed, Keysym::Tab));
-        assert_eq!(suppressed, vec![Keysym::Tab]);
-        assert!(consume_shortcut_release(&mut suppressed, Keysym::Tab));
+        const TAB_KEY_CODE: u32 = 15;
+        assert!(suppress_shortcut_press(&mut suppressed, TAB_KEY_CODE));
+        assert!(!suppress_shortcut_press(&mut suppressed, TAB_KEY_CODE));
+        assert_eq!(suppressed, vec![TAB_KEY_CODE]);
+        assert!(consume_shortcut_release(&mut suppressed, TAB_KEY_CODE));
         assert!(suppressed.is_empty());
-        assert!(suppress_shortcut_press(&mut suppressed, Keysym::Tab));
+        assert!(suppress_shortcut_press(&mut suppressed, TAB_KEY_CODE));
     }
 
     #[test]
@@ -1990,13 +3816,64 @@ mod tests {
             ..ModifiersState::default()
         };
         assert_eq!(
-            compositor_shortcut(modifiers, Keysym::Tab),
+            compositor_shortcut(
+                ModifiersState {
+                    ctrl: true,
+                    alt: true,
+                    ..ModifiersState::default()
+                },
+                Keysym::r
+            ),
             Some(CompositorShortcut::Restore)
         );
         assert_eq!(
             compositor_shortcut(modifiers, Keysym::q),
             Some(CompositorShortcut::Close)
         );
+        assert_eq!(
+            compositor_shortcut(modifiers, Keysym::Left),
+            Some(CompositorShortcut::WorkspacePrevious)
+        );
+        assert_eq!(
+            compositor_shortcut(modifiers, Keysym::Right),
+            Some(CompositorShortcut::WorkspaceNext)
+        );
+        assert_eq!(
+            compositor_shortcut(modifiers, Keysym::t),
+            Some(CompositorShortcut::ToggleLayout)
+        );
+        assert_eq!(
+            compositor_shortcut(modifiers, Keysym::T),
+            Some(CompositorShortcut::ToggleLayout)
+        );
+        assert_eq!(
+            compositor_shortcut(modifiers, Keysym::f),
+            Some(CompositorShortcut::ToggleWindowLayout)
+        );
+        assert_eq!(
+            compositor_shortcut(modifiers, Keysym::F),
+            Some(CompositorShortcut::ToggleWindowLayout)
+        );
+    }
+
+    #[test]
+    fn layer_focus_falls_back_when_surface_cannot_receive_keyboard_input() {
+        assert!(should_fallback_from_layer_focus(
+            KeyboardInteractivity::None,
+            true
+        ));
+        assert!(should_fallback_from_layer_focus(
+            KeyboardInteractivity::Exclusive,
+            false
+        ));
+        assert!(should_fallback_from_layer_focus(
+            KeyboardInteractivity::OnDemand,
+            false
+        ));
+        assert!(!should_fallback_from_layer_focus(
+            KeyboardInteractivity::OnDemand,
+            true
+        ));
     }
 
     #[test]
@@ -2057,36 +3934,21 @@ mod tests {
     }
 
     #[test]
-    fn capability_query_does_not_advertise_unimplemented_workspace_control() {
-        assert_eq!(
-            handle_ipc_request(Request::GetCapabilities),
-            Response::Success {
-                data: ResponseData::Capabilities {
-                    workspace_control: false
-                }
-            }
-        );
+    fn workspace_navigation_wraps_in_both_directions() {
+        assert_eq!(previous_workspace(0, WORKSPACE_COUNT), WORKSPACE_COUNT - 1);
+        assert_eq!(previous_workspace(2, WORKSPACE_COUNT), 1);
+        assert_eq!(next_workspace(WORKSPACE_COUNT - 1, WORKSPACE_COUNT), 0);
+        assert_eq!(next_workspace(1, WORKSPACE_COUNT), 2);
     }
 
     #[test]
-    fn workspace_requests_report_unavailable_until_workspace_state_exists() {
-        let requests = [
-            Request::GetWorkspaceState,
-            Request::WorkspacePrevious,
-            Request::WorkspaceNext,
-            Request::ActivateWorkspace { index: 0 },
-        ];
+    fn workspace_navigation_handles_zero_count_without_panicking() {
+        assert_eq!(previous_workspace(0, 0), 0);
+        assert_eq!(next_workspace(0, 0), 0);
+    }
 
-        for request in requests {
-            assert_eq!(
-                handle_ipc_request(request),
-                Response::Failure {
-                    error: ErrorResponse {
-                        code: ErrorCode::Unavailable,
-                        message: "workspace management is not initialized yet".into(),
-                    }
-                }
-            );
-        }
+    #[test]
+    fn workspace_count_starts_with_four_workspaces() {
+        assert_eq!(WORKSPACE_COUNT, 4);
     }
 }

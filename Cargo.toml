@@ -7,6 +7,7 @@ license = "GPL-3.0-or-later"
 description = "A native, lightweight and customizable Wayland compositor for BubbleOS."
 repository = "https://github.com/Ruraam/BubbleWM"
 readme = "README.md"
+default-run = "bubblewm"
 
 [workspace]
 members = ["bubble-ipc", "bubblepanel"]
@@ -16,10 +17,23 @@ resolver = "3"
 bubble-ipc = { path = "bubble-ipc" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 smithay = { version = "0.7", default-features = false, features = ["backend_winit", "wayland_frontend", "desktop"] }
+zbus = "5.19"
+
+[features]
+default = []
+# Optional native DRM/KMS dependencies. The runtime backend is not enabled yet.
+native-backend = [
+    "smithay/backend_drm",
+    "smithay/backend_gbm",
+    "smithay/backend_libinput",
+    "smithay/backend_udev",
+    "smithay/backend_session_libseat",
+]
 
 [dev-dependencies]
 tempfile = "3"

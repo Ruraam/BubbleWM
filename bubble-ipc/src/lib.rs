@@ -31,9 +31,49 @@ pub struct RequestEnvelope {
 pub enum Request {
     GetCapabilities,
     GetWorkspaceState,
+    GetThemePalette,
     WorkspacePrevious,
     WorkspaceNext,
     ActivateWorkspace { index: u32 },
+    GetSessionState,
+    GetSessionCapabilities,
+    RequestSessionAction { action: SessionAction },
+}
+
+/// Actions that a session manager may request from a native session provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionAction {
+    Lock,
+    Logout,
+    Suspend,
+    Reboot,
+    PowerOff,
+}
+
+/// Runtime kind reported by the session manager.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionEnvironment {
+    NestedDevelopment,
+    Native,
+}
+
+/// Explicit capability flags; unsupported actions must remain false.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionCapabilities {
+    pub lock: bool,
+    pub logout: bool,
+    pub suspend: bool,
+    pub reboot: bool,
+    pub power_off: bool,
+}
+
+/// Session status reported to shell and settings clients.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionState {
+    pub environment: SessionEnvironment,
+    pub action_in_progress: bool,
 }
 
 /// Response envelope matching a request ID.
@@ -52,12 +92,32 @@ pub enum Response {
     Failure { error: ErrorResponse },
 }
 
+/// Versioned semantic colors shared with shell clients.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThemePalette {
+    pub schema_version: u32,
+    pub generation: u64,
+    pub primary: [u8; 3],
+    pub primary_container: [u8; 3],
+    pub on_primary_container: [u8; 3],
+    pub surface: [u8; 3],
+    pub on_surface: [u8; 3],
+    pub surface_variant: [u8; 3],
+    pub outline: [u8; 3],
+    pub warning: [u8; 3],
+    pub success: [u8; 3],
+    pub error: [u8; 3],
+}
+
 /// Data returned by supported read or control requests.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ResponseData {
     Capabilities { workspace_control: bool },
     WorkspaceState { active: u32, count: u32 },
+    ThemePalette { palette: Option<ThemePalette> },
+    SessionCapabilities { capabilities: SessionCapabilities },
+    SessionState { state: SessionState },
     Acknowledged,
 }
 
@@ -204,6 +264,53 @@ mod tests {
         write_frame(&mut bytes, &expected).expect("frame should serialize");
         let decoded: RequestEnvelope =
             read_frame(&mut Cursor::new(bytes)).expect("frame should deserialize");
+        assert_eq!(decoded, expected);
+    }
+
+    #[test]
+    fn theme_palette_response_round_trips_all_semantic_roles() {
+        let expected = ResponseEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: 103,
+            response: Response::Success {
+                data: ResponseData::ThemePalette {
+                    palette: Some(ThemePalette {
+                        schema_version: 1,
+                        generation: 9,
+                        primary: [12, 34, 56],
+                        primary_container: [20, 40, 60],
+                        on_primary_container: [240, 245, 250],
+                        surface: [18, 22, 30],
+                        on_surface: [230, 235, 245],
+                        surface_variant: [38, 44, 55],
+                        outline: [90, 100, 115],
+                        warning: [240, 180, 40],
+                        success: [40, 190, 120],
+                        error: [220, 60, 70],
+                    }),
+                },
+            },
+        };
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, &expected).expect("theme palette should serialize");
+        let decoded: ResponseEnvelope =
+            read_frame(&mut Cursor::new(bytes)).expect("theme palette should deserialize");
+        assert_eq!(decoded, expected);
+    }
+
+    #[test]
+    fn session_action_requests_round_trip_with_typed_actions() {
+        let expected = RequestEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: 77,
+            request: Request::RequestSessionAction {
+                action: SessionAction::PowerOff,
+            },
+        };
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, &expected).expect("session request should serialize");
+        let decoded: RequestEnvelope =
+            read_frame(&mut Cursor::new(bytes)).expect("session request should deserialize");
         assert_eq!(decoded, expected);
     }
 

@@ -6,7 +6,7 @@ on:
 
 jobs:
   rust:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install native dependencies
@@ -22,11 +22,20 @@ jobs:
             libudev-dev \
             libgbm-dev \
             libdrm-dev \
+            libseat-dev \
             pkg-config
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+      - name: Validate Bubble icon theme
+        run: python3 tools/check-icons.py
+      - name: Test Bubble icon audit
+        run: python3 -m unittest discover -s tools -p 'test_*.py'
       - name: Format
         run: cargo fmt --all -- --check
       - name: Test workspace
         run: cargo test --workspace --all-targets
+      - name: Test native backend lifecycle policy
+        run: cargo test -p bubblewm --features native-backend --bin bubblewm
+      - name: Check optional native backend dependencies
+        run: cargo check -p bubblewm --features native-backend

@@ -1,5 +1,8 @@
-# BubbleWM configuration draft for milestone 0.1.0.
-# Supported keys are validated by the application.
+# BubbleWM configuration.
+# Appearance and Bubble Color keys are persisted configuration foundations.
+# They do not imply that wallpaper/font/icon rendering is already wired into the compositor.
+
+schema_version = 1
 
 [core]
 backend = "winit"
@@ -18,6 +21,26 @@ workspace_cube = true
 source = "wallpaper"
 automatic_contrast = true
 smooth_transitions = true
+
+[appearance]
+# Set to an absolute image path to select a wallpaper.
+# wallpaper = "/home/user/Pictures/wallpaper.jpg"
+wallpaper_mode = "zoom"
+icon_theme = "Bubble"
+cursor_theme = "default"
+cursor_size = 24
+font_family = "Sans"
+monospace_font_family = "Monospace"
+font_size = 10
+color_scheme = "dark"
+accent_color = "#8B5CF6"
+
+[bubble_color]
+enabled = true
+engine = "bubble-color"
+palette_source = "wallpaper"
+palette_variant = "vivid"
+enforce_contrast = true
 
 [decoration]
 mode = "server"
