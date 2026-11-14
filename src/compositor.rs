@@ -1841,15 +1841,20 @@ impl CompositorStateData {
         }
         self.arrange_tiled_windows();
 
-        // A newly mapped transient can be inserted below its parent by Space.
-        // Raise the child after layout has finished so it is immediately visible.
+        // A newly mapped parent can be inserted above transient children
+        // that were mapped earlier. Rebuild family stacking whenever either
+        // a child or a parent with transient descendants is mapped.
+        let has_transient_children = self
+            .windows
+            .iter()
+            .any(|entry| entry.parent_surface.as_ref() == Some(surface));
         if !was_mapped
-            && is_transient
+            && (is_transient || has_transient_children)
             && !self.windows[index].minimized
             && self.windows[index].workspace == self.active_workspace
         {
-            // Raise from the family root so parent and every transient
-            // descendant are ordered together, exactly as on workspace restore.
+            // Raise from the family root so the parent stays below every
+            // mapped transient descendant, regardless of commit order.
             let family_root = self.root_surface_for_toplevel(surface);
             if let Some(root_window) = self.managed_window_for_surface(&family_root) {
                 self.raise_window_family(&root_window);
