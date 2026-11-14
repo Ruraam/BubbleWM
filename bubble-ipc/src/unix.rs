@@ -31,6 +31,49 @@ const PRIVATE_DIR_MODE: u32 = 0o700;
 const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const CLIENT_IO_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Errors raised by the blocking client helper.
+#[derive(Debug)]
+pub enum ClientError {
+    Io(std::io::Error),
+    Protocol(ProtocolError),
+    MismatchedResponse { expected: u64, received: u64 },
+}
+
+impl std::fmt::Display for ClientError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) => write!(formatter, "BubbleWM IPC socket error: {error}"),
+            Self::Protocol(error) => write!(formatter, "BubbleWM IPC protocol error: {error}"),
+            Self::MismatchedResponse { expected, received } => write!(
+                formatter,
+                "BubbleWM IPC response mismatch: expected request {expected}, received {received}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ClientError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            Self::Protocol(error) => Some(error),
+            Self::MismatchedResponse { .. } => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for ClientError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<ProtocolError> for ClientError {
+    fn from(error: ProtocolError) -> Self {
+        Self::Protocol(error)
+    }
+}
+
 /// Errors raised while preparing or running the local IPC listener.
 #[derive(Debug)]
 pub enum ServerError {
@@ -285,6 +328,44 @@ impl Drop for UnixIpcServer {
             }
         }
     }
+}
+
+/// Sends one request to a BubbleWM control socket and returns its response.
+///
+/// The helper is blocking, bounded by the same two-second timeouts as the
+/// server, and intended for short-lived command line tools.
+pub fn send_request(
+    socket_path: impl AsRef<Path>,
+    request: Request,
+) -> Result<Response, ClientError> {
+    const REQUEST_ID: u64 = 1;
+    let mut stream = UnixStream::connect(socket_path.as_ref())?;
+    stream.set_read_timeout(Some(CLIENT_IO_TIMEOUT))?;
+    stream.set_write_timeout(Some(CLIENT_IO_TIMEOUT))?;
+
+    let envelope = RequestEnvelope {
+        protocol_version: PROTOCOL_VERSION,
+        request_id: REQUEST_ID,
+        request,
+    };
+    write_frame(&mut stream, &envelope)?;
+
+    let response: ResponseEnvelope = {
+        let mut reader = BufReader::new(&mut stream);
+        read_frame(&mut reader)?
+    };
+    if response.request_id != REQUEST_ID {
+        return Err(ClientError::MismatchedResponse {
+            expected: REQUEST_ID,
+            received: response.request_id,
+        });
+    }
+    if response.protocol_version != PROTOCOL_VERSION {
+        return Err(ClientError::Protocol(ProtocolError::UnsupportedVersion(
+            response.protocol_version,
+        )));
+    }
+    Ok(response.response)
 }
 
 /// Checks Linux SO_PEERCRED before accepting a local IPC request.

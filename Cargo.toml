@@ -14,12 +14,31 @@ resolver = "3"
 
 [dependencies]
 bubble-ipc = { path = "bubble-ipc" }
+bubble-theme-engine = { path = "vendor/bubble-theme-engine" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-smithay = { version = "0.7", default-features = false, features = ["backend_winit", "wayland_frontend", "desktop"] }
+smithay = { version = "0.7", default-features = false, features = [
+    "backend_winit",
+    "backend_drm",
+    "backend_gbm",
+    "backend_udev",
+    "backend_libinput",
+    "backend_session_libseat",
+    "renderer_gl",
+    "use_system_lib",
+    "wayland_frontend",
+    "desktop",
+] }
+smithay-drm-extras = { version = "0.1", default-features = false }
+xcursor = "0.3"
+libc = "0.2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+fontdue = "0.9"
+tiny-skia = "0.11"
+zbus = { version = "4", features = ["blocking"] }
 
 [dev-dependencies]
 tempfile = "3"

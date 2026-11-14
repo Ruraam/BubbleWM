@@ -1,8 +1,7 @@
 //! BubbleWM application entry point.
 
-mod config;
-
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
+use bubblewm::config;
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
@@ -12,16 +11,14 @@ fn main() -> Result<()> {
         )
         .init();
 
-    let config_path = std::env::args().nth(1);
-    let config = config::load(config_path.as_deref())?;
+    let config_path = std::env::args()
+        .skip(1)
+        .find(|argument| !argument.starts_with("--"));
+    let config = config::Config::load(config_path.as_deref().map(std::path::Path::new))?;
 
     tracing::info!("BubbleWM {}", env!("CARGO_PKG_VERSION"));
     tracing::info!("Configured backend: {}", config.core.backend);
     tracing::info!("Configured layout: {}", config.core.layout);
 
-    match config.core.backend.as_str() {
-        "winit" => bubblewm::compositor::run_winit().context("BubbleWM Winit compositor failed"),
-        "drm" => bail!("the DRM/KMS backend is not implemented yet; use core.backend = \"winit\""),
-        backend => bail!("unsupported compositor backend: {backend}"),
-    }
+    bubblewm::compositor::run(config).context("BubbleWM compositor failed")
 }
