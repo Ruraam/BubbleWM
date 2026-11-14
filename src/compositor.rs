@@ -452,9 +452,37 @@ impl CompositorStateData {
     }
 
     fn set_keyboard_focus(&mut self, requested: Option<WlSurface>, serial: Serial) {
+        let surface_title = |surface: Option<&WlSurface>| {
+            surface
+                .and_then(|surface| {
+                    self.windows.iter().find_map(|entry| {
+                        entry.window.toplevel().and_then(|toplevel| {
+                            (toplevel.wl_surface() == surface)
+                                .then(|| toplevel_title(&toplevel))
+                                .flatten()
+                        })
+                    })
+                })
+                .unwrap_or_else(|| "<none-or-non-toplevel>".into())
+        };
+        let requested_title = surface_title(requested.as_ref());
         let focus = self.exclusive_layer_focus().or(requested);
+        let effective_title = surface_title(focus.as_ref());
         if let Some(keyboard) = self.keyboard.clone() {
             keyboard.set_focus(self, focus, serial);
+            let actual_title = surface_title(keyboard.current_focus().as_ref());
+            info!(
+                requested = %requested_title,
+                effective = %effective_title,
+                actual = %actual_title,
+                "Keyboard focus transition"
+            );
+        } else {
+            info!(
+                requested = %requested_title,
+                effective = %effective_title,
+                "Keyboard focus transition skipped: no keyboard"
+            );
         }
     }
 
