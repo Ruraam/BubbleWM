@@ -1,13 +1,16 @@
 //! BubblePanel's first Wayland layer-shell prototype.
 //!
 //! This milestone provides an independent Wayland client, a bottom layer-shell
-//! surface and a software-rendered three-zone layout. The clock is sampled when
-//! the surface is configured; the clock refreshes on a low-overhead event-loop
-//! timeout, while interactive modules follow in a later implementation step.
+//! surface and a software-rendered three-zone layout. The clock is refreshed
+//! on a low-overhead event-loop timeout, and theme snapshots arrive on a worker
+//! thread; interactive modules follow in a later implementation step.
 
 use std::{
     num::NonZeroU32,
     os::fd::{AsFd, AsRawFd},
+    sync::mpsc::{self, Receiver, Sender},
+    thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use anyhow::{Context, Result};
@@ -173,7 +176,8 @@ fn main() -> Result<()> {
         closed: false,
         clock_minute: current_clock_minute(),
         theme_palette: None,
-        last_theme_check: None,
+        theme_runtime: ThemePaletteRuntime::start()
+            .context("cannot start BubblePanel theme worker")?,
         pointer: None,
         pointer_interaction: PointerInteraction::default(),
     };
@@ -206,7 +210,8 @@ fn main() -> Result<()> {
                 .blocking_dispatch(&mut panel)
                 .context("Wayland event dispatch failed")?;
         }
-        if panel.refresh_theme_palette() || panel.clock_minute != current_clock_minute() {
+        let theme_changed = panel.adopt_theme_update();
+        if theme_changed || panel.clock_minute != current_clock_minute() {
             panel.draw().context("cannot refresh the panel clock")?;
         }
     }
@@ -340,7 +345,7 @@ struct BubblePanel {
     closed: bool,
     clock_minute: String,
     theme_palette: Option<ThemePalette>,
-    last_theme_check: Option<std::time::Instant>,
+    theme_runtime: ThemePaletteRuntime,
     pointer: Option<wl_pointer::WlPointer>,
     pointer_interaction: PointerInteraction,
 }
@@ -378,35 +383,8 @@ impl BubblePanel {
         Ok(())
     }
 
-    /// Poll BubbleWM's immutable palette at a low rate so wallpaper changes
-    /// reach the panel without decoding images in a client process.
-    fn refresh_theme_palette(&mut self) -> bool {
-        const REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
-        let now = std::time::Instant::now();
-        if self
-            .last_theme_check
-            .is_some_and(|last| now.duration_since(last) < REFRESH_INTERVAL)
-        {
-            return false;
-        }
-        self.last_theme_check = Some(now);
-
-        let Ok(socket_path) = unix::default_socket_path() else {
-            return false;
-        };
-        let response = match unix::send_request(socket_path, Request::GetThemePalette) {
-            Ok(response) => response,
-            Err(error) => {
-                if self.theme_palette.is_some() {
-                    warn!(%error, "cannot refresh BubbleWM's theme palette");
-                }
-                return false;
-            }
-        };
-        let Response::Success {
-            data: ResponseData::ThemePalette { palette },
-        } = response
-        else {
+    fn adopt_theme_update(&mut self) -> bool {
+        let Some(palette) = self.theme_runtime.try_take_update() else {
             return false;
         };
         if palette == self.theme_palette {
@@ -415,6 +393,75 @@ impl BubblePanel {
         self.theme_palette = palette;
         info!("BubblePanel adopted the current BubbleThemeEngine palette");
         true
+    }
+}
+
+/// Fetches the compositor palette outside BubblePanel's Wayland event loop.
+/// The worker coalesces identical snapshots and exits promptly when dropped.
+struct ThemePaletteRuntime {
+    updates: Receiver<Option<ThemePalette>>,
+    shutdown: Sender<()>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl ThemePaletteRuntime {
+    fn start() -> std::io::Result<Self> {
+        let (update_tx, updates) = mpsc::channel();
+        let (shutdown, shutdown_rx) = mpsc::channel();
+        let worker = thread::Builder::new()
+            .name("bubblepanel-theme".into())
+            .spawn(move || {
+                let mut previous: Option<Option<ThemePalette>> = None;
+                loop {
+                    if let Some(palette) = read_theme_palette()
+                        && previous.as_ref() != Some(&palette)
+                    {
+                        if update_tx.send(palette.clone()).is_err() {
+                            break;
+                        }
+                        previous = Some(palette);
+                    }
+                    match shutdown_rx.recv_timeout(Duration::from_secs(5)) {
+                        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    }
+                }
+            })?;
+        Ok(Self {
+            updates,
+            shutdown,
+            worker: Some(worker),
+        })
+    }
+
+    fn try_take_update(&self) -> Option<Option<ThemePalette>> {
+        let mut latest = None;
+        while let Ok(palette) = self.updates.try_recv() {
+            latest = Some(palette);
+        }
+        latest
+    }
+}
+
+impl Drop for ThemePaletteRuntime {
+    fn drop(&mut self) {
+        let _ = self.shutdown.send(());
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+/// `None` means the local IPC request failed; `Some(None)` means the
+/// compositor has not generated a wallpaper theme yet.
+fn read_theme_palette() -> Option<Option<ThemePalette>> {
+    let socket_path = unix::default_socket_path().ok()?;
+    let response = unix::send_request(socket_path, Request::GetThemePalette).ok()?;
+    match response {
+        Response::Success {
+            data: ResponseData::ThemePalette { palette },
+        } => Some(palette),
+        _ => None,
     }
 }
 
