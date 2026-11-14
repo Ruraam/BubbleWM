@@ -19,7 +19,7 @@
 - [x] Bounded frame pacing, versioned IPC startup, compositor-thread dispatch and orderly shutdown.
 - [ ] Pointer cursor rendering, touch routing and robust keyboard/pointer grabs.
 - [ ] Output-management protocols, multi-output layout and hotplug handling.
-- [ ] wlr-layer-shell server support for BubblePanel.
+- [x] wlr-layer-shell server support for BubblePanel.
 
 ## 0.3.0 — Window management
 - [x] Stable toplevel registry and lifecycle handling for creation, map, unmap, remap and destruction.
@@ -38,11 +38,13 @@
 - [x] XDG close event from a prototype server-side titlebar; applications remain responsible for handling the close request.
 - [x] XDG decoration negotiation, default server-side mode and honoring explicit client-side mode requests.
 - [x] Prototype 32-pixel server-side titlebar with close, maximize/restore, minimize and move interactions.
-- [ ] Window title text, icons, themed controls, borders and accessibility refinements.
+- [x] Apply BubbleThemeEngine surface roles to window decorations.
+- [ ] Window title text, icons and accessibility refinements.
 - [ ] Tiling layout policy and virtual workspace foundations.
 - [ ] Floating layout policy and virtual workspace foundations.
 - [ ] Connect workspace IPC commands to authoritative workspace state.
-- [ ] Integrate BubblePanel's IPC client for workspace state and navigation.
+- [x] Integrate BubblePanel's IPC client for the BubbleThemeEngine palette.
+- [ ] Integrate workspace state and navigation over IPC.
 
 ## 0.4.0 — BubbleDecor
 - [ ] Server-side decoration negotiation.
@@ -62,8 +64,10 @@
 - [ ] The compositor remains functional without the settings app.
 
 ## 0.7.0 — BubbleColor
-- [ ] Wallpaper palette extraction.
-- [ ] Contrast-aware adaptive theme and manual tuning controls.
+- [x] Wallpaper palette extraction through BubbleThemeEngine.
+- [x] Contrast-aware adaptive theme generation.
+- [x] Share semantic roles with BubbleWM surfaces and BubblePanel over IPC.
+- [ ] Manual theme tuning controls.
 
 ## 0.8.0 — BubbleFX
 - [ ] Animation scheduler and easing.
@@ -74,6 +78,7 @@
 - [x] Independent Rust Wayland panel process.
 - [x] Layer-shell integration and capability detection on the client side.
 - [x] Three-zone layout, placeholder workspaces, pointer hit testing and clock.
+- [x] Consume and refresh BubbleThemeEngine colors over Bubble IPC.
 - [ ] Real workspace state, task list and system modules.
 - [ ] Multi-monitor support, profiles and validated configuration.
 - [ ] BubbleSettings integration and graceful degradation.

@@ -15,6 +15,8 @@ The initial executable:
 - Refreshes the clock when the displayed minute changes.
 - Tracks pointer hover and left-click press/release targets.
 - Detects vertical, horizontal and diagonal scroll gestures, including workspace navigation intent.
+- Reads BubbleWM's semantic theme palette over the authenticated local IPC socket and refreshes it every five seconds.
+- Uses BubbleThemeEngine glass tint and opacity, primary, surface, text and outline roles; falls back to its built-in palette on other compositors.
 
 The panel currently logs workspace navigation intent. It does not yet send commands to BubbleWM or switch workspaces.
 
@@ -27,15 +29,15 @@ cargo build -p bubblepanel
 cargo run -p bubblepanel
 ```
 
-Run it inside a Wayland session whose compositor supports wlr-layer-shell. BubbleWM's initial Winit server does not yet implement the compositor side of layer-shell, so use a compatible existing Wayland compositor for development and visual testing.
+Run it inside a Wayland session whose compositor supports wlr-layer-shell. BubbleWM implements layer-shell for the panel. The BubbleThemeEngine palette is available when BubblePanel shares the same user session and runtime directory as BubbleWM.
 
 ## Current limitations
 
 - Software rendering through wl_shm; no GPU renderer.
 - Fixed bottom placement and 40-pixel height.
 - Single surface; multi-monitor lifecycle is not implemented.
-- No live workspace data, task list or IPC client yet. BubbleWM has a running authenticated IPC endpoint, but BubblePanel is not connected to it.
+- No live workspace data or task list yet. The IPC client currently reads the theme palette; workspace commands remain unavailable until BubbleWM implements workspaces.
 - No real network, audio, Bluetooth, battery, notification or media modules.
-- No user-facing configuration, blur or transparency.
+- No user-facing configuration or blur. The themed panel background can use alpha transparency.
 
 These are intentional scope boundaries for the first milestone, not claims of completed functionality.
