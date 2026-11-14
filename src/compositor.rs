@@ -930,9 +930,16 @@ impl CompositorStateData {
             .collect::<Vec<_>>();
         family_windows.sort_by_key(|(order, _)| *order);
 
-        if let Some(position) = family_windows
-            .iter()
-            .position(|(_, member)| member == window)
+        // A transient family is stacked root-first, descendants-last.
+        // Focusing the root must not move it above its transient children;
+        // focusing a child still raises that child to the top of the family.
+        let target_is_root = window
+            .toplevel()
+            .is_some_and(|surface| surface.wl_surface() == &family[0]);
+        if !target_is_root
+            && let Some(position) = family_windows
+                .iter()
+                .position(|(_, member)| member == window)
         {
             let target = family_windows.remove(position);
             family_windows.push(target);
