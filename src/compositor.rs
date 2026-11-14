@@ -957,6 +957,36 @@ impl CompositorStateData {
             }
             self.space.raise_element(&member, member == *window);
         }
+
+        let managed_order = self
+            .windows
+            .iter()
+            .map(|entry| {
+                let title = entry
+                    .window
+                    .toplevel()
+                    .and_then(|toplevel| toplevel_title(&toplevel))
+                    .unwrap_or_else(|| "<untitled>".into());
+                let parent = entry.parent_surface.is_some();
+                format!("{title}:parent={parent}:stack={}", entry.stacking_order)
+            })
+            .collect::<Vec<_>>();
+        let space_order = self
+            .space
+            .elements()
+            .map(|member| {
+                member
+                    .toplevel()
+                    .and_then(|toplevel| toplevel_title(&toplevel))
+                    .unwrap_or_else(|| "<untitled>".into())
+            })
+            .collect::<Vec<_>>();
+        info!(
+            target = ?window.toplevel().and_then(|toplevel| toplevel_title(&toplevel)),
+            managed_order = ?managed_order,
+            space_back_to_front = ?space_order,
+            "Transient stacking diagnostic"
+        );
         self.configure_toplevels();
     }
 
