@@ -926,13 +926,19 @@ impl CompositorStateData {
                         .toplevel()
                         .is_some_and(|surface| family.contains(surface.wl_surface()))
             })
-            .map(|entry| (entry.stacking_order, entry.window.clone()))
+            .map(|entry| {
+                let surface = entry.window.toplevel()?.wl_surface();
+                let family_position = family.iter().position(|member| member == surface)?;
+                Some((family_position, entry.window.clone()))
+            })
+            .flatten()
             .collect::<Vec<_>>();
-        family_windows.sort_by_key(|(order, _)| *order);
+        family_windows.sort_by_key(|(position, _)| *position);
 
-        // A transient family is stacked root-first, descendants-last.
-        // Focusing the root must not move it above its transient children;
-        // focusing a child still raises that child to the top of the family.
+        // Always raise a transient family from its root to its deepest
+        // descendants. Smithay's Space order is back-to-front, so this
+        // guarantees that children remain above their parent even when the
+        // parent itself receives focus.
         let target_is_root = window
             .toplevel()
             .is_some_and(|surface| surface.wl_surface() == &family[0]);
