@@ -468,9 +468,23 @@ impl CompositorStateData {
         let requested_title = surface_title(requested.as_ref());
         let focus = self.exclusive_layer_focus().or(requested);
         let effective_title = surface_title(focus.as_ref());
+        drop(surface_title);
+
         if let Some(keyboard) = self.keyboard.clone() {
             keyboard.set_focus(self, focus, serial);
-            let actual_title = surface_title(keyboard.current_focus().as_ref());
+            let actual_focus = keyboard.current_focus();
+            let actual_title = actual_focus
+                .as_ref()
+                .and_then(|surface| {
+                    self.windows.iter().find_map(|entry| {
+                        entry.window.toplevel().and_then(|toplevel| {
+                            (toplevel.wl_surface() == surface)
+                                .then(|| toplevel_title(&toplevel))
+                                .flatten()
+                        })
+                    })
+                })
+                .unwrap_or_else(|| "<none-or-non-toplevel>".into());
             info!(
                 requested = %requested_title,
                 effective = %effective_title,
