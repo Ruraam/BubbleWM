@@ -86,15 +86,15 @@ impl BarColors {
             let colors = &theme.colors;
             return Self {
                 glass: glass_tint(config, Some(theme), glass_alpha),
-                outline: rgba(colors.outline, 128),
+                outline: rgba(colors.glass_border, 128),
                 text: rgba(colors.on_surface, 255),
                 muted: rgba(colors.on_surface_variant, 190),
                 accent: rgba(colors.primary, 255),
-                accent_soft: rgba(colors.primary, 90),
+                accent_soft: rgba(colors.primary_container, 90),
                 on_accent: rgba(colors.on_primary, 255),
                 warning: rgba(colors.warning, 255),
                 error: rgba(colors.error, 255),
-                highlight: rgba(colors.on_surface, 26),
+                highlight: rgba(colors.glass_highlight, 28),
             };
         }
         Self {

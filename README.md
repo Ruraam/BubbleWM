@@ -18,6 +18,7 @@ A native, lightweight and customizable Wayland compositor for BubbleOS, written 
 - **bubblewm:** Smithay compositor, configuration and application lifecycle.
 - **bubblepanel:** independent Wayland panel client using Smithay Client Toolkit.
 - **bubble-ipc:** shared, versioned local-control protocol and Linux Unix-socket transport.
+- **bubble-theme-engine:** vendored BubbleOS wallpaper palette generator used by BubbleWM and companion clients.
 
 ## Run the nested compositor
 
@@ -58,26 +59,27 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Window geometry is refreshed after root-surface and subsurface commits.
 - Frame pacing is throttled to approximately 60 updates per second in the nested development loop.
 - The IPC server starts and stops with the compositor. Capability discovery works, but workspace commands correctly return `unavailable` until workspace management exists.
+- BubbleThemeEngine generates wallpaper-based semantic roles. BubbleWM uses them in glass panels, notifications, launcher, lock screen and window surfaces; BubblePanel reads the full palette over local IPC and refreshes it every five seconds.
 
 ### Not implemented yet
 
 - Pointer cursor rendering, touch input, and a complete focus/grab policy.
-- Polished decorations: the current server-side titlebar is a basic prototype with colored controls, not yet a themed titlebar with title text, icons, borders or full accessibility behavior.
+- Polished decorations: the current server-side titlebar uses BubbleThemeEngine surfaces but remains a prototype with colored controls and no title text, icons or full accessibility behavior.
 - Tiling and virtual workspaces.
 - Virtual workspaces and workspace switching.
-- `wlr-layer-shell`, output-management protocols, multiple outputs and native DRM/KMS.
-- BubblePanel integration and real system status modules.
+- Output-management protocols, multiple outputs and native DRM/KMS.
+- BubblePanel workspace actions and real system status modules.
 
 ## BubblePanel prototype
 
-The independent panel connects to a Wayland compositor, creates a bottom `wlr-layer-shell` surface, reserves a 40-pixel exclusive zone and renders a three-zone layout with workspace/status placeholders and a seven-segment local-time clock. It also detects pointer clicks and scroll gestures and refreshes the clock once per minute.
+The independent panel connects to a Wayland compositor, creates a bottom `wlr-layer-shell` surface, reserves a 40-pixel exclusive zone and renders a three-zone layout with workspace/status placeholders and a seven-segment local-time clock. When BubbleWM's local IPC endpoint is available, the panel reads BubbleThemeEngine's semantic palette and refreshes it every five seconds. Pointer click and scroll gestures are detected; workspace control is still pending.
 
 ```sh
 cargo build -p bubblepanel
 cargo run -p bubblepanel
 ```
 
-BubblePanel currently requires a compositor that supports `wlr-layer-shell`. BubbleWM does not yet implement the server side of that protocol, so use another compatible Wayland compositor to test the panel for now. Real workspace state, IPC client integration and system modules remain future work.
+BubblePanel requires a compositor that supports `wlr-layer-shell`; its BubbleWM-specific theme colors also require BubbleWM's local IPC endpoint. Real workspace state and system modules remain future work.
 
 See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANEL.md).
 

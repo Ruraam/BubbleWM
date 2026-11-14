@@ -621,11 +621,11 @@ impl PopupMenu {
         let (outline, text, muted, accent, highlight, error) = if let Some(theme) = theme {
             let colors = &theme.colors;
             (
-                rgba(colors.outline, 120),
+                rgba(colors.glass_border, 160),
                 rgba(colors.on_surface, 255),
                 rgba(colors.on_surface_variant, 190),
                 rgba(colors.primary, 255),
-                rgba(colors.on_surface, 24),
+                rgba(colors.glass_highlight, 24),
                 rgba(colors.error, 255),
             )
         } else {

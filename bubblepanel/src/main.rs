@@ -11,6 +11,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use bubble_ipc::{Request, Response, ResponseData, ThemePalette, unix};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_registry,
@@ -171,6 +172,8 @@ fn main() -> Result<()> {
         first_configure: true,
         closed: false,
         clock_minute: current_clock_minute(),
+        theme_palette: None,
+        last_theme_check: None,
         pointer: None,
         pointer_interaction: PointerInteraction::default(),
     };
@@ -202,7 +205,8 @@ fn main() -> Result<()> {
             event_queue
                 .blocking_dispatch(&mut panel)
                 .context("Wayland event dispatch failed")?;
-        } else if panel.clock_minute != current_clock_minute() {
+        }
+        if panel.refresh_theme_palette() || panel.clock_minute != current_clock_minute() {
             panel.draw().context("cannot refresh the panel clock")?;
         }
     }
@@ -335,6 +339,8 @@ struct BubblePanel {
     first_configure: bool,
     closed: bool,
     clock_minute: String,
+    theme_palette: Option<ThemePalette>,
+    last_theme_check: Option<std::time::Instant>,
     pointer: Option<wl_pointer::WlPointer>,
     pointer_interaction: PointerInteraction,
 }
@@ -355,10 +361,11 @@ impl BubblePanel {
             .context("cannot create a shared-memory panel buffer")?;
 
         canvas.fill(0);
-        fill_rect(canvas, width, height, 0, 0, width, height, 0xFF1B202B);
-        draw_brand(canvas, width, height);
-        draw_workspaces(canvas, width, height);
-        draw_status_and_clock(canvas, width, height);
+        let colors = PanelColors::from_palette(self.theme_palette.as_ref());
+        fill_rect(canvas, width, height, 0, 0, width, height, colors.glass);
+        draw_brand(canvas, width, height, colors);
+        draw_workspaces(canvas, width, height, colors);
+        draw_status_and_clock(canvas, width, height, colors);
 
         self.layer
             .wl_surface()
@@ -369,6 +376,45 @@ impl BubblePanel {
         self.layer.commit();
         self.clock_minute = current_clock_minute();
         Ok(())
+    }
+
+    /// Poll BubbleWM's immutable palette at a low rate so wallpaper changes
+    /// reach the panel without decoding images in a client process.
+    fn refresh_theme_palette(&mut self) -> bool {
+        const REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+        let now = std::time::Instant::now();
+        if self
+            .last_theme_check
+            .is_some_and(|last| now.duration_since(last) < REFRESH_INTERVAL)
+        {
+            return false;
+        }
+        self.last_theme_check = Some(now);
+
+        let Ok(socket_path) = unix::default_socket_path() else {
+            return false;
+        };
+        let response = match unix::send_request(socket_path, Request::GetThemePalette) {
+            Ok(response) => response,
+            Err(error) => {
+                if self.theme_palette.is_some() {
+                    warn!(%error, "cannot refresh BubbleWM's theme palette");
+                }
+                return false;
+            }
+        };
+        let Response::Success {
+            data: ResponseData::ThemePalette { palette },
+        } = response
+        else {
+            return false;
+        };
+        if palette == self.theme_palette {
+            return false;
+        }
+        self.theme_palette = palette;
+        info!("BubblePanel adopted the current BubbleThemeEngine palette");
+        true
     }
 }
 
@@ -656,26 +702,69 @@ fn fill_rect(
     }
 }
 
-fn draw_brand(canvas: &mut [u8], width: u32, height: u32) {
-    fill_rect(canvas, width, height, 16, 12, 16, 16, 0xFF62D6E8);
-    fill_rect(canvas, width, height, 20, 16, 8, 8, 0xFF1B202B);
-    fill_rect(canvas, width, height, 40, 18, 2, 4, 0xFFE7EDF5);
-    fill_rect(canvas, width, height, 47, 18, 2, 4, 0xFFE7EDF5);
-    fill_rect(canvas, width, height, 54, 18, 2, 4, 0xFFE7EDF5);
+#[derive(Clone, Copy)]
+struct PanelColors {
+    glass: u32,
+    surface: u32,
+    primary: u32,
+    text: u32,
+    muted: u32,
 }
 
-fn draw_workspaces(canvas: &mut [u8], width: u32, height: u32) {
-    for index in 0..4 {
-        let x = 82 + index * 24;
-        let color = if index == 0 { 0xFF62D6E8 } else { 0xFF465060 };
-        fill_rect(canvas, width, height, x, 14, 16, 12, color);
-        if index != 0 {
-            fill_rect(canvas, width, height, x + 3, 17, 10, 6, 0xFF1B202B);
+impl PanelColors {
+    fn from_palette(palette: Option<&ThemePalette>) -> Self {
+        let Some(palette) = palette else {
+            return Self {
+                glass: 0xFF1B202B,
+                surface: 0xFF1B202B,
+                primary: 0xFF62D6E8,
+                text: 0xFFE7EDF5,
+                muted: 0xFF657184,
+            };
+        };
+        let opacity = if palette.glass_opacity.is_finite() {
+            palette.glass_opacity.clamp(0.0, 1.0)
+        } else {
+            0.78
+        };
+        Self {
+            glass: argb(palette.glass_tint, (opacity * 255.0).round() as u32),
+            surface: argb(palette.surface, 255),
+            primary: argb(palette.primary, 255),
+            text: argb(palette.on_surface, 255),
+            muted: argb(palette.outline_variant, 255),
         }
     }
 }
 
-fn draw_status_and_clock(canvas: &mut [u8], width: u32, height: u32) {
+fn argb(color: [u8; 3], alpha: u32) -> u32 {
+    (alpha << 24) | (u32::from(color[0]) << 16) | (u32::from(color[1]) << 8) | u32::from(color[2])
+}
+
+fn draw_brand(canvas: &mut [u8], width: u32, height: u32, colors: PanelColors) {
+    fill_rect(canvas, width, height, 16, 12, 16, 16, colors.primary);
+    fill_rect(canvas, width, height, 20, 16, 8, 8, colors.surface);
+    fill_rect(canvas, width, height, 40, 18, 2, 4, colors.text);
+    fill_rect(canvas, width, height, 47, 18, 2, 4, colors.text);
+    fill_rect(canvas, width, height, 54, 18, 2, 4, colors.text);
+}
+
+fn draw_workspaces(canvas: &mut [u8], width: u32, height: u32, colors: PanelColors) {
+    for index in 0..4 {
+        let x = 82 + index * 24;
+        let color = if index == 0 {
+            colors.primary
+        } else {
+            colors.muted
+        };
+        fill_rect(canvas, width, height, x, 14, 16, 12, color);
+        if index != 0 {
+            fill_rect(canvas, width, height, x + 3, 17, 10, 6, colors.surface);
+        }
+    }
+}
+
+fn draw_status_and_clock(canvas: &mut [u8], width: u32, height: u32, colors: PanelColors) {
     let clock = chrono::Local::now().format("%H:%M").to_string();
     let origin = width.saturating_sub(106);
     fill_rect(
@@ -686,7 +775,7 @@ fn draw_status_and_clock(canvas: &mut [u8], width: u32, height: u32) {
         17,
         2,
         6,
-        0xFF657184,
+        colors.muted,
     );
     fill_rect(
         canvas,
@@ -696,7 +785,7 @@ fn draw_status_and_clock(canvas: &mut [u8], width: u32, height: u32) {
         16,
         4,
         8,
-        0xFF62D6E8,
+        colors.primary,
     );
     fill_rect(
         canvas,
@@ -706,23 +795,23 @@ fn draw_status_and_clock(canvas: &mut [u8], width: u32, height: u32) {
         13,
         4,
         11,
-        0xFF62D6E8,
+        colors.primary,
     );
 
     let mut cursor = origin;
     for character in clock.chars() {
         if character == ':' {
-            fill_rect(canvas, width, height, cursor + 5, 15, 3, 3, 0xFFE7EDF5);
-            fill_rect(canvas, width, height, cursor + 5, 22, 3, 3, 0xFFE7EDF5);
+            fill_rect(canvas, width, height, cursor + 5, 15, 3, 3, colors.text);
+            fill_rect(canvas, width, height, cursor + 5, 22, 3, 3, colors.text);
             cursor += 12;
         } else if let Some(digit) = character.to_digit(10) {
-            draw_digit(canvas, width, height, cursor, digit);
+            draw_digit(canvas, width, height, cursor, digit, colors.text);
             cursor += 18;
         }
     }
 }
 
-fn draw_digit(canvas: &mut [u8], width: u32, height: u32, x: u32, digit: u32) {
+fn draw_digit(canvas: &mut [u8], width: u32, height: u32, x: u32, digit: u32, color: u32) {
     const SEGMENTS: [u8; 10] = [
         0b0111111, 0b0000110, 0b1011011, 0b1001111, 0b1100110, 0b1101101, 0b1111101, 0b0000111,
         0b1111111, 0b1101111,
@@ -741,7 +830,7 @@ fn draw_digit(canvas: &mut [u8], width: u32, height: u32, x: u32, digit: u32) {
     ];
     for (index, (sx, sy, sw, sh)) in segments.into_iter().enumerate() {
         if mask & (1 << index) != 0 {
-            fill_rect(canvas, width, height, x + sx, sy + 8, sw, sh, 0xFFE7EDF5);
+            fill_rect(canvas, width, height, x + sx, sy + 8, sw, sh, color);
         }
     }
 }

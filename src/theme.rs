@@ -77,23 +77,32 @@ pub struct SemanticColors {
     pub on_primary_container: Rgb,
     pub secondary: Rgb,
     pub on_secondary: Rgb,
+    pub secondary_container: Rgb,
+    pub on_secondary_container: Rgb,
     pub tertiary: Rgb,
     pub on_tertiary: Rgb,
+    pub tertiary_container: Rgb,
+    pub on_tertiary_container: Rgb,
     pub background: Rgb,
     pub on_background: Rgb,
     pub surface: Rgb,
     pub on_surface: Rgb,
     pub surface_variant: Rgb,
     pub on_surface_variant: Rgb,
+    pub surface_elevated: Rgb,
+    pub surface_overlay: Rgb,
     pub outline: Rgb,
+    pub outline_variant: Rgb,
     pub error: Rgb,
     pub on_error: Rgb,
     pub success: Rgb,
     pub warning: Rgb,
     pub info: Rgb,
     pub glass_tint: Rgb,
+    pub glass_opacity: f32,
     pub glass_border: Rgb,
     pub glass_highlight: Rgb,
+    pub glass_shadow: Rgb,
     pub neon_cyan: Rgb,
     pub neon_magenta: Rgb,
     pub neon_violet: Rgb,
@@ -147,23 +156,32 @@ pub fn generate_from_path(path: impl AsRef<Path>, options: &ThemeOptions) -> Res
         on_primary_container: color(&colors.on_primary_container)?,
         secondary: color(&colors.secondary)?,
         on_secondary: color(&colors.on_secondary)?,
+        secondary_container: color(&colors.secondary_container)?,
+        on_secondary_container: color(&colors.on_secondary_container)?,
         tertiary: color(&colors.tertiary)?,
         on_tertiary: color(&colors.on_tertiary)?,
+        tertiary_container: color(&colors.tertiary_container)?,
+        on_tertiary_container: color(&colors.on_tertiary_container)?,
         background: color(&colors.background)?,
         on_background: color(&colors.on_background)?,
         surface: color(&colors.surface)?,
         on_surface: color(&colors.on_surface)?,
         surface_variant: color(&colors.surface_variant)?,
         on_surface_variant: color(&colors.on_surface_variant)?,
+        surface_elevated: color(&colors.surface_elevated)?,
+        surface_overlay: color(&colors.surface_overlay)?,
         outline: color(&colors.outline)?,
+        outline_variant: color(&colors.outline_variant)?,
         error: color(&colors.error)?,
         on_error: color(&colors.on_error)?,
         success: color(&colors.success)?,
         warning: color(&colors.warning)?,
         info: color(&colors.info)?,
         glass_tint: color(&colors.glass_tint)?,
+        glass_opacity: colors.glass_opacity,
         glass_border: color(&colors.glass_border)?,
         glass_highlight: color(&colors.glass_highlight)?,
+        glass_shadow: color(&colors.glass_shadow)?,
         neon_cyan: color(&colors.neon_cyan)?,
         neon_magenta: color(&colors.neon_magenta)?,
         neon_violet: color(&colors.neon_violet)?,
@@ -305,6 +323,28 @@ fn build_semantic_colors(base: Hsl, options: &ThemeOptions) -> SemanticColors {
     } else {
         Rgb::new(231, 229, 239)
     };
+    let surface_elevated = if dark {
+        Rgb::new(29, 33, 47)
+    } else {
+        Rgb::WHITE
+    };
+    let surface_overlay = if dark {
+        Rgb::new(34, 39, 55)
+    } else {
+        Rgb::new(242, 240, 248)
+    };
+    let secondary_container = accessible_tone(
+        secondary_hsl,
+        if dark { 0.28 } else { 0.90 },
+        options.contrast_target,
+        !dark,
+    );
+    let tertiary_container = accessible_tone(
+        tertiary_hsl,
+        if dark { 0.31 } else { 0.89 },
+        options.contrast_target,
+        !dark,
+    );
     let error = accessible_tone(
         Hsl::from_rgb(Rgb::new(186, 26, 26)),
         0.42,
@@ -319,18 +359,29 @@ fn build_semantic_colors(base: Hsl, options: &ThemeOptions) -> SemanticColors {
         on_primary_container: readable_foreground(primary_container, options.contrast_target),
         secondary,
         on_secondary: readable_foreground(secondary, options.contrast_target),
+        secondary_container,
+        on_secondary_container: readable_foreground(secondary_container, options.contrast_target),
         tertiary,
         on_tertiary: readable_foreground(tertiary, options.contrast_target),
+        tertiary_container,
+        on_tertiary_container: readable_foreground(tertiary_container, options.contrast_target),
         background,
         on_background: readable_foreground(background, options.contrast_target),
         surface,
         on_surface: readable_foreground(surface, options.contrast_target),
         surface_variant,
         on_surface_variant: readable_foreground(surface_variant, options.contrast_target),
+        surface_elevated,
+        surface_overlay,
         outline: if dark {
             Rgb::new(143, 147, 164)
         } else {
             Rgb::new(104, 101, 117)
+        },
+        outline_variant: if dark {
+            Rgb::new(67, 71, 88)
+        } else {
+            Rgb::new(198, 195, 208)
         },
         error,
         on_error: readable_foreground(error, options.contrast_target),
@@ -338,6 +389,7 @@ fn build_semantic_colors(base: Hsl, options: &ThemeOptions) -> SemanticColors {
         warning: Rgb::new(210, 143, 25),
         info: Rgb::new(50, 130, 210),
         glass_tint: if dark { primary_container } else { primary },
+        glass_opacity: if dark { 0.78 } else { 0.86 },
         glass_border: if dark {
             Rgb::new(95, 105, 133)
         } else {
@@ -348,6 +400,7 @@ fn build_semantic_colors(base: Hsl, options: &ThemeOptions) -> SemanticColors {
         } else {
             Rgb::WHITE
         },
+        glass_shadow: Rgb::BLACK,
         neon_cyan: Rgb::new(45, 225, 235),
         neon_magenta: Rgb::new(245, 65, 190),
         neon_violet: Rgb::new(165, 95, 255),

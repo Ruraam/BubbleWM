@@ -13,6 +13,7 @@ use smithay::{
 use crate::{
     auth,
     config::Config,
+    theme::{Rgb, ThemeDocument},
     ui::{Canvas, Fonts, GlassBackdrop, GlassRegion, TRANSPARENT, UiColor, glass_tint},
 };
 
@@ -144,6 +145,7 @@ impl LockScreen {
         &self,
         fonts: &Fonts,
         config: &Config,
+        theme: Option<&ThemeDocument>,
         output: Size<i32, Logical>,
         glass: Option<&GlassBackdrop>,
     ) -> Option<crate::render::Pixmap> {
@@ -162,7 +164,9 @@ impl LockScreen {
             0,
             output.w,
             output.h,
-            UiColor::from_css(&config.theme.background, dim * 0.82),
+            theme
+                .map(|theme| rgba(theme.colors.background, (dim * 0.82 * 255.0).round() as u8))
+                .unwrap_or_else(|| UiColor::from_css(&config.theme.background, dim * 0.82)),
         );
 
         let card_width = 460.min(output.w - 64).max(320);
@@ -171,17 +175,36 @@ impl LockScreen {
         let y = (output.h - card_height) / 2;
         let panel = glass_tint(
             config,
-            None,
+            theme,
             if glass_enabled && glass.is_some() {
                 config.effects.lock_opacity
             } else {
                 0.92
             },
         );
-        let accent = UiColor::from_css(&config.theme.accent, 1.0);
-        let text = UiColor::from_css(&config.theme.foreground, 1.0);
-        let muted = UiColor::from_css(&config.theme.foreground, 0.58);
-        let highlight = UiColor::from_css(&config.theme.foreground, 0.12);
+        let (accent, text, muted, highlight, border, field_tint, error_color) =
+            if let Some(theme) = theme {
+                let colors = &theme.colors;
+                (
+                    rgba(colors.primary, 255),
+                    rgba(colors.on_surface, 255),
+                    rgba(colors.on_surface_variant, 200),
+                    rgba(colors.glass_highlight, 28),
+                    rgba(colors.glass_border, 170),
+                    rgba(colors.surface_overlay, 140),
+                    rgba(colors.error, 255),
+                )
+            } else {
+                (
+                    UiColor::from_css(&config.theme.accent, 1.0),
+                    UiColor::from_css(&config.theme.foreground, 1.0),
+                    UiColor::from_css(&config.theme.foreground, 0.58),
+                    UiColor::from_css(&config.theme.foreground, 0.12),
+                    UiColor::from_css(&config.theme.accent, 0.38),
+                    UiColor::from_css(&config.theme.background, 0.55),
+                    UiColor::rgba(248, 113, 113, 255),
+                )
+            };
         canvas.fill_round_rect_glass(
             x,
             y,
@@ -196,7 +219,7 @@ impl LockScreen {
         if glow {
             canvas.glow_round_rect(x, y, card_width, card_height, 24, accent, 14);
         }
-        canvas.stroke_round_rect(x, y, card_width, card_height, 24, 1, accent.with_alpha(95));
+        canvas.stroke_round_rect(x, y, card_width, card_height, 24, 1, border);
         canvas.fill_round_rect(x + card_width / 2 - 56, y + 1, 112, 2, 1, accent);
 
         // HUD corner brackets around the login card.
@@ -253,7 +276,7 @@ impl LockScreen {
             12,
             glass.filter(|_| glass_enabled),
             (0, 0),
-            UiColor::from_css(&config.theme.background, 0.55),
+            field_tint,
         );
         canvas.stroke_round_rect(
             field_x,
@@ -262,7 +285,7 @@ impl LockScreen {
             46,
             12,
             1,
-            accent.with_alpha(70),
+            border.with_alpha(180),
         );
         if glow {
             canvas.glow_round_rect(field_x, field_y, field_width, 46, 12, accent, 5);
@@ -290,7 +313,7 @@ impl LockScreen {
 
         if let Some(message) = &self.message {
             let color = if self.message_is_error {
-                UiColor::rgba(248, 113, 113, 255)
+                error_color
             } else {
                 muted
             };
@@ -329,6 +352,10 @@ impl LockScreen {
 
         Some(canvas.into_pixmap((0, 0)))
     }
+}
+
+fn rgba(color: Rgb, alpha: u8) -> UiColor {
+    UiColor::rgba(color.r, color.g, color.b, alpha)
 }
 
 /// Returns the local time and date using libc so no chrono dependency is needed.

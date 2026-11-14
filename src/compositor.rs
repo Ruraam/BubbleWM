@@ -806,35 +806,46 @@ impl CompositorStateData {
     pub(crate) fn theme_palette(&self) -> Option<ThemePalette> {
         let theme = self.active_theme.as_deref()?;
         let colors = &theme.colors;
+        let rgb = |color: Rgb| [color.r, color.g, color.b];
         Some(ThemePalette {
             schema_version: theme.schema_version,
             generation: self.theme_generation,
-            primary: [colors.primary.r, colors.primary.g, colors.primary.b],
-            primary_container: [
-                colors.primary_container.r,
-                colors.primary_container.g,
-                colors.primary_container.b,
-            ],
-            on_primary_container: [
-                colors.on_primary_container.r,
-                colors.on_primary_container.g,
-                colors.on_primary_container.b,
-            ],
-            surface: [colors.surface.r, colors.surface.g, colors.surface.b],
-            on_surface: [
-                colors.on_surface.r,
-                colors.on_surface.g,
-                colors.on_surface.b,
-            ],
-            surface_variant: [
-                colors.surface_variant.r,
-                colors.surface_variant.g,
-                colors.surface_variant.b,
-            ],
-            outline: [colors.outline.r, colors.outline.g, colors.outline.b],
-            warning: [colors.warning.r, colors.warning.g, colors.warning.b],
-            success: [colors.success.r, colors.success.g, colors.success.b],
-            error: [colors.error.r, colors.error.g, colors.error.b],
+            primary: rgb(colors.primary),
+            on_primary: rgb(colors.on_primary),
+            primary_container: rgb(colors.primary_container),
+            on_primary_container: rgb(colors.on_primary_container),
+            secondary: rgb(colors.secondary),
+            on_secondary: rgb(colors.on_secondary),
+            secondary_container: rgb(colors.secondary_container),
+            on_secondary_container: rgb(colors.on_secondary_container),
+            tertiary: rgb(colors.tertiary),
+            on_tertiary: rgb(colors.on_tertiary),
+            tertiary_container: rgb(colors.tertiary_container),
+            on_tertiary_container: rgb(colors.on_tertiary_container),
+            background: rgb(colors.background),
+            on_background: rgb(colors.on_background),
+            surface: rgb(colors.surface),
+            on_surface: rgb(colors.on_surface),
+            surface_variant: rgb(colors.surface_variant),
+            on_surface_variant: rgb(colors.on_surface_variant),
+            surface_elevated: rgb(colors.surface_elevated),
+            surface_overlay: rgb(colors.surface_overlay),
+            outline: rgb(colors.outline),
+            outline_variant: rgb(colors.outline_variant),
+            on_error: rgb(colors.on_error),
+            warning: rgb(colors.warning),
+            success: rgb(colors.success),
+            error: rgb(colors.error),
+            info: rgb(colors.info),
+            glass_tint: rgb(colors.glass_tint),
+            glass_opacity: colors.glass_opacity,
+            glass_border: rgb(colors.glass_border),
+            glass_highlight: rgb(colors.glass_highlight),
+            glass_shadow: rgb(colors.glass_shadow),
+            neon_cyan: rgb(colors.neon_cyan),
+            neon_magenta: rgb(colors.neon_magenta),
+            neon_violet: rgb(colors.neon_violet),
+            neon_lime: rgb(colors.neon_lime),
         })
     }
 
@@ -1521,7 +1532,13 @@ impl CompositorStateData {
         let mut regions = Vec::new();
 
         if self.launcher.visible && self.overlays.dirty {
-            self.overlays.launcher = self.launcher.render(&self.fonts, &self.config, size, glass);
+            self.overlays.launcher = self.launcher.render(
+                &self.fonts,
+                &self.config,
+                self.active_theme.as_deref(),
+                size,
+                glass,
+            );
         } else if !self.launcher.visible {
             self.overlays.launcher = None;
         }
@@ -1532,9 +1549,13 @@ impl CompositorStateData {
         if self.notifications.is_empty() {
             self.overlays.notifications = None;
         } else if self.overlays.dirty {
-            self.overlays.notifications =
-                self.notifications
-                    .render(&self.fonts, &self.config, size, glass);
+            self.overlays.notifications = self.notifications.render(
+                &self.fonts,
+                &self.config,
+                self.active_theme.as_deref(),
+                size,
+                glass,
+            );
         }
         if self.overlays.notifications.is_some() {
             regions.extend(self.notifications.glass_regions(&self.config, size));
@@ -1622,7 +1643,13 @@ impl CompositorStateData {
             .unwrap_or(true)
             || self.overlays.lock_minute != minute_key;
         if self.lock.active && (self.overlays.dirty || lock_refresh) {
-            self.overlays.lock = self.lock.render(&self.fonts, &self.config, size, glass);
+            self.overlays.lock = self.lock.render(
+                &self.fonts,
+                &self.config,
+                self.active_theme.as_deref(),
+                size,
+                glass,
+            );
             self.overlays.lock_rendered_at = Some(Instant::now());
             self.overlays.lock_minute = minute_key;
         } else if !self.lock.active {
@@ -2030,9 +2057,9 @@ impl CompositorStateData {
             let titlebar_color = palette
                 .map(|theme| {
                     let color = if focused {
-                        theme.colors.surface
+                        theme.colors.surface_elevated
                     } else {
-                        theme.colors.surface_variant
+                        theme.colors.surface_overlay
                     };
                     Color32F::new(
                         color.r as f32 / 255.0,

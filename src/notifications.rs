@@ -13,6 +13,7 @@ use zbus::zvariant::OwnedValue;
 
 use crate::{
     config::{Config, NotificationsConfig},
+    theme::{Rgb, ThemeDocument},
     ui::{Canvas, Fonts, GlassBackdrop, GlassRegion, TRANSPARENT, UiColor, glass_tint},
 };
 
@@ -162,6 +163,7 @@ impl NotificationCenter {
         &self,
         fonts: &Fonts,
         config: &Config,
+        theme: Option<&ThemeDocument>,
         output: Size<i32, Logical>,
         glass: Option<&GlassBackdrop>,
     ) -> Option<crate::render::Pixmap> {
@@ -200,17 +202,33 @@ impl NotificationCenter {
         let glow = config.effects.enabled && config.effects.glow;
         let panel = glass_tint(
             config,
-            None,
+            theme,
             if glass_enabled && glass.is_some() {
                 config.effects.notification_opacity
             } else {
                 0.96
             },
         );
-        let accent = UiColor::from_css(&config.theme.accent, 1.0);
-        let text = UiColor::from_css(&config.theme.foreground, 1.0);
-        let muted = UiColor::from_css(&config.theme.foreground, 0.60);
-        let highlight = UiColor::from_css(&config.theme.foreground, 0.10);
+        let (accent, text, muted, highlight, border, badge_text) = if let Some(theme) = theme {
+            let colors = &theme.colors;
+            (
+                rgba(colors.primary, 255),
+                rgba(colors.on_surface, 255),
+                rgba(colors.on_surface_variant, 200),
+                rgba(colors.glass_highlight, 22),
+                rgba(colors.glass_border, 160),
+                rgba(colors.on_primary, 255),
+            )
+        } else {
+            (
+                UiColor::from_css(&config.theme.accent, 1.0),
+                UiColor::from_css(&config.theme.foreground, 1.0),
+                UiColor::from_css(&config.theme.foreground, 0.60),
+                UiColor::from_css(&config.theme.foreground, 0.10),
+                UiColor::from_css(&config.theme.accent, 0.55),
+                UiColor::from_css(&config.theme.background, 1.0),
+            )
+        };
         let mut card_y = 0;
         for (notification, height) in visible.iter().zip(heights.iter()) {
             canvas.fill_round_rect_glass(
@@ -227,7 +245,7 @@ impl NotificationCenter {
             if glow {
                 canvas.glow_round_rect(0, card_y, width, *height, 20, accent, 8);
             }
-            canvas.stroke_round_rect(0, card_y, width, *height, 16, 1, accent.with_alpha(85));
+            canvas.stroke_round_rect(0, card_y, width, *height, 16, 1, border);
             canvas.fill_round_rect(1, card_y + 12, 3, height - 24, 2, accent);
             canvas.glow_round_rect(1, card_y + 12, 3, height - 24, 2, accent, 4);
 
@@ -246,15 +264,7 @@ impl NotificationCenter {
                 accent.with_alpha(220),
                 accent.with_alpha(120),
             );
-            canvas.text_center(
-                fonts,
-                &badge,
-                31,
-                card_y + 22,
-                14.0,
-                UiColor::from_css(&config.theme.background, 1.0),
-                true,
-            );
+            canvas.text_center(fonts, &badge, 31, card_y + 22, 14.0, badge_text, true);
 
             let app = canvas.ellipsize(fonts, &notification.app_name, 11.0, width - 76);
             canvas.text(fonts, &app, 56, card_y + 10, 11.0, accent, false);
@@ -279,6 +289,10 @@ impl NotificationCenter {
 
         Some(canvas.into_pixmap(origin))
     }
+}
+
+fn rgba(color: Rgb, alpha: u8) -> UiColor {
+    UiColor::rgba(color.r, color.g, color.b, alpha)
 }
 
 struct Service {

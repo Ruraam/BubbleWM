@@ -24,6 +24,7 @@ The event-loop handler must remain quick and must not perform blocking I/O. It m
 ## Current command capabilities
 
 - GetCapabilities succeeds and currently reports workspace_control = false.
+- GetThemePalette returns the active BubbleThemeEngine snapshot, including container, elevated-surface, glass, status and neon roles. Older protocol-v1 clients ignore the additive fields; new clients default fields omitted by an older server.
 - GetWorkspaceState returns unavailable because workspace state does not exist yet.
 - WorkspacePrevious, WorkspaceNext and ActivateWorkspace return unavailable for the same reason.
 
@@ -33,6 +34,6 @@ This is intentional. The endpoint is live and correctly reports the current feat
 
 The compositor is still an early nested prototype. It advertises wl_compositor, wl_shm, wl_seat, xdg-shell, xdg-decoration and one wl_output, accepts clients and renders mapped xdg toplevel windows through a Smithay Space. Its current window manager tracks toplevel map/unmap/remap/destruction, supports XDG interactive move/resize using validated pointer grabs, preserves floating geometry across maximize/unmaximize, tracks transient toplevel relationships, supports minimizing/restoring whole transient families and manages XDG popup placement, repositioning and grabs. A prototype server-side titlebar is available to clients negotiating XDG decorations.
 
-These desktop operations are not exposed over IPC yet: protocol v1 still provides capability discovery and workspace requests only, and workspace requests correctly return unavailable. The compositor also does not yet implement workspace management, output-management protocols or multiple outputs, pointer cursor rendering, touch, polished/title-bearing decorations, tiling or the layer-shell server protocol.
+These desktop operations are not exposed over IPC yet: protocol v1 provides capability discovery, theme-palette reads and workspace requests; workspace requests correctly return unavailable. The compositor also does not yet implement workspace management, output-management protocols or multiple outputs, pointer cursor rendering, touch, polished/title-bearing decorations or tiling.
 
 See docs/ARCHITECTURE.md and docs/ROADMAP.md for the next integration milestones.

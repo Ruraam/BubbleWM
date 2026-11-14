@@ -21,7 +21,9 @@ BubbleWM, BubblePanel and BubbleSettings are separate processes. A failure or re
 
 BubblePanel is a Wayland client. It should use layer-shell when available for panel placement, anchors and exclusive zones, and detect optional protocols before enabling dependent features. It must not assume every Wayland compositor exposes the same protocol set.
 
-The panel owns its module lifecycle and presentation. It obtains compositor information through supported Wayland protocols and communicates with BubbleWM through a versioned local IPC interface only for BubbleWM-specific controls that are not covered by standard protocols.
+The panel owns its module lifecycle and presentation. It obtains compositor information through supported Wayland protocols and reads BubbleWM-specific state or theme data through the versioned local IPC interface.
+
+BubbleThemeEngine is vendored as a workspace dependency from BubbleOS's `theme-engine` package. BubbleWM is the sole wallpaper analyzer and publishes the generated semantic palette as an immutable IPC snapshot. Built-in compositor surfaces use the full palette, and BubblePanel polls the snapshot without opening or decoding wallpaper files.
 
 ### Local IPC contract
 
@@ -51,9 +53,9 @@ XDG maximize requests configure the toplevel to the single output's logical geom
 
 Transient toplevels are positioned relative to their known parent and participate in family raising/minimization. XDG popups are managed by Smithay's `PopupManager`: they are tracked across commits, rendered with their toplevel, constrained to the output bounds and repositioned in response to the XDG reposition request. Popup grabs use Smithay's keyboard and pointer grab implementations, with serial validation before a grab is installed.
 
-The compositor advertises XDG minimize/maximize capabilities only. Clients that negotiate `xdg-decoration` default to server-side decoration; an explicit client-side request is honored. The current server-side decoration is intentionally minimal: a 32-pixel titlebar with close, maximize/restore and minimize hit targets, plus titlebar dragging. Close controls send the standard XDG close event and do not kill the client process. The titlebar is currently rendered as a simple bar with colored controls; text, icons, theme integration and refined accessibility remain future work. Window geometry is refreshed on root and subsurface commits so the Smithay space uses current surface bounds.
+The compositor advertises XDG minimize/maximize capabilities only. Clients that negotiate `xdg-decoration` default to server-side decoration; an explicit client-side request is honored. The current server-side decoration is intentionally minimal: a 32-pixel titlebar with close, maximize/restore and minimize hit targets, plus titlebar dragging. Close controls send the standard XDG close event and do not kill the client process. The titlebar uses BubbleThemeEngine's elevated and overlay surface roles; title text, icons and refined accessibility remain future work. Window geometry is refreshed on root and subsurface commits so the Smithay space uses current surface bounds.
 
-This remains a bring-up milestone, not a complete desktop. Pointer cursor rendering, touch routing, a complete focus/grab policy, tiling, workspaces, output-management protocols, multiple outputs, layer-shell and DRM/KMS are not implemented yet. BubblePanel therefore still needs a separate layer-shell-compatible compositor for visual testing.
+This remains a bring-up milestone, not a complete desktop. Pointer cursor rendering, touch routing, a complete focus/grab policy, tiling, workspaces, output-management protocols, multiple outputs and DRM/KMS are not implemented yet. BubbleWM implements the layer-shell server used by BubblePanel.
 
 ## Settings-first design
 

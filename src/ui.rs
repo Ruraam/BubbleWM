@@ -106,15 +106,15 @@ pub const WHITE: UiColor = UiColor::rgba(255, 255, 255, 255);
 
 /// Resolves the glass surface tint.
 ///
-/// `effects.glass_tint` overrides the BubbleColor `surface` role so users can
-/// color every glass surface live, without restarting the compositor.
+/// `effects.glass_tint` overrides BubbleThemeEngine's `glass_tint` role so
+/// users can color every glass surface live, without restarting the compositor.
 pub fn glass_tint(config: &Config, theme: Option<&ThemeDocument>, alpha: f32) -> UiColor {
     let alpha = alpha.clamp(0.0, 1.0);
     if !config.effects.glass_tint.trim().is_empty() {
         return UiColor::from_css(&config.effects.glass_tint, alpha);
     }
     if let Some(theme) = theme {
-        let color = theme.colors.surface;
+        let color = theme.colors.glass_tint;
         return UiColor::rgba(color.r, color.g, color.b, (alpha * 255.0).round() as u8);
     }
     UiColor::from_css(&config.theme.background, alpha)

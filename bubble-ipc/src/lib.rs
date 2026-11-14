@@ -39,7 +39,7 @@ pub enum Request {
 }
 
 /// Response envelope matching a request ID.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResponseEnvelope {
     pub protocol_version: u16,
     pub request_id: u64,
@@ -47,7 +47,7 @@ pub struct ResponseEnvelope {
 }
 
 /// Explicit success or failure; protocol errors are never encoded as success.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum Response {
     Success { data: ResponseData },
@@ -55,7 +55,7 @@ pub enum Response {
 }
 
 /// Data returned by supported read or control requests.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ResponseData {
     Capabilities { workspace_control: bool },
@@ -68,20 +68,47 @@ pub enum ResponseData {
 ///
 /// The compositor owns wallpaper analysis and publishes only immutable
 /// snapshots. Clients must not decode wallpapers or run their own analysis.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ThemePalette {
     pub schema_version: u32,
     pub generation: u64,
     pub primary: [u8; 3],
+    pub on_primary: [u8; 3],
     pub primary_container: [u8; 3],
     pub on_primary_container: [u8; 3],
+    pub secondary: [u8; 3],
+    pub on_secondary: [u8; 3],
+    pub secondary_container: [u8; 3],
+    pub on_secondary_container: [u8; 3],
+    pub tertiary: [u8; 3],
+    pub on_tertiary: [u8; 3],
+    pub tertiary_container: [u8; 3],
+    pub on_tertiary_container: [u8; 3],
+    pub background: [u8; 3],
+    pub on_background: [u8; 3],
     pub surface: [u8; 3],
     pub on_surface: [u8; 3],
     pub surface_variant: [u8; 3],
+    pub on_surface_variant: [u8; 3],
+    pub surface_elevated: [u8; 3],
+    pub surface_overlay: [u8; 3],
     pub outline: [u8; 3],
+    pub outline_variant: [u8; 3],
+    pub on_error: [u8; 3],
     pub warning: [u8; 3],
     pub success: [u8; 3],
     pub error: [u8; 3],
+    pub info: [u8; 3],
+    pub glass_tint: [u8; 3],
+    pub glass_opacity: f32,
+    pub glass_border: [u8; 3],
+    pub glass_highlight: [u8; 3],
+    pub glass_shadow: [u8; 3],
+    pub neon_cyan: [u8; 3],
+    pub neon_magenta: [u8; 3],
+    pub neon_violet: [u8; 3],
+    pub neon_lime: [u8; 3],
 }
 
 /// Stable machine-readable error category with a user-readable explanation.
@@ -241,15 +268,7 @@ mod tests {
                         schema_version: 1,
                         generation: 9,
                         primary: [12, 34, 56],
-                        primary_container: [20, 40, 60],
-                        on_primary_container: [240, 245, 250],
-                        surface: [18, 22, 30],
-                        on_surface: [230, 235, 245],
-                        surface_variant: [38, 44, 55],
-                        outline: [90, 100, 115],
-                        warning: [240, 180, 40],
-                        success: [40, 190, 120],
-                        error: [220, 60, 70],
+                        ..ThemePalette::default()
                     }),
                 },
             },

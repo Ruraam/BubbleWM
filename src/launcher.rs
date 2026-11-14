@@ -15,6 +15,7 @@ use tracing::{info, warn};
 
 use crate::{
     config::Config,
+    theme::{Rgb, ThemeDocument},
     ui::{Canvas, Fonts, GlassBackdrop, GlassRegion, TRANSPARENT, UiColor, glass_tint},
 };
 
@@ -230,6 +231,7 @@ impl Launcher {
         &self,
         fonts: &Fonts,
         config: &Config,
+        theme: Option<&ThemeDocument>,
         output: Size<i32, Logical>,
         glass: Option<&GlassBackdrop>,
     ) -> Option<crate::render::Pixmap> {
@@ -253,21 +255,40 @@ impl Launcher {
         } else {
             0.96
         };
-        let panel = glass_tint(config, None, panel_alpha);
-        let search_tint = glass_tint(
-            config,
-            None,
-            if glass_active {
-                panel_alpha * 0.72
+        let panel = glass_tint(config, theme, panel_alpha);
+        let search_alpha = if glass_active {
+            panel_alpha * 0.72
+        } else {
+            0.72
+        };
+        let (search_tint, border, text, muted, accent, highlight, selected_fill, selected_text) =
+            if let Some(theme) = theme {
+                let colors = &theme.colors;
+                (
+                    rgba(
+                        colors.surface_elevated,
+                        (search_alpha * 255.0).round() as u8,
+                    ),
+                    rgba(colors.glass_border, 158),
+                    rgba(colors.on_surface, 255),
+                    rgba(colors.on_surface_variant, 190),
+                    rgba(colors.primary, 255),
+                    rgba(colors.glass_highlight, 24),
+                    rgba(colors.primary_container, 205),
+                    rgba(colors.on_primary_container, 255),
+                )
             } else {
-                0.72
-            },
-        );
-        let border = UiColor::from_css(&config.theme.accent, 0.62);
-        let text = UiColor::from_css(&config.theme.foreground, 1.0);
-        let muted = UiColor::from_css(&config.theme.foreground, 0.55);
-        let accent = UiColor::from_css(&config.theme.accent, 1.0);
-        let highlight = UiColor::from_css(&config.theme.foreground, 0.10);
+                (
+                    glass_tint(config, None, search_alpha),
+                    UiColor::from_css(&config.theme.accent, 0.62),
+                    UiColor::from_css(&config.theme.foreground, 1.0),
+                    UiColor::from_css(&config.theme.foreground, 0.55),
+                    UiColor::from_css(&config.theme.accent, 1.0),
+                    UiColor::from_css(&config.theme.foreground, 0.10),
+                    UiColor::from_css(&config.theme.accent, 0.24),
+                    UiColor::from_css(&config.theme.background, 1.0),
+                )
+            };
 
         canvas.fill_round_rect_glass(
             0,
@@ -374,8 +395,8 @@ impl Launcher {
                     width - PADDING * 2,
                     ITEM_HEIGHT,
                     12,
-                    accent.with_alpha(58),
-                    accent.with_alpha(16),
+                    selected_fill.with_alpha(86),
+                    selected_fill.with_alpha(28),
                 );
                 if glow {
                     canvas.glow_round_rect(
@@ -396,7 +417,11 @@ impl Launcher {
                 .next()
                 .map(|character| character.to_uppercase().to_string())
                 .unwrap_or_else(|| "?".into());
-            let badge_color = accent.with_alpha(if row == self.selected { 225 } else { 120 });
+            let badge_color = if row == self.selected {
+                accent.with_alpha(225)
+            } else {
+                accent.with_alpha(120)
+            };
             canvas.fill_round_rect_gradient(
                 22,
                 row_y + 10,
@@ -412,7 +437,11 @@ impl Launcher {
                 36,
                 row_y + 15,
                 14.0,
-                UiColor::from_css(&config.theme.background, 1.0),
+                if row == self.selected {
+                    selected_text
+                } else {
+                    UiColor::from_css(&config.theme.background, 1.0)
+                },
                 true,
             );
             let name = canvas.ellipsize(fonts, &entry.name, 15.0, width - 130);
@@ -427,7 +456,7 @@ impl Launcher {
         }
 
         let footer_y = height - FOOTER_HEIGHT;
-        canvas.fill_rect(16, footer_y, width - 32, 1, border.with_alpha(70));
+        canvas.fill_rect(16, footer_y, width - 32, 1, border.with_alpha(90));
         canvas.text(fonts, "↑↓ naviguer", 26, footer_y + 7, 10.5, muted, false);
         canvas.text_center(
             fonts,
@@ -503,6 +532,10 @@ impl Launcher {
             Err(error) => warn!(application = %entry.name, %error, "cannot launch application"),
         }
     }
+}
+
+fn rgba(color: Rgb, alpha: u8) -> UiColor {
+    UiColor::rgba(color.r, color.g, color.b, alpha)
 }
 
 fn application_directories() -> Vec<PathBuf> {
