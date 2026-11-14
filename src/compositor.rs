@@ -3215,7 +3215,7 @@ pub fn run_winit_with_theme(
                         })
                     }).unwrap_or_else(|| "<none-or-non-toplevel>".into());
                     info!(
-                        key_code,
+                        key_code = ?key_code,
                         state = ?event.state(),
                         focused = %focused_title,
                         "Winit keyboard event"
