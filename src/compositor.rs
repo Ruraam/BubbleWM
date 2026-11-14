@@ -1879,6 +1879,39 @@ impl CompositorStateData {
             });
             if is_transient || has_transient_children {
                 self.raise_window_family(&window);
+
+                // If the parent maps after its transient child, the parent
+                // mapping path may have taken keyboard focus. Keep the
+                // topmost mapped descendant focused along with the family.
+                if has_transient_children {
+                    let mut family = vec![surface.clone()];
+                    let mut position = 0;
+                    while position < family.len() {
+                        let parent = family[position].clone();
+                        for entry in &self.windows {
+                            if entry.parent_surface.as_ref() == Some(&parent)
+                                && !entry.minimized
+                                && entry.workspace == self.active_workspace
+                                && self.space.element_location(&entry.window).is_some()
+                                && let Some(child) = entry.window.toplevel()
+                                    .map(|toplevel| toplevel.wl_surface().clone())
+                                && !family.contains(&child)
+                            {
+                                family.push(child);
+                            }
+                        }
+                        position += 1;
+                    }
+
+                    if let Some(topmost) = family.last()
+                        && topmost != surface
+                    {
+                        self.set_keyboard_focus(
+                            Some(topmost.clone()),
+                            SERIAL_COUNTER.next_serial(),
+                        );
+                    }
+                }
             }
         }
     }
