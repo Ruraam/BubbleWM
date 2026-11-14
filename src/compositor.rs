@@ -1765,6 +1765,7 @@ impl CompositorStateData {
         };
 
         let window = self.windows[index].window.clone();
+        let was_mapped = self.space.element_location(&window).is_some();
         let has_buffer =
             with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false);
         info!(
@@ -1865,9 +1866,21 @@ impl CompositorStateData {
         }
         self.arrange_tiled_windows();
 
-        // A newly mapped parent can be inserted above transient children
-        // that were mapped earlier. Rebuild family stacking whenever either
-        // a child or a parent with transient descendants is mapped.
+        // Mapping order is client-dependent: a parent may become visible
+        // after its transient child and otherwise cover it on the first frame.
+        // Rebuild the family stack exactly once for each newly mapped member.
+        if !was_mapped {
+            let is_transient = self.windows[index].parent_surface.is_some();
+            let has_transient_children = self.windows.iter().any(|entry| {
+                entry.parent_surface.as_ref() == Some(surface)
+                    && !entry.minimized
+                    && entry.workspace == self.active_workspace
+                    && self.space.element_location(&entry.window).is_some()
+            });
+            if is_transient || has_transient_children {
+                self.raise_window_family(&window);
+            }
+        }
     }
 
     fn begin_move(&mut self, surface: &ToplevelSurface, seat: &Seat<Self>, serial: Serial) {
