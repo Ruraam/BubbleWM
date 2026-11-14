@@ -2565,6 +2565,18 @@ impl SeatHandler for CompositorStateData {
     }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        let title = focused
+            .and_then(|surface| {
+                self.windows.iter().find_map(|entry| {
+                    entry.window.toplevel().and_then(|toplevel| {
+                        (toplevel.wl_surface() == surface)
+                            .then(|| toplevel_title(&toplevel))
+                            .flatten()
+                    })
+                })
+            })
+            .unwrap_or_else(|| "<none-or-non-toplevel>".into());
+        info!(focused = %title, has_surface = focused.is_some(), "Wayland seat focus_changed");
         let client = focused.and_then(|surface| self.display_handle.get_client(surface.id()).ok());
         set_data_device_focus(&self.display_handle, seat, client.clone());
         set_primary_focus(&self.display_handle, seat, client);
@@ -3193,6 +3205,21 @@ pub fn run_winit_with_theme(
             WinitEvent::Input(InputEvent::Keyboard { event }) => {
                 let key_code = event.key_code();
                 if let Some(keyboard) = state.keyboard.clone() {
+                    let focused_title = keyboard.current_focus().and_then(|focused| {
+                        state.windows.iter().find_map(|entry| {
+                            entry.window.toplevel().and_then(|toplevel| {
+                                (toplevel.wl_surface() == &focused)
+                                    .then(|| toplevel_title(&toplevel))
+                                    .flatten()
+                            })
+                        })
+                    }).unwrap_or_else(|| "<none-or-non-toplevel>".into());
+                    info!(
+                        key_code,
+                        state = ?event.state(),
+                        focused = %focused_title,
+                        "Winit keyboard event"
+                    );
                     let serial = SERIAL_COUNTER.next_serial();
                     if event.state() == smithay::backend::input::KeyState::Pressed {
                         let focus = keyboard.current_focus();
