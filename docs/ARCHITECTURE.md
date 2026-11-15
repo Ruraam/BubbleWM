@@ -1,11 +1,12 @@
 # Architecture
 
-BubbleWM is a standalone Wayland compositor. BubbleOS integration must remain optional.
+BubbleWM is a standalone, Wayland-only desktop project whose target includes a compositor and login/session manager. BubbleOS is its first-class integration target; packaging remains optional for other distributions.
 
 ## Layers
 
 - **Compositor core:** Smithay state, event loop, protocol globals and lifecycle.
 - **Backend:** Winit for nested development; DRM/KMS for native sessions.
+- **BubbleSession:** Wayland greeter, login/session supervisor, PAM/logind lifecycle and user-session cleanup. This replaces a distribution's display manager for BubbleWM-managed Wayland sessions; Xorg sessions are out of scope.
 - **Desktop:** surfaces, toplevel management, focus, placement and workspaces.
 - **BubbleDecor:** server-side titlebars, borders and window controls.
 - **BubbleFX:** effect scheduling, animation and GPU shader pipeline.
@@ -18,6 +19,16 @@ BubbleWM is a standalone Wayland compositor. BubbleOS integration must remain op
 ## Process boundaries
 
 BubbleWM, BubblePanel and BubbleSettings are separate processes. A failure or restart in BubblePanel must not terminate the compositor or disrupt client windows. BubbleWM must remain usable without either BubblePanel or BubbleSettings.
+
+### Wayland login and session lifecycle (target architecture)
+
+BubbleWM owns the graphical login and session lifecycle for its Wayland desktop. In BubbleOS, the production integration is intended to replace the current `greetd`/`tuigreet` plus Wayfire launch path. Other distributions may package the same BubbleWM session entry point in place of LightDM or another display manager. This is a target design: the present Winit compositor and lock screen do not yet provide a system greeter or create user sessions.
+
+The system-facing supervisor is responsible for the greeter, PAM authentication and account checks, creating and ending the authenticated PAM/logind session, handing the seat/VT to the session, launching BubbleWM and the desktop under the selected user's identity, and reaping the complete session process tree on logout or failure. Privileged lifecycle work must be separated from the per-user compositor; the compositor and desktop clients must not run as root. Use the platform's supported seat/session interface (logind or libseat) and preserve the standard user-session environment, including `XDG_RUNTIME_DIR` and the user manager.
+
+The greeter, compositor, and managed desktop session speak Wayland. BubbleWM does not start or manage Xorg sessions. Optional XWayland support for legacy applications, if packaged, is compatibility inside a Wayland session and does not create an X11 login/session type. BubbleWM's existing `LockScreen` is only a lock screen for the current logged-in user; it is not the login greeter or the session supervisor.
+
+The manager must support selecting a local user, successful and failed authentication, session startup failure, logout, compositor crash, system shutdown/reboot actions, and return to the greeter without leaving user processes or seat/VT ownership behind. Password handling stays inside the PAM conversation; credentials must not be written to logs or exposed over the compositor IPC socket.
 
 BubblePanel is a Wayland client. It should use layer-shell when available for panel placement, anchors and exclusive zones, and detect optional protocols before enabling dependent features. It must not assume every Wayland compositor exposes the same protocol set.
 
