@@ -22,7 +22,7 @@ BubbleWM, BubblePanel and BubbleSettings are separate processes. A failure or re
 
 ### Wayland login and session lifecycle (target architecture)
 
-BubbleWM owns the graphical login and session lifecycle for its Wayland desktop. In BubbleOS, the production integration is intended to replace the current `greetd`/`tuigreet` plus Wayfire launch path. Other distributions may package the same BubbleWM session entry point in place of LightDM or another display manager. This is a target design: the present Winit compositor and lock screen do not yet provide a system greeter or create user sessions.
+BubbleWM owns the graphical login and session lifecycle for its Wayland desktop. In BubbleOS, the production integration is intended to replace the current `greetd`/`tuigreet` plus Wayfire launch path. Other distributions may package the same BubbleWM session entry point in place of LightDM or another display manager. This is a target design: the existing Winit and single-output DRM/KMS compositor backends do not yet provide a system greeter or create user sessions.
 
 The system-facing supervisor is responsible for the greeter, PAM authentication and account checks, creating and ending the authenticated PAM/logind session, handing the seat/VT to the session, launching BubbleWM and the desktop under the selected user's identity, and reaping the complete session process tree on logout or failure. Privileged lifecycle work must be separated from the per-user compositor; the compositor and desktop clients must not run as root. Use the platform's supported seat/session interface (logind or libseat) and preserve the standard user-session environment, including `XDG_RUNTIME_DIR` and the user manager.
 
@@ -54,7 +54,9 @@ The shared protocol lives in the `bubble-ipc` workspace crate and is consumed by
 
 ## Initial compositor milestone
 
-The current executable starts a nested Winit/EGL backend and a Wayland server socket. It advertises the core compositor, shared-memory, seat, xdg-shell, the standard data-device manager and one `wl_output` global. The virtual output follows Winit window resizes and currently advertises a 60 Hz development mode.
+The nested development mode starts a Winit/EGL backend and a Wayland server socket. It advertises the core compositor, shared-memory, seat, xdg-shell, the standard data-device manager and one `wl_output` global. The virtual output follows Winit window resizes and currently advertises a 60 Hz development mode.
+
+The native mode initializes a Smithay DRM/KMS output through libseat, GBM and EGL, assigns libinput to the acquired seat, and handles VT/session pause and resume. Its current bring-up targets one primary GPU and the first connected output; it does not yet reconfigure outputs on hotplug or manage multiple outputs. This native compositor path does not provide the planned login greeter or PAM/logind user-session supervisor.
 
 Each xdg toplevel has a stable managed-window entry, independent of whether its surface is currently mapped. The compositor preserves its last floating position across null-buffer unmaps and remaps, removes the entry on toplevel destruction, and restores keyboard focus and activation to the topmost remaining window. Mapped windows are represented as Smithay `Window` elements in a `Space<Window>`; the compositor refreshes output enter/leave state and renders the mapped scene.
 
@@ -70,7 +72,7 @@ Transient toplevels are positioned relative to their known parent and participat
 
 The compositor advertises XDG minimize/maximize capabilities only. Clients that negotiate `xdg-decoration` default to server-side decoration; an explicit client-side request is honored. The current server-side decoration is intentionally minimal: a 32-pixel titlebar with close, maximize/restore and minimize hit targets, plus titlebar dragging. Close controls send the standard XDG close event and do not kill the client process. The titlebar uses BubbleThemeEngine's elevated and overlay surface roles; title text, icons and refined accessibility remain future work. Window geometry is refreshed on root and subsurface commits so the Smithay space uses current surface bounds.
 
-This remains a bring-up milestone, not a complete desktop. Pointer cursor rendering, touch routing, a complete focus/grab policy, tiling, output-management protocols, multiple outputs and DRM/KMS are not implemented yet. BubbleWM implements the layer-shell server used by BubblePanel.
+This remains a bring-up milestone, not a complete desktop. Pointer cursor rendering, touch routing, a complete focus/grab policy, tiling, output-management protocols, multiple outputs and connector hotplug are not implemented yet. BubbleWM implements the layer-shell server used by BubblePanel.
 
 ## Settings-first design
 
