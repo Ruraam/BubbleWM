@@ -18,8 +18,8 @@ use std::{
 
 use anyhow::{Context, Result, anyhow};
 use bubble_ipc::{
-    ErrorCode, ErrorResponse, Request, Response, ResponseData, SystemStatus, ThemePalette,
-    WindowSummary,
+    ErrorCode, ErrorResponse, Request, Response, ResponseData, SavedWifiSummary, SystemStatus,
+    ThemePalette, WifiNetworkSummary, WindowSummary,
 };
 use smithay::{
     backend::input::{
@@ -4337,6 +4337,140 @@ impl CompositorStateData {
                     windows: self.window_list_snapshot(),
                 },
             },
+            Request::GetNetworkList => {
+                let mut networks = self.bar_status.networks.clone();
+                networks.sort_by(|left, right| {
+                    right
+                        .active
+                        .cmp(&left.active)
+                        .then(right.signal.cmp(&left.signal))
+                        .then(left.ssid.cmp(&right.ssid))
+                });
+                networks.truncate(20);
+                Response::Success {
+                    data: ResponseData::NetworkList {
+                        networks: networks
+                            .into_iter()
+                            .map(|network| WifiNetworkSummary {
+                                ssid: network.ssid,
+                                signal: network.signal,
+                                secured: network.secured,
+                                active: network.active,
+                            })
+                            .collect(),
+                        saved: self
+                            .bar_status
+                            .saved
+                            .iter()
+                            .filter(|connection| connection.kind == "802-11-wireless")
+                            .take(10)
+                            .map(|connection| SavedWifiSummary {
+                                name: connection.name.clone(),
+                                active: connection.active,
+                            })
+                            .collect(),
+                    },
+                }
+            }
+            Request::RefreshNetworkStatus => {
+                if let Some(runtime) = self.status_runtime.as_ref() {
+                    runtime.refresh();
+                    Response::Success {
+                        data: ResponseData::Acknowledged,
+                    }
+                } else {
+                    Response::Failure {
+                        error: ErrorResponse {
+                            code: ErrorCode::Unavailable,
+                            message: "session status worker is unavailable".into(),
+                        },
+                    }
+                }
+            }
+            Request::ConnectWifi { ssid } => {
+                let network = self
+                    .bar_status
+                    .networks
+                    .iter()
+                    .find(|network| network.ssid == ssid);
+                if let Some(network) = network
+                    .filter(|_| self.bar_status.network_manager && self.bar_status.wifi_enabled)
+                {
+                    if let Some(runtime) = self.status_runtime.as_ref() {
+                        runtime.connect_wifi(
+                            ssid,
+                            network.secured,
+                            self.config.core.terminal.clone(),
+                        );
+                        Response::Success {
+                            data: ResponseData::Acknowledged,
+                        }
+                    } else {
+                        Response::Failure {
+                            error: ErrorResponse {
+                                code: ErrorCode::Unavailable,
+                                message: "session status worker is unavailable".into(),
+                            },
+                        }
+                    }
+                } else {
+                    Response::Failure {
+                        error: ErrorResponse {
+                            code: ErrorCode::Unavailable,
+                            message: "the requested Wi-Fi network is no longer available".into(),
+                        },
+                    }
+                }
+            }
+            Request::ConnectSavedWifi { name } => {
+                let available = self.bar_status.network_manager
+                    && self.bar_status.saved.iter().any(|connection| {
+                        connection.kind == "802-11-wireless" && connection.name == name
+                    });
+                if available {
+                    if let Some(runtime) = self.status_runtime.as_ref() {
+                        runtime.connect_saved_wifi(name);
+                        Response::Success {
+                            data: ResponseData::Acknowledged,
+                        }
+                    } else {
+                        Response::Failure {
+                            error: ErrorResponse {
+                                code: ErrorCode::Unavailable,
+                                message: "session status worker is unavailable".into(),
+                            },
+                        }
+                    }
+                } else {
+                    Response::Failure {
+                        error: ErrorResponse {
+                            code: ErrorCode::Unavailable,
+                            message: "the saved Wi-Fi profile is no longer available".into(),
+                        },
+                    }
+                }
+            }
+            Request::DisconnectWifi if self.bar_status.ssid.is_some() => {
+                if let Some(runtime) = self.status_runtime.as_ref() {
+                    runtime.disconnect_wifi();
+                    Response::Success {
+                        data: ResponseData::Acknowledged,
+                    }
+                } else {
+                    Response::Failure {
+                        error: ErrorResponse {
+                            code: ErrorCode::Unavailable,
+                            message: "session status worker is unavailable".into(),
+                        },
+                    }
+                }
+            }
+            Request::DisconnectWifi => Response::Failure {
+                error: ErrorResponse {
+                    code: ErrorCode::Unavailable,
+                    message: "there is no active Wi-Fi connection".into(),
+                },
+            },
             Request::FocusWindow { id } => {
                 self.focus_window_by_id(id);
                 Response::Success {
@@ -4455,9 +4589,14 @@ pub(crate) fn handle_ipc_request(
         | Request::ActivateWorkspace { .. }
         | Request::FocusWindow { .. }
         | Request::GetWindowList
+        | Request::GetNetworkList
         | Request::ToggleWifi
         | Request::ToggleMute
         | Request::AdjustVolume { .. }
+        | Request::RefreshNetworkStatus
+        | Request::ConnectWifi { .. }
+        | Request::ConnectSavedWifi { .. }
+        | Request::DisconnectWifi
         | Request::ReloadConfig
         | Request::GetSystemStatus => Response::Failure {
             error: ErrorResponse {

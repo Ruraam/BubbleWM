@@ -71,12 +71,19 @@ pub struct SessionStatus {
     pub bluetooth_devices: Vec<BluetoothDevice>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum StatusCommand {
     Refresh,
     ToggleWifi,
     ToggleMute,
     AdjustVolume(i16),
+    ConnectWifi {
+        ssid: String,
+        secured: bool,
+        terminal: String,
+    },
+    ConnectSavedWifi(String),
+    DisconnectWifi,
 }
 
 /// Non-blocking status worker owned by the compositor.
@@ -209,6 +216,25 @@ impl StatusRuntime {
             .commands
             .send(StatusCommand::AdjustVolume(delta_percent));
     }
+
+    /// Connects to a nearby network on the status worker.
+    pub fn connect_wifi(&self, ssid: String, secured: bool, terminal: String) {
+        let _ = self.commands.send(StatusCommand::ConnectWifi {
+            ssid,
+            secured,
+            terminal,
+        });
+    }
+
+    /// Activates a saved Wi-Fi profile on the status worker.
+    pub fn connect_saved_wifi(&self, name: String) {
+        let _ = self.commands.send(StatusCommand::ConnectSavedWifi(name));
+    }
+
+    /// Disconnects the active Wi-Fi connection on the status worker.
+    pub fn disconnect_wifi(&self) {
+        let _ = self.commands.send(StatusCommand::DisconnectWifi);
+    }
 }
 
 fn run_status_command(
@@ -229,6 +255,25 @@ fn run_status_command(
             set_volume_percent(volume);
             *audio = Some((volume, muted));
         }
+        StatusCommand::ConnectWifi {
+            ssid,
+            secured,
+            terminal,
+        } => {
+            if secured {
+                connect_wifi_ask(&terminal, &ssid);
+            } else {
+                connect_wifi(&ssid);
+            }
+        }
+        StatusCommand::ConnectSavedWifi(name) => {
+            if !network.wifi_enabled {
+                network.wifi_enabled = true;
+                set_wifi_enabled(true);
+            }
+            connect_saved(&name);
+        }
+        StatusCommand::DisconnectWifi => disconnect_wifi(),
     }
 }
 

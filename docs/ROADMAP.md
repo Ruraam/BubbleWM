@@ -88,7 +88,8 @@
 - [x] Show live window task buttons and focus/restore on click.
 - [x] Toggle Wi-Fi and audio mute from BubblePanel.
 - [x] Adjust volume from the BubblePanel speaker indicator.
-- [ ] Richer task-list presentation and network selection.
+- [x] Select nearby and saved Wi-Fi networks from a themed panel popover.
+- [ ] Richer task-list presentation.
 - [ ] Multi-monitor support, profiles and validated configuration.
 - [ ] BubbleSettings integration and graceful degradation.
 

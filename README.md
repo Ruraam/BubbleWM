@@ -68,18 +68,18 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Polished decorations: the current server-side titlebar uses BubbleThemeEngine surfaces but remains a prototype with colored controls and no title text, icons or full accessibility behavior.
 - Tiling layout policy and workspace-specific layout behavior.
 - Output-management protocols, multiple outputs and native DRM/KMS.
-- BubblePanel workspace actions and real system status modules.
+- Richer BubblePanel task-list presentation, Bluetooth and battery modules.
 
 ## BubblePanel prototype
 
-The independent panel connects to a Wayland compositor, creates a bottom `wlr-layer-shell` surface, reserves a 40-pixel exclusive zone and renders a three-zone layout with workspace and task indicators, live Wi-Fi/audio indicators and a seven-segment local-time clock. Through BubbleWM's local IPC endpoint it reads the semantic palette, current workspace, window list and status state, focuses windows when a task is clicked, toggles Wi-Fi or audio mute when a status icon is clicked, adjusts volume with vertical scrolling over the speaker, switches workspaces and handles vertical scroll navigation. These snapshots refresh every five seconds.
+The independent panel connects to a Wayland compositor, creates a bottom `wlr-layer-shell` surface, reserves a 40-pixel exclusive zone and renders a three-zone layout with workspace and task indicators, live Wi-Fi/audio indicators and a seven-segment local-time clock. Through BubbleWM's local IPC endpoint it reads the semantic palette, current workspace, window list, status and Wi-Fi network list; focuses windows when a task is clicked; opens a network popover to connect to nearby or saved profiles; toggles Wi-Fi or audio mute; adjusts volume with vertical scrolling over the speaker; and switches workspaces. Snapshots refresh every five seconds, with network probes refreshed when the popover opens.
 
 ```sh
 cargo build -p bubblepanel
 cargo run -p bubblepanel
 ```
 
-BubblePanel requires a compositor that supports `wlr-layer-shell`; live theme colors, workspace control and Wi-Fi/audio state require BubbleWM's local IPC endpoint. Task-list, Bluetooth, battery and notification modules remain future work.
+BubblePanel requires a compositor that supports `wlr-layer-shell`; live theme colors, workspace/window control and system-status modules require BubbleWM's local IPC endpoint. Bluetooth, battery and notification indicators remain future work.
 
 See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANEL.md).
 

@@ -15,7 +15,8 @@ use std::{
 
 use anyhow::{Context, Result};
 use bubble_ipc::{
-    Request, Response, ResponseData, SystemStatus, ThemePalette, WindowSummary, unix,
+    Request, Response, ResponseData, SavedWifiSummary, SystemStatus, ThemePalette,
+    WifiNetworkSummary, WindowSummary, unix,
 };
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
@@ -45,6 +46,9 @@ use wayland_client::{
 };
 
 const PANEL_HEIGHT: u32 = 40;
+const NETWORK_POPOVER_HEIGHT: u32 = 220;
+const MAX_PANEL_HEIGHT: u32 = PANEL_HEIGHT + NETWORK_POPOVER_HEIGHT;
+const NETWORK_CARD_HEIGHT: u32 = 204;
 const INITIAL_WIDTH: u32 = 1280;
 const MAX_BUFFER_WIDTH: u32 = 3840;
 
@@ -72,6 +76,10 @@ pub enum PanelAction {
     Window(u64),
     Wifi,
     Audio,
+    WifiMenuClose,
+    WifiMenuToggle,
+    WifiMenuNetwork(u8),
+    WifiMenuSaved(u8),
     Clock,
 }
 
@@ -92,33 +100,94 @@ pub fn hit_test(regions: &[HitRegion], x: u32, y: u32) -> Option<PanelAction> {
 
 /// Describes the initial launcher, workspace and clock hit regions.
 pub fn interactive_regions(width: u32, height: u32) -> Vec<HitRegion> {
-    interactive_regions_with_state(width, height, 4, &[])
+    interactive_regions_with_state(
+        width,
+        height,
+        height.saturating_sub(PANEL_HEIGHT),
+        4,
+        &[],
+        None,
+        false,
+        false,
+    )
 }
 
 fn interactive_regions_with_state(
     width: u32,
     height: u32,
+    panel_top: u32,
     workspace_count: u32,
     windows: &[WindowSummary],
+    network_list: Option<&NetworkListSnapshot>,
+    network_menu_open: bool,
+    wifi_enabled: bool,
 ) -> Vec<HitRegion> {
-    let panel_height = height.min(PANEL_HEIGHT);
+    let panel_height = height.saturating_sub(panel_top).min(PANEL_HEIGHT);
+    let mut regions = Vec::new();
+    if network_menu_open {
+        let (card_x, card_width) = network_card_geometry(width);
+        regions.push(HitRegion {
+            bounds: HitRect {
+                x: card_x + card_width.saturating_sub(30),
+                y: 12,
+                width: 20.min(card_width),
+                height: 18,
+            },
+            action: PanelAction::WifiMenuClose,
+        });
+        regions.push(HitRegion {
+            bounds: HitRect {
+                x: card_x + 8,
+                y: 36,
+                width: card_width.saturating_sub(16),
+                height: 22,
+            },
+            action: PanelAction::WifiMenuToggle,
+        });
+        if let Some(network_list) = network_list {
+            if wifi_enabled {
+                for (index, _) in network_list.networks.iter().take(4).enumerate() {
+                    regions.push(HitRegion {
+                        bounds: HitRect {
+                            x: card_x + 8,
+                            y: 64 + index as u32 * 22,
+                            width: card_width.saturating_sub(16),
+                            height: 20,
+                        },
+                        action: PanelAction::WifiMenuNetwork(index as u8),
+                    });
+                }
+            }
+            for (index, _) in network_list.saved.iter().take(2).enumerate() {
+                regions.push(HitRegion {
+                    bounds: HitRect {
+                        x: card_x + 8,
+                        y: 158 + index as u32 * 22,
+                        width: card_width.saturating_sub(16),
+                        height: 20,
+                    },
+                    action: PanelAction::WifiMenuSaved(index as u8),
+                });
+            }
+        }
+    }
     let launcher_x = 8;
-    let mut regions = vec![HitRegion {
+    regions.push(HitRegion {
         bounds: HitRect {
             x: launcher_x,
-            y: 8,
+            y: panel_top + 8,
             width: 32.min(width.saturating_sub(launcher_x)),
             height: 24.min(panel_height.saturating_sub(8)),
         },
         action: PanelAction::Launcher,
-    }];
+    });
 
     for index in 0..visible_workspace_count(width, workspace_count) {
         let x = 82 + index * 24;
         regions.push(HitRegion {
             bounds: HitRect {
                 x,
-                y: 14,
+                y: panel_top + 14,
                 width: 16.min(width.saturating_sub(x)),
                 height: 12.min(panel_height.saturating_sub(14)),
             },
@@ -130,7 +199,7 @@ fn interactive_regions_with_state(
         regions.push(HitRegion {
             bounds: HitRect {
                 x: task.x,
-                y: 8,
+                y: panel_top + 8,
                 width: task.width,
                 height: 24.min(panel_height.saturating_sub(8)),
             },
@@ -143,7 +212,7 @@ fn interactive_regions_with_state(
         regions.push(HitRegion {
             bounds: HitRect {
                 x: status_origin.saturating_sub(62),
-                y: 8,
+                y: panel_top + 8,
                 width: 20,
                 height: 24.min(panel_height.saturating_sub(8)),
             },
@@ -152,7 +221,7 @@ fn interactive_regions_with_state(
         regions.push(HitRegion {
             bounds: HitRect {
                 x: status_origin.saturating_sub(35),
-                y: 8,
+                y: panel_top + 8,
                 width: 26,
                 height: 24.min(panel_height.saturating_sub(8)),
             },
@@ -163,7 +232,7 @@ fn interactive_regions_with_state(
     regions.push(HitRegion {
         bounds: HitRect {
             x: width.saturating_sub(106),
-            y: 8,
+            y: panel_top + 8,
             width: 96.min(width),
             height: 24.min(panel_height.saturating_sub(8)),
         },
@@ -182,6 +251,12 @@ struct TaskButton {
     id: u64,
     x: u32,
     width: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NetworkListSnapshot {
+    networks: Vec<WifiNetworkSummary>,
+    saved: Vec<SavedWifiSummary>,
 }
 
 fn task_button_layout(
@@ -259,7 +334,7 @@ fn main() -> Result<()> {
     layer.set_keyboard_interactivity(KeyboardInteractivity::None);
     layer.commit();
 
-    let pool = SlotPool::new((MAX_BUFFER_WIDTH * PANEL_HEIGHT * 4) as usize, &shm)
+    let pool = SlotPool::new((MAX_BUFFER_WIDTH * MAX_PANEL_HEIGHT * 4) as usize, &shm)
         .context("cannot allocate the shared-memory drawing pool")?;
 
     let mut panel = BubblePanel {
@@ -276,6 +351,7 @@ fn main() -> Result<()> {
         clock_minute: current_clock_minute(),
         snapshot: PanelSnapshot::default(),
         ipc_runtime: PanelIpcRuntime::start().context("cannot start BubblePanel IPC worker")?,
+        network_menu_open: false,
         pointer: None,
         pointer_interaction: PointerInteraction::default(),
     };
@@ -455,6 +531,7 @@ struct BubblePanel {
     clock_minute: String,
     snapshot: PanelSnapshot,
     ipc_runtime: PanelIpcRuntime,
+    network_menu_open: bool,
     pointer: Option<wl_pointer::WlPointer>,
     pointer_interaction: PointerInteraction,
 }
@@ -462,7 +539,8 @@ struct BubblePanel {
 impl BubblePanel {
     fn draw(&mut self) -> Result<()> {
         let width = self.width.clamp(1, MAX_BUFFER_WIDTH);
-        let height = self.height.clamp(1, PANEL_HEIGHT);
+        let height = self.height.clamp(PANEL_HEIGHT, MAX_PANEL_HEIGHT);
+        let panel_top = height - PANEL_HEIGHT;
         let stride = (width * 4) as i32;
         let (buffer, canvas) = self
             .pool
@@ -476,8 +554,27 @@ impl BubblePanel {
 
         canvas.fill(0);
         let colors = PanelColors::from_snapshot(&self.snapshot);
-        fill_rect(canvas, width, height, 0, 0, width, height, colors.glass);
-        draw_brand(canvas, width, height, colors);
+        if self.network_menu_open {
+            draw_network_popover(
+                canvas,
+                width,
+                height,
+                colors,
+                self.snapshot.system_status.as_ref(),
+                self.snapshot.network_list.as_ref(),
+            );
+        }
+        fill_rect(
+            canvas,
+            width,
+            height,
+            0,
+            panel_top,
+            width,
+            PANEL_HEIGHT,
+            colors.glass,
+        );
+        draw_brand(canvas, width, height, panel_top, colors);
         let workspace_count = self
             .snapshot
             .workspace
@@ -495,14 +592,24 @@ impl BubblePanel {
             colors,
             workspace_count,
             active_workspace,
+            panel_top,
         );
         if let Some(windows) = self.snapshot.windows.as_ref() {
-            draw_task_list(canvas, width, height, colors, workspace_count, windows);
+            draw_task_list(
+                canvas,
+                width,
+                height,
+                panel_top,
+                colors,
+                workspace_count,
+                windows,
+            );
         }
         draw_status_and_clock(
             canvas,
             width,
             height,
+            panel_top,
             colors,
             self.snapshot.system_status.as_ref(),
         );
@@ -529,6 +636,21 @@ impl BubblePanel {
         info!("BubblePanel adopted the current theme, workspace and window state");
         true
     }
+
+    fn set_network_menu_open(&mut self, open: bool) {
+        if self.network_menu_open == open {
+            return;
+        }
+        self.network_menu_open = open;
+        self.layer
+            .set_size(0, if open { MAX_PANEL_HEIGHT } else { PANEL_HEIGHT });
+        self.layer.set_exclusive_zone(PANEL_HEIGHT as i32);
+        self.layer.commit();
+        if open {
+            self.ipc_runtime
+                .send_command(PanelCommand::RefreshNetworkStatus);
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -544,6 +666,7 @@ struct PanelSnapshot {
     workspace_control: bool,
     system_status: Option<SystemStatus>,
     windows: Option<Vec<WindowSummary>>,
+    network_list: Option<NetworkListSnapshot>,
 }
 
 impl Default for PanelSnapshot {
@@ -554,11 +677,12 @@ impl Default for PanelSnapshot {
             workspace_control: false,
             system_status: None,
             windows: None,
+            network_list: None,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum PanelCommand {
     PreviousWorkspace,
     NextWorkspace,
@@ -567,6 +691,10 @@ enum PanelCommand {
     ToggleWifi,
     ToggleMute,
     AdjustVolume(i16),
+    RefreshNetworkStatus,
+    ConnectWifi(String),
+    ConnectSavedWifi(String),
+    DisconnectWifi,
 }
 
 /// Polls compositor state and sends control requests outside BubblePanel's
@@ -603,6 +731,12 @@ impl PanelIpcRuntime {
                             PanelCommand::AdjustVolume(delta_percent) => {
                                 Request::AdjustVolume { delta_percent }
                             }
+                            PanelCommand::RefreshNetworkStatus => Request::RefreshNetworkStatus,
+                            PanelCommand::ConnectWifi(ssid) => Request::ConnectWifi { ssid },
+                            PanelCommand::ConnectSavedWifi(name) => {
+                                Request::ConnectSavedWifi { name }
+                            }
+                            PanelCommand::DisconnectWifi => Request::DisconnectWifi,
                         };
                         match request_bubblewm(request) {
                             Some(Response::Success {
@@ -640,6 +774,9 @@ impl PanelIpcRuntime {
                         }
                         if let Some(windows) = read_window_list() {
                             snapshot.windows = Some(windows);
+                        }
+                        if let Some(network_list) = read_network_list() {
+                            snapshot.network_list = Some(network_list);
                         }
                         next_poll = Instant::now() + Duration::from_secs(5);
                     }
@@ -734,6 +871,15 @@ fn read_window_list() -> Option<Vec<WindowSummary>> {
         Response::Success {
             data: ResponseData::WindowList { windows },
         } => Some(windows),
+        _ => None,
+    }
+}
+
+fn read_network_list() -> Option<NetworkListSnapshot> {
+    match request_bubblewm(Request::GetNetworkList)? {
+        Response::Success {
+            data: ResponseData::NetworkList { networks, saved },
+        } => Some(NetworkListSnapshot { networks, saved }),
         _ => None,
     }
 }
@@ -916,11 +1062,19 @@ impl PointerHandler for BubblePanel {
                 .workspace
                 .as_ref()
                 .map_or(4, |state| state.count);
+            let panel_top = self.height.saturating_sub(PANEL_HEIGHT);
             let regions = interactive_regions_with_state(
                 self.width,
                 self.height,
+                panel_top,
                 workspace_count,
                 self.snapshot.windows.as_deref().unwrap_or(&[]),
+                self.snapshot.network_list.as_ref(),
+                self.network_menu_open,
+                self.snapshot
+                    .system_status
+                    .as_ref()
+                    .is_some_and(|status| status.network_manager && status.wifi_enabled),
             );
             let action = hit_test(&regions, x, y);
 
@@ -934,7 +1088,21 @@ impl PointerHandler for BubblePanel {
                     self.pointer_interaction.press(action);
                 }
                 PointerEventKind::Release { button, .. } if *button == BTN_LEFT => {
-                    if let Some(action) = self.pointer_interaction.release(action) {
+                    let clicked = self.pointer_interaction.release(action);
+                    let popup_action = matches!(
+                        action,
+                        Some(
+                            PanelAction::WifiMenuClose
+                                | PanelAction::WifiMenuToggle
+                                | PanelAction::WifiMenuNetwork(_)
+                                | PanelAction::WifiMenuSaved(_)
+                        )
+                    );
+                    let dismissed_network_menu = self.network_menu_open && !popup_action;
+                    if dismissed_network_menu {
+                        self.set_network_menu_open(false);
+                    }
+                    if let Some(action) = clicked {
                         match action {
                             PanelAction::Workspace(workspace)
                                 if self.snapshot.workspace_control =>
@@ -947,14 +1115,8 @@ impl PointerHandler for BubblePanel {
                             PanelAction::Window(id) if self.snapshot.windows.is_some() => {
                                 self.ipc_runtime.send_command(PanelCommand::FocusWindow(id));
                             }
-                            PanelAction::Wifi
-                                if self
-                                    .snapshot
-                                    .system_status
-                                    .as_ref()
-                                    .is_some_and(|status| status.network_manager) =>
-                            {
-                                self.ipc_runtime.send_command(PanelCommand::ToggleWifi);
+                            PanelAction::Wifi if !dismissed_network_menu => {
+                                self.set_network_menu_open(true);
                             }
                             PanelAction::Audio
                                 if self
@@ -964,6 +1126,46 @@ impl PointerHandler for BubblePanel {
                                     .is_some_and(|status| status.volume.is_some()) =>
                             {
                                 self.ipc_runtime.send_command(PanelCommand::ToggleMute);
+                            }
+                            PanelAction::WifiMenuClose => self.set_network_menu_open(false),
+                            PanelAction::WifiMenuToggle
+                                if self
+                                    .snapshot
+                                    .system_status
+                                    .as_ref()
+                                    .is_some_and(|status| status.network_manager) =>
+                            {
+                                self.ipc_runtime.send_command(PanelCommand::ToggleWifi);
+                            }
+                            PanelAction::WifiMenuNetwork(index) => {
+                                if let Some(network) = self
+                                    .snapshot
+                                    .network_list
+                                    .as_ref()
+                                    .and_then(|list| list.networks.get(usize::from(index)))
+                                {
+                                    let command = if network.active {
+                                        PanelCommand::DisconnectWifi
+                                    } else {
+                                        PanelCommand::ConnectWifi(network.ssid.clone())
+                                    };
+                                    self.ipc_runtime.send_command(command);
+                                    self.set_network_menu_open(false);
+                                }
+                            }
+                            PanelAction::WifiMenuSaved(index) => {
+                                if let Some(saved) = self
+                                    .snapshot
+                                    .network_list
+                                    .as_ref()
+                                    .and_then(|list| list.saved.get(usize::from(index)))
+                                {
+                                    self.ipc_runtime
+                                        .send_command(PanelCommand::ConnectSavedWifi(
+                                            saved.name.clone(),
+                                        ));
+                                    self.set_network_menu_open(false);
+                                }
                             }
                             _ => info!(?action, x, y, "BubblePanel left-click completed"),
                         }
@@ -1117,12 +1319,30 @@ fn argb(color: [u8; 3], alpha: u32) -> u32 {
     (alpha << 24) | (u32::from(color[0]) << 16) | (u32::from(color[1]) << 8) | u32::from(color[2])
 }
 
-fn draw_brand(canvas: &mut [u8], width: u32, height: u32, colors: PanelColors) {
-    fill_rect(canvas, width, height, 16, 12, 16, 16, colors.primary);
-    fill_rect(canvas, width, height, 20, 16, 8, 8, colors.surface);
-    fill_rect(canvas, width, height, 40, 18, 2, 4, colors.text);
-    fill_rect(canvas, width, height, 47, 18, 2, 4, colors.text);
-    fill_rect(canvas, width, height, 54, 18, 2, 4, colors.text);
+fn draw_brand(canvas: &mut [u8], width: u32, height: u32, y_offset: u32, colors: PanelColors) {
+    fill_rect(
+        canvas,
+        width,
+        height,
+        16,
+        y_offset + 12,
+        16,
+        16,
+        colors.primary,
+    );
+    fill_rect(
+        canvas,
+        width,
+        height,
+        20,
+        y_offset + 16,
+        8,
+        8,
+        colors.surface,
+    );
+    fill_rect(canvas, width, height, 40, y_offset + 18, 2, 4, colors.text);
+    fill_rect(canvas, width, height, 47, y_offset + 18, 2, 4, colors.text);
+    fill_rect(canvas, width, height, 54, y_offset + 18, 2, 4, colors.text);
 }
 
 fn draw_workspaces(
@@ -1132,6 +1352,7 @@ fn draw_workspaces(
     colors: PanelColors,
     workspace_count: u32,
     active_workspace: u32,
+    y_offset: u32,
 ) {
     for index in 0..visible_workspace_count(width, workspace_count) {
         let x = 82 + index * 24;
@@ -1140,9 +1361,18 @@ fn draw_workspaces(
         } else {
             colors.muted
         };
-        fill_rect(canvas, width, height, x, 14, 16, 12, color);
+        fill_rect(canvas, width, height, x, y_offset + 14, 16, 12, color);
         if index != active_workspace {
-            fill_rect(canvas, width, height, x + 3, 17, 10, 6, colors.surface);
+            fill_rect(
+                canvas,
+                width,
+                height,
+                x + 3,
+                y_offset + 17,
+                10,
+                6,
+                colors.surface,
+            );
         }
     }
 }
@@ -1151,6 +1381,7 @@ fn draw_task_list(
     canvas: &mut [u8],
     width: u32,
     height: u32,
+    y_offset: u32,
     colors: PanelColors,
     workspace_count: u32,
     windows: &[WindowSummary],
@@ -1176,7 +1407,7 @@ fn draw_task_list(
             width,
             height,
             button.x,
-            8,
+            y_offset + 8,
             button.width,
             24,
             background,
@@ -1187,7 +1418,7 @@ fn draw_task_list(
             width,
             height,
             button.x + 8,
-            17,
+            y_offset + 17,
             &window.title,
             max_chars,
             foreground,
@@ -1274,10 +1505,265 @@ fn mini_glyph(character: char) -> [u8; 5] {
     }
 }
 
+fn network_card_geometry(width: u32) -> (u32, u32) {
+    let card_width = 352.min(width);
+    (width.saturating_sub(card_width), card_width)
+}
+
+fn draw_network_popover(
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    colors: PanelColors,
+    status: Option<&SystemStatus>,
+    network_list: Option<&NetworkListSnapshot>,
+) {
+    let (x, card_width) = network_card_geometry(width);
+    let y = 8;
+    fill_rect(
+        canvas,
+        width,
+        height,
+        x + 3,
+        y + 3,
+        card_width.saturating_sub(3),
+        NETWORK_CARD_HEIGHT,
+        argb([0, 0, 0], 110),
+    );
+    fill_rect(
+        canvas,
+        width,
+        height,
+        x,
+        y,
+        card_width,
+        NETWORK_CARD_HEIGHT,
+        colors.glass,
+    );
+    fill_rect(
+        canvas,
+        width,
+        height,
+        x + 1,
+        y + 1,
+        card_width.saturating_sub(2),
+        24,
+        colors.surface,
+    );
+    draw_mini_text(
+        canvas,
+        width,
+        height,
+        x + 10,
+        y + 10,
+        "WI-FI NETWORKS",
+        30,
+        colors.text,
+    );
+    draw_mini_text(
+        canvas,
+        width,
+        height,
+        x + card_width.saturating_sub(24),
+        y + 10,
+        "X",
+        1,
+        colors.muted,
+    );
+
+    let network_manager = status.is_some_and(|status| status.network_manager);
+    let wifi_enabled = status.is_some_and(|status| status.wifi_enabled);
+    let toggle_background = if wifi_enabled {
+        colors.primary
+    } else {
+        colors.surface
+    };
+    let toggle_foreground = if wifi_enabled {
+        colors.on_primary
+    } else {
+        colors.text
+    };
+    fill_rect(
+        canvas,
+        width,
+        height,
+        x + 8,
+        y + 28,
+        card_width.saturating_sub(16),
+        22,
+        toggle_background,
+    );
+    let toggle_label = if !network_manager {
+        "NETWORK MANAGER UNAVAILABLE"
+    } else if wifi_enabled {
+        "WI-FI ON - CLICK TO TURN OFF"
+    } else {
+        "WI-FI OFF - CLICK TO TURN ON"
+    };
+    draw_mini_text(
+        canvas,
+        width,
+        height,
+        x + 14,
+        y + 36,
+        toggle_label,
+        card_width.saturating_sub(28) / 4,
+        toggle_foreground,
+    );
+
+    let networks = if network_manager && wifi_enabled {
+        network_list.map_or(&[][..], |list| &list.networks)
+    } else {
+        &[][..]
+    };
+    if !network_manager {
+        draw_mini_text(
+            canvas,
+            width,
+            height,
+            x + 10,
+            y + 65,
+            "NETWORK MANAGER NOT FOUND",
+            78,
+            colors.muted,
+        );
+    } else if !wifi_enabled && networks.is_empty() {
+        draw_mini_text(
+            canvas,
+            width,
+            height,
+            x + 10,
+            y + 65,
+            "TURN WI-FI ON TO SCAN",
+            78,
+            colors.muted,
+        );
+    } else if networks.is_empty() {
+        draw_mini_text(
+            canvas,
+            width,
+            height,
+            x + 10,
+            y + 65,
+            "NO NETWORKS FOUND",
+            78,
+            colors.muted,
+        );
+    }
+
+    for (index, network) in networks.iter().take(4).enumerate() {
+        let row_y = y + 56 + index as u32 * 22;
+        let row_background = if network.active {
+            colors.primary
+        } else {
+            colors.surface
+        };
+        let row_foreground = if network.active {
+            colors.on_primary
+        } else {
+            colors.text
+        };
+        fill_rect(
+            canvas,
+            width,
+            height,
+            x + 8,
+            row_y,
+            card_width.saturating_sub(16),
+            20,
+            row_background,
+        );
+        draw_mini_text(
+            canvas,
+            width,
+            height,
+            x + 14,
+            row_y + 7,
+            &network.ssid,
+            card_width.saturating_sub(82) / 4,
+            row_foreground,
+        );
+        let detail = if network.active {
+            "ACTIVE".to_owned()
+        } else if network.secured {
+            "LOCKED".to_owned()
+        } else {
+            format!("{}%", network.signal)
+        };
+        draw_mini_text(
+            canvas,
+            width,
+            height,
+            x + card_width.saturating_sub(64),
+            row_y + 7,
+            &detail,
+            13,
+            row_foreground,
+        );
+    }
+
+    fill_rect(
+        canvas,
+        width,
+        height,
+        x + 8,
+        y + 148,
+        card_width.saturating_sub(16),
+        1,
+        colors.muted,
+    );
+    if let Some(network_list) = network_list {
+        for (index, saved) in network_list.saved.iter().take(2).enumerate() {
+            let row_y = y + 150 + index as u32 * 22;
+            let row_background = if saved.active {
+                colors.primary
+            } else {
+                colors.surface
+            };
+            let row_foreground = if saved.active {
+                colors.on_primary
+            } else {
+                colors.text
+            };
+            fill_rect(
+                canvas,
+                width,
+                height,
+                x + 8,
+                row_y,
+                card_width.saturating_sub(16),
+                20,
+                row_background,
+            );
+            draw_mini_text(
+                canvas,
+                width,
+                height,
+                x + 14,
+                row_y + 7,
+                &saved.name,
+                card_width.saturating_sub(82) / 4,
+                row_foreground,
+            );
+            draw_mini_text(
+                canvas,
+                width,
+                height,
+                x + card_width.saturating_sub(64),
+                row_y + 7,
+                "SAVED",
+                13,
+                row_foreground,
+            );
+        }
+    }
+}
+
 fn draw_status_and_clock(
     canvas: &mut [u8],
     width: u32,
     height: u32,
+    y_offset: u32,
     colors: PanelColors,
     status: Option<&SystemStatus>,
 ) {
@@ -1289,7 +1775,7 @@ fn draw_status_and_clock(
             width,
             height,
             origin.saturating_sub(38),
-            17,
+            y_offset + 17,
             2,
             6,
             colors.muted,
@@ -1299,6 +1785,7 @@ fn draw_status_and_clock(
             width,
             height,
             origin.saturating_sub(58),
+            y_offset,
             colors,
             status,
         );
@@ -1307,6 +1794,7 @@ fn draw_status_and_clock(
             width,
             height,
             origin.saturating_sub(29),
+            y_offset,
             colors,
             status,
         );
@@ -1315,11 +1803,29 @@ fn draw_status_and_clock(
     let mut cursor = origin;
     for character in clock.chars() {
         if character == ':' {
-            fill_rect(canvas, width, height, cursor + 5, 15, 3, 3, colors.text);
-            fill_rect(canvas, width, height, cursor + 5, 22, 3, 3, colors.text);
+            fill_rect(
+                canvas,
+                width,
+                height,
+                cursor + 5,
+                y_offset + 15,
+                3,
+                3,
+                colors.text,
+            );
+            fill_rect(
+                canvas,
+                width,
+                height,
+                cursor + 5,
+                y_offset + 22,
+                3,
+                3,
+                colors.text,
+            );
             cursor += 12;
         } else if let Some(digit) = character.to_digit(10) {
-            draw_digit(canvas, width, height, cursor, digit, colors.text);
+            draw_digit(canvas, width, height, y_offset, cursor, digit, colors.text);
             cursor += 18;
         }
     }
@@ -1330,6 +1836,7 @@ fn draw_network_indicator(
     width: u32,
     height: u32,
     x: u32,
+    y_offset: u32,
     colors: PanelColors,
     status: Option<&SystemStatus>,
 ) {
@@ -1354,7 +1861,7 @@ fn draw_network_indicator(
             width,
             height,
             x + index as u32 * 4,
-            26 - bar_height,
+            y_offset + 26 - bar_height,
             2,
             bar_height,
             color,
@@ -1367,6 +1874,7 @@ fn draw_audio_indicator(
     width: u32,
     height: u32,
     x: u32,
+    y_offset: u32,
     colors: PanelColors,
     status: Option<&SystemStatus>,
 ) {
@@ -1380,9 +1888,27 @@ fn draw_audio_indicator(
     } else {
         colors.muted
     };
-    fill_rect(canvas, width, height, x, 18, 3, 6, speaker_color);
-    fill_rect(canvas, width, height, x + 3, 16, 3, 10, speaker_color);
-    fill_rect(canvas, width, height, x + 6, 18, 2, 6, speaker_color);
+    fill_rect(canvas, width, height, x, y_offset + 18, 3, 6, speaker_color);
+    fill_rect(
+        canvas,
+        width,
+        height,
+        x + 3,
+        y_offset + 16,
+        3,
+        10,
+        speaker_color,
+    );
+    fill_rect(
+        canvas,
+        width,
+        height,
+        x + 6,
+        y_offset + 18,
+        2,
+        6,
+        speaker_color,
+    );
 
     for (index, threshold) in [10, 35, 65].into_iter().enumerate() {
         let bar_height = 4 + index as u32 * 3;
@@ -1396,7 +1922,7 @@ fn draw_audio_indicator(
             width,
             height,
             x + 10 + index as u32 * 4,
-            26 - bar_height,
+            y_offset + 26 - bar_height,
             2,
             bar_height,
             color,
@@ -1404,7 +1930,15 @@ fn draw_audio_indicator(
     }
 }
 
-fn draw_digit(canvas: &mut [u8], width: u32, height: u32, x: u32, digit: u32, color: u32) {
+fn draw_digit(
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    y_offset: u32,
+    x: u32,
+    digit: u32,
+    color: u32,
+) {
     const SEGMENTS: [u8; 10] = [
         0b0111111, 0b0000110, 0b1011011, 0b1001111, 0b1100110, 0b1101101, 0b1111101, 0b0000111,
         0b1111111, 0b1101111,
@@ -1423,7 +1957,16 @@ fn draw_digit(canvas: &mut [u8], width: u32, height: u32, x: u32, digit: u32, co
     ];
     for (index, (sx, sy, sw, sh)) in segments.into_iter().enumerate() {
         if mask & (1 << index) != 0 {
-            fill_rect(canvas, width, height, x + sx, sy + 8, sw, sh, color);
+            fill_rect(
+                canvas,
+                width,
+                height,
+                x + sx,
+                y_offset + sy + 8,
+                sw,
+                sh,
+                color,
+            );
         }
     }
 }
@@ -1443,7 +1986,7 @@ mod tests {
     #[test]
     fn digit_drawing_ignores_invalid_values() {
         let mut canvas = vec![0; 40 * 40 * 4];
-        draw_digit(&mut canvas, 40, 40, 0, 99, 0xFFFFFFFF);
+        draw_digit(&mut canvas, 40, 40, 0, 0, 99, 0xFFFFFFFF);
         assert!(canvas.iter().all(|byte| *byte == 0));
     }
 

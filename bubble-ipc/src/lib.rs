@@ -34,10 +34,15 @@ pub enum Request {
     GetThemePalette,
     GetSystemStatus,
     GetWindowList,
+    GetNetworkList,
     ReloadConfig,
     ToggleWifi,
     ToggleMute,
     AdjustVolume { delta_percent: i16 },
+    RefreshNetworkStatus,
+    ConnectWifi { ssid: String },
+    ConnectSavedWifi { name: String },
+    DisconnectWifi,
     WorkspacePrevious,
     WorkspaceNext,
     ActivateWorkspace { index: u32 },
@@ -64,11 +69,26 @@ pub enum Response {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ResponseData {
-    Capabilities { workspace_control: bool },
-    WorkspaceState { active: u32, count: u32 },
-    ThemePalette { palette: Option<ThemePalette> },
-    SystemStatus { status: SystemStatus },
-    WindowList { windows: Vec<WindowSummary> },
+    Capabilities {
+        workspace_control: bool,
+    },
+    WorkspaceState {
+        active: u32,
+        count: u32,
+    },
+    ThemePalette {
+        palette: Option<ThemePalette>,
+    },
+    SystemStatus {
+        status: SystemStatus,
+    },
+    WindowList {
+        windows: Vec<WindowSummary>,
+    },
+    NetworkList {
+        networks: Vec<WifiNetworkSummary>,
+        saved: Vec<SavedWifiSummary>,
+    },
     Acknowledged,
 }
 
@@ -152,6 +172,24 @@ impl Default for WindowSummary {
             active: false,
         }
     }
+}
+
+/// Nearby wireless network exposed to shell clients.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WifiNetworkSummary {
+    pub ssid: String,
+    pub signal: u8,
+    pub secured: bool,
+    pub active: bool,
+}
+
+/// Saved wireless profile exposed without unrelated connection metadata.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SavedWifiSummary {
+    pub name: String,
+    pub active: bool,
 }
 
 /// Stable machine-readable error category with a user-readable explanation.
