@@ -819,3 +819,75 @@ fn combine_cleanup_results(
         (Err(first), Err(second)) => Err(format!("{first}; {second}")),
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    #[test]
+    fn credential_validation_rejects_empty_and_control_input() {
+        assert!(validate_credentials("romain", "secret", "bubblewm").is_ok());
+        assert!(validate_credentials("", "secret", "bubblewm").is_err());
+        assert!(validate_credentials("romain", "", "bubblewm").is_err());
+        assert!(validate_credentials("romain\\nroot", "secret", "bubblewm").is_err());
+        assert!(validate_credentials("romain", "secret", "").is_err());
+    }
+
+    #[test]
+    fn credential_validation_enforces_password_limit() {
+        let password = "x".repeat(1025);
+        assert!(validate_credentials("romain", &password, "bubblewm").is_err());
+    }
+
+    #[test]
+    fn pam_environment_uses_a_narrow_allowlist() {
+        for name in [
+            "LANG",
+            "LANGUAGE",
+            "TZ",
+            "XDG_SESSION_ID",
+            "XDG_SESSION_CLASS",
+            "XDG_SEAT",
+            "XDG_VTNR",
+            "LC_ALL",
+            "DBUS_SESSION_BUS_ADDRESS",
+        ] {
+            assert!(pass_pam_environment(std::ffi::OsStr::new(name)), "{name}");
+        }
+
+        for name in ["PATH", "HOME", "XDG_RUNTIME_DIR", "LD_PRELOAD", "DISPLAY"] {
+            assert!(!pass_pam_environment(std::ffi::OsStr::new(name)), "{name}");
+        }
+    }
+
+    #[test]
+    fn runtime_directory_must_be_private_and_owned_by_user() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        std::fs::set_permissions(
+            directory.path(),
+            std::fs::Permissions::from_mode(0o700),
+        )
+        .expect("set private permissions");
+        assert!(validate_runtime_directory(directory.path(), unsafe { libc::getuid() }).is_ok());
+
+        std::fs::set_permissions(
+            directory.path(),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .expect("set public permissions");
+        assert!(validate_runtime_directory(directory.path(), unsafe { libc::getuid() }).is_err());
+    }
+
+    #[test]
+    fn runtime_directory_rejects_symlinks() {
+        let parent = tempfile::tempdir().expect("temporary parent");
+        let target = parent.path().join("target");
+        std::fs::create_dir(&target).expect("create target");
+        let link = parent.path().join("runtime-link");
+        symlink(&target, &link).expect("create symlink");
+
+        assert!(validate_runtime_directory(&link, unsafe { libc::getuid() }).is_err());
+    }
+}
