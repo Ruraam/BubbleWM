@@ -104,7 +104,9 @@ fn take_worker_channel_from_fd(fd: RawFd) -> io::Result<UnixStream> {
         )
     } < 0
     {
-        return Err(invalid_input("worker control descriptor is not a Unix stream socket"));
+        return Err(invalid_input(
+            "worker control descriptor is not a Unix stream socket",
+        ));
     }
     if domain != libc::AF_UNIX || socket_type != libc::SOCK_STREAM {
         return Err(invalid_input(
