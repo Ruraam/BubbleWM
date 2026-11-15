@@ -326,8 +326,6 @@ mod tests {
 
     #[test]
     fn worker_spawn_receives_channel_on_fd_three() {
-        use std::os::unix::ffi::OsStrExt;
-
         let (mut supervisor, worker) = private_channel_pair().unwrap();
         let pid = spawn_worker_with_channel(
             std::ffi::OsStr::new("/bin/sh"),
@@ -344,7 +342,6 @@ mod tests {
         assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
         assert!(libc::WIFEXITED(status));
         assert_eq!(libc::WEXITSTATUS(status), 0);
-        let _ = OsStrExt::as_bytes(std::ffi::OsStr::new("test"));
     }
 
     #[test]
