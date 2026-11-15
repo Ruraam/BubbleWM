@@ -29,7 +29,6 @@ pub struct SessionReady {
     pub vt_number: Option<u32>,
 }
 
-
 /// Creates a private, connected supervisor/worker channel.
 ///
 /// Both ends are local Unix stream sockets with `FD_CLOEXEC` enforced. The
