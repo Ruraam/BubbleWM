@@ -1,21 +1,22 @@
 # BubbleWM
 
-A native, lightweight and customizable Wayland compositor for BubbleOS, written in Rust and built on Smithay.
+A native, lightweight and customizable Wayland desktop for BubbleOS, written in Rust and built on Smithay. Its target role includes the Wayland login and session lifecycle currently handled by display managers such as greetd or LightDM.
 
-> **Status:** early development. BubbleWM now starts an initial nested Winit compositor with a single advertised `wl_output`, core Wayland globals, tracked xdg-toplevel lifecycle, pointer routing, interactive move/resize, maximize/restore, minimize/restore, transient stacking, XDG popup management and a prototype XDG server-decoration path. It is a development milestone, not yet a complete or daily-usable desktop environment.
+> **Status:** early development. BubbleWM now starts an initial nested Winit compositor with a single advertised `wl_output`, core Wayland globals, tracked xdg-toplevel lifecycle, pointer routing, interactive move/resize, maximize/restore, minimize/restore, transient stacking, XDG popup management and a prototype XDG server-decoration path. The built-in PAM lock screen locks an already-running user session; a login greeter, privileged session supervisor, native DRM/KMS session and session start/stop lifecycle are not implemented yet. BubbleWM is not yet a complete or daily-usable desktop environment.
 
 ## Project principles
 
-- Develop and test independently from BubbleOS.
+- Develop and test independently from BubbleOS while keeping BubbleOS integration a first-class target.
 - Use Smithay as the Wayland compositor foundation.
 - Start with a nested Winit backend before native DRM/KMS support.
-- Keep the compositor core independent from the BubbleOS shell.
+- Keep the compositor core independent from BubbleOS internals; integrate through documented packaging, configuration and session interfaces.
+- Manage graphical login and user-session start/stop for Wayland sessions only. Do not offer Xorg desktop sessions.
 - Make visual effects optional and degrade gracefully when unsupported.
 - Prefer explicit, documented behavior over placeholder feature claims.
 
 ## Workspace
 
-- **bubblewm:** Smithay compositor, configuration and application lifecycle.
+- **bubblewm:** Smithay compositor, configuration, login/session lifecycle and application lifecycle (login/session management is planned, not implemented).
 - **bubblepanel:** independent Wayland panel client using Smithay Client Toolkit.
 - **bubble-ipc:** shared, versioned local-control protocol and Linux Unix-socket transport.
 - **bubble-theme-engine:** vendored BubbleOS wallpaper palette generator used by BubbleWM and companion clients.
@@ -68,6 +69,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Polished decorations: the current server-side titlebar uses BubbleThemeEngine surfaces but remains a prototype with colored controls and no title text, icons or full accessibility behavior.
 - Tiling layout policy and workspace-specific layout behavior.
 - Output-management protocols, multiple outputs and native DRM/KMS.
+- A login greeter and session supervisor: BubbleWM cannot yet authenticate a login, create a PAM/logind user session, launch the compositor as that user, or cleanly end and reap it. The current built-in lock screen only unlocks the user who already owns the running compositor; it does not replace greetd or LightDM today.
 - Richer BubblePanel task-list presentation, Bluetooth and battery modules.
 
 ## BubblePanel prototype
@@ -87,7 +89,7 @@ See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANE
 
 - Rust 1.87 or newer.
 - Cargo.
-- A Wayland or X11 host session with working EGL/OpenGL drivers for the Winit development backend.
+- A Wayland or X11 host session with working EGL/OpenGL drivers for the nested Winit development backend. This is a development host requirement; BubbleWM's managed desktop sessions will be Wayland-only.
 - Native development libraries required by the selected Smithay backend.
 - A separate compositor with `wlr-layer-shell` to run the current BubblePanel prototype.
 
@@ -95,6 +97,7 @@ See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANE
 
 - **Core:** compositor state, event loop and protocol lifecycle.
 - **Backend:** Winit for nested development; DRM/KMS for native sessions.
+- **BubbleSession:** Wayland-only greeter, authentication boundary, user-session startup, logout and child-process cleanup; designed to replace greetd/tuigreet in BubbleOS and integrate with other distributions without requiring Xorg sessions.
 - **Desktop:** surfaces, focus, placement, workspaces and optional tiling.
 - **BubbleDecor:** server-side titlebars, borders and controls.
 - **BubbleFX:** animation scheduler, effects and GPU shader pipeline.
