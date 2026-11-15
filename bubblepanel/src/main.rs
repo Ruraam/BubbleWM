@@ -397,6 +397,17 @@ fn workspace_scroll_direction(
     }
 }
 
+fn volume_adjustment(action: Option<PanelAction>, directions: ScrollDirections) -> Option<i16> {
+    if !matches!(action, Some(PanelAction::Audio)) {
+        return None;
+    }
+    match directions.vertical {
+        Some(VerticalScrollDirection::Up) => Some(5),
+        Some(VerticalScrollDirection::Down) => Some(-5),
+        None => None,
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct PointerInteraction {
     hovered: Option<PanelAction>,
@@ -555,6 +566,7 @@ enum PanelCommand {
     FocusWindow(u64),
     ToggleWifi,
     ToggleMute,
+    AdjustVolume(i16),
 }
 
 /// Polls compositor state and sends control requests outside BubblePanel's
@@ -588,6 +600,9 @@ impl PanelIpcRuntime {
                             PanelCommand::FocusWindow(id) => Request::FocusWindow { id },
                             PanelCommand::ToggleWifi => Request::ToggleWifi,
                             PanelCommand::ToggleMute => Request::ToggleMute,
+                            PanelCommand::AdjustVolume(delta_percent) => {
+                                Request::AdjustVolume { delta_percent }
+                            }
                         };
                         match request_bubblewm(request) {
                             Some(Response::Success {
@@ -960,7 +975,17 @@ impl PointerHandler for BubblePanel {
                     ..
                 } => {
                     if let Some(directions) = scroll_directions(horizontal, vertical) {
-                        if let Some(workspace_direction) =
+                        if let Some(delta_percent) = volume_adjustment(action, directions) {
+                            if self
+                                .snapshot
+                                .system_status
+                                .as_ref()
+                                .is_some_and(|status| status.volume.is_some())
+                            {
+                                self.ipc_runtime
+                                    .send_command(PanelCommand::AdjustVolume(delta_percent));
+                            }
+                        } else if let Some(workspace_direction) =
                             workspace_scroll_direction(action, directions)
                         {
                             if self.snapshot.workspace_control {

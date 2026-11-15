@@ -4385,6 +4385,37 @@ impl CompositorStateData {
                     message: "audio status is unavailable".into(),
                 },
             },
+            Request::AdjustVolume { delta_percent }
+                if !(-20..=20).contains(&delta_percent) || delta_percent == 0 =>
+            {
+                Response::Failure {
+                    error: ErrorResponse {
+                        code: ErrorCode::InvalidRequest,
+                        message: "volume changes must be between -20 and 20 percent".into(),
+                    },
+                }
+            }
+            Request::AdjustVolume { delta_percent } if self.bar_status.volume.is_some() => {
+                if let Some(runtime) = self.status_runtime.as_ref() {
+                    runtime.adjust_volume(delta_percent);
+                    Response::Success {
+                        data: ResponseData::Acknowledged,
+                    }
+                } else {
+                    Response::Failure {
+                        error: ErrorResponse {
+                            code: ErrorCode::Unavailable,
+                            message: "session status worker is unavailable".into(),
+                        },
+                    }
+                }
+            }
+            Request::AdjustVolume { .. } => Response::Failure {
+                error: ErrorResponse {
+                    code: ErrorCode::Unavailable,
+                    message: "audio status is unavailable".into(),
+                },
+            },
             other => handle_ipc_request(
                 other,
                 self.theme_palette(),
@@ -4426,6 +4457,7 @@ pub(crate) fn handle_ipc_request(
         | Request::GetWindowList
         | Request::ToggleWifi
         | Request::ToggleMute
+        | Request::AdjustVolume { .. }
         | Request::ReloadConfig
         | Request::GetSystemStatus => Response::Failure {
             error: ErrorResponse {

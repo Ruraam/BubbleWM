@@ -29,7 +29,7 @@ BubbleThemeEngine is vendored as a workspace dependency from BubbleOS's `theme-e
 
 The shared protocol lives in the `bubble-ipc` workspace crate and is consumed by BubbleWM and BubblePanel. Protocol version 1 uses typed JSON request/response envelopes with a monotonically assigned request ID, explicit success/failure responses and stable error categories.
 
-- Commands are deliberately narrow: capability discovery, theme-palette, system-status and window-list snapshots, workspace-state queries, workspace navigation, activation by index, window focus by stable ID and Wi-Fi/audio toggles.
+- Commands are deliberately narrow: capability discovery, theme-palette, system-status and window-list snapshots, workspace-state queries, workspace navigation, activation by index, window focus by stable ID, Wi-Fi/audio toggles and bounded volume adjustments.
 - Frames are newline-delimited UTF-8 JSON, limited to 64 KiB, and must carry the supported protocol version.
 - The Linux transport binds a Unix-domain socket at `$XDG_RUNTIME_DIR/bubblewm/control.sock`; no TCP listener or network-accessible endpoint is provided.
 - The runtime directory and application subdirectory are checked without following symlinks. The application directory is restricted to mode `0700`, and the socket to `0600`.

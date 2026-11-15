@@ -76,6 +76,7 @@ enum StatusCommand {
     Refresh,
     ToggleWifi,
     ToggleMute,
+    AdjustVolume(i16),
 }
 
 /// Non-blocking status worker owned by the compositor.
@@ -140,9 +141,10 @@ impl StatusRuntime {
                         let remaining = POLL_INTERVAL.saturating_sub(waited);
                         match command_receiver.recv_timeout(remaining.min(SHUTDOWN_SLICE)) {
                             Ok(command) => {
-                                run_status_command(command, &mut network);
+                                let mut audio = audio;
+                                run_status_command(command, &mut network, &mut audio);
                                 while let Ok(command) = command_receiver.try_recv() {
-                                    run_status_command(command, &mut network);
+                                    run_status_command(command, &mut network, &mut audio);
                                 }
                                 network = probe_network();
                                 bluetooth = probe_bluetooth();
@@ -200,9 +202,20 @@ impl StatusRuntime {
     pub fn toggle_mute(&self) {
         let _ = self.commands.send(StatusCommand::ToggleMute);
     }
+
+    /// Adjusts the default audio volume on the status worker.
+    pub fn adjust_volume(&self, delta_percent: i16) {
+        let _ = self
+            .commands
+            .send(StatusCommand::AdjustVolume(delta_percent));
+    }
 }
 
-fn run_status_command(command: StatusCommand, network: &mut NetworkSnapshot) {
+fn run_status_command(
+    command: StatusCommand,
+    network: &mut NetworkSnapshot,
+    audio: &mut Option<(u8, bool)>,
+) {
     match command {
         StatusCommand::Refresh => {}
         StatusCommand::ToggleWifi => {
@@ -210,7 +223,28 @@ fn run_status_command(command: StatusCommand, network: &mut NetworkSnapshot) {
             set_wifi_enabled(network.wifi_enabled);
         }
         StatusCommand::ToggleMute => toggle_mute(),
+        StatusCommand::AdjustVolume(delta_percent) => {
+            let (current, muted) = audio.unwrap_or((50, false));
+            let volume = (i16::from(current) + delta_percent).clamp(0, 150) as u8;
+            set_volume_percent(volume);
+            *audio = Some((volume, muted));
+        }
     }
+}
+
+fn set_volume_percent(volume: u8) {
+    let value = format!("{volume}%");
+    if Command::new("wpctl")
+        .args(["set-volume", "@DEFAULT_AUDIO_SINK@", &value])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let _ = Command::new("pactl")
+        .args(["set-sink-volume", "@DEFAULT_SINK@", &value])
+        .status();
 }
 
 impl Drop for StatusRuntime {

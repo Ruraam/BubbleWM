@@ -37,6 +37,7 @@ pub enum Request {
     ReloadConfig,
     ToggleWifi,
     ToggleMute,
+    AdjustVolume { delta_percent: i16 },
     WorkspacePrevious,
     WorkspaceNext,
     ActivateWorkspace { index: u32 },

@@ -21,11 +21,12 @@ The first implementation lives in the bubblepanel/ workspace member. It is inten
 - Bubble IPC client support for fetching the current BubbleThemeEngine palette. The panel uses the engine's glass tint, opacity, primary, surface, text and outline roles and polls every five seconds so wallpaper changes propagate without decoding images in the client.
 - Compact Wi-Fi signal and audio volume/mute indicators from BubbleWM's status snapshot. These indicators update with the existing five-second IPC poll and show a muted style when the data is unavailable or disabled.
 - Clicking the Wi-Fi indicator toggles the radio; clicking the audio indicator toggles mute. Controls are enabled when BubbleWM detects the corresponding system service.
+- Scrolling vertically over the speaker adjusts volume in five-percent steps; scrolling horizontally does not change volume.
 - A live task list for up to six windows, showing titles and highlighting the active window. Clicking a task asks BubbleWM to restore/focus it and switch workspaces when needed.
 
 ### Explicitly not implemented yet
 
-- Network selection, volume adjustment and richer task-list presentation.
+- Network selection and richer task-list presentation.
 - Bluetooth, battery, notification and media modules.
 - Multi-monitor surface management.
 - User-facing panel configuration.

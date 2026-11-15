@@ -72,7 +72,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 
 ## BubblePanel prototype
 
-The independent panel connects to a Wayland compositor, creates a bottom `wlr-layer-shell` surface, reserves a 40-pixel exclusive zone and renders a three-zone layout with workspace and task indicators, live Wi-Fi/audio indicators and a seven-segment local-time clock. Through BubbleWM's local IPC endpoint it reads the semantic palette, current workspace, window list and status state, focuses windows when a task is clicked, toggles Wi-Fi or audio mute when a status icon is clicked, switches workspaces and handles vertical scroll navigation. These snapshots refresh every five seconds.
+The independent panel connects to a Wayland compositor, creates a bottom `wlr-layer-shell` surface, reserves a 40-pixel exclusive zone and renders a three-zone layout with workspace and task indicators, live Wi-Fi/audio indicators and a seven-segment local-time clock. Through BubbleWM's local IPC endpoint it reads the semantic palette, current workspace, window list and status state, focuses windows when a task is clicked, toggles Wi-Fi or audio mute when a status icon is clicked, adjusts volume with vertical scrolling over the speaker, switches workspaces and handles vertical scroll navigation. These snapshots refresh every five seconds.
 
 ```sh
 cargo build -p bubblepanel

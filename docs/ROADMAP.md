@@ -48,6 +48,7 @@
 - [x] Publish Wi-Fi and audio state to BubblePanel over IPC.
 - [x] Publish managed window titles and focus/restore requests over IPC.
 - [x] Queue Wi-Fi and audio mute toggles on the background status worker.
+- [x] Adjust audio volume from BubblePanel using bounded five-percent scroll steps.
 
 ## 0.4.0 — BubbleDecor
 - [ ] Server-side decoration negotiation.
@@ -86,7 +87,8 @@
 - [x] Read-only Wi-Fi signal and audio volume/mute indicators.
 - [x] Show live window task buttons and focus/restore on click.
 - [x] Toggle Wi-Fi and audio mute from BubblePanel.
-- [ ] Richer task-list presentation, network selection and volume adjustment.
+- [x] Adjust volume from the BubblePanel speaker indicator.
+- [ ] Richer task-list presentation and network selection.
 - [ ] Multi-monitor support, profiles and validated configuration.
 - [ ] BubbleSettings integration and graceful degradation.
 
