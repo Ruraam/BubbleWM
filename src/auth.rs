@@ -864,20 +864,14 @@ mod tests {
     #[test]
     fn runtime_directory_must_be_private_and_owned_by_expected_user() {
         let directory = tempfile::tempdir().expect("temporary directory");
-        std::fs::set_permissions(
-            directory.path(),
-            std::fs::Permissions::from_mode(0o700),
-        )
-        .expect("set private permissions");
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("set private permissions");
         let uid = unsafe { libc::getuid() };
         assert!(validate_runtime_directory(directory.path(), uid).is_ok());
         assert!(validate_runtime_directory(directory.path(), uid.saturating_add(1)).is_err());
 
-        std::fs::set_permissions(
-            directory.path(),
-            std::fs::Permissions::from_mode(0o755),
-        )
-        .expect("set public permissions");
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o755))
+            .expect("set public permissions");
         assert!(validate_runtime_directory(directory.path(), unsafe { libc::getuid() }).is_err());
     }
 
