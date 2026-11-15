@@ -1,4 +1,4 @@
-//! Built-in session lock and login screen (replaces swaylock and greetd).
+//! Built-in lock screen for an already-running user session.
 
 use std::{
     ffi::CStr,
