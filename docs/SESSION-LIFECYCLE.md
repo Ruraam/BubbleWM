@@ -85,7 +85,10 @@ The production design must keep the supervisor outside the user session scope:
    sets `FD_CLOEXEC` again to prevent the channel leaking into later execs.
    The spawn primitive uses an empty environment and does not yet enforce a
    general close-all-unrelated-descriptors policy, so the production
-   supervisor must retain a strict descriptor hygiene policy.
+   supervisor must retain a strict descriptor hygiene policy. Before trusting
+   any later worker output, the supervisor must read and validate the exact
+   fixed `BUBWORK1` bootstrap marker; EOF, truncation or a different marker is
+   a worker-start failure.
 2. The worker opens PAM. After `pam_open_session` succeeds, it sends one
    versioned `SessionReady` frame over the private control stream. The bounded
    frame contains only the numeric UID, opaque `XDG_SESSION_ID`, validated
