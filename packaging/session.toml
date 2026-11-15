@@ -1,0 +1,7 @@
+# System-wide BubbleWM session configuration.
+# Installed as /etc/bubblewm/session.toml; owned by root and not writable
+# by the graphical login user.
+
+[core]
+backend = "drm"
+layout = "floating"
