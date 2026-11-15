@@ -580,6 +580,7 @@ pub fn run(config: Config, config_path: Option<PathBuf>) -> Result<()> {
     info!(output = %output_name, "BubbleWM DRM compositor is ready");
     state.request_redraw();
 
+    let mut event_loop_error = None;
     loop {
         if shutdown_requested() {
             break;
@@ -593,6 +594,7 @@ pub fn run(config: Config, config_path: Option<PathBuf>) -> Result<()> {
             }
             Err(error) => {
                 error!(%error, "DRM event loop failed");
+                event_loop_error = Some(error);
                 break;
             }
         }
@@ -601,5 +603,8 @@ pub fn run(config: Config, config_path: Option<PathBuf>) -> Result<()> {
     drop(state);
     drop(ipc_runtime);
     info!("BubbleWM DRM backend stopped");
+    if let Some(error) = event_loop_error {
+        return Err(error).context("DRM event loop failed");
+    }
     Ok(())
 }
