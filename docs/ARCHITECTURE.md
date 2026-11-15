@@ -39,7 +39,11 @@ groups. Dropping the handle closes the PAM session, deletes credentials and
 restores the helper's original groups. `spawn_user_command` starts a trusted
 absolute-path command with the selected user's IDs and a filtered Wayland
 environment. The greeter and supervisor do not coordinate these primitives
-yet, and the `bubblewm` PAM service still needs packaging.
+yet, and the `bubblewm` PAM service still needs packaging. The launcher returns
+a `ManagedUserProcess`: it creates a dedicated process group, supports
+graceful termination followed by SIGKILL, and reaps the session leader. This
+does not contain descendants that deliberately leave the process group; the
+production supervisor still needs logind/systemd session-scope cleanup.
 
 BubblePanel is a Wayland client. It should use layer-shell when available for panel placement, anchors and exclusive zones, and detect optional protocols before enabling dependent features. It must not assume every Wayland compositor exposes the same protocol set.
 
