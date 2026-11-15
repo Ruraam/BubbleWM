@@ -22,7 +22,7 @@ BubbleWM, BubblePanel and BubbleSettings are separate processes. A failure or re
 
 ### Wayland login and session lifecycle (target architecture)
 
-BubbleWM owns the graphical login and session lifecycle for its Wayland desktop. In BubbleOS, the production integration is intended to replace the current `greetd`/`tuigreet` plus Wayfire launch path. Other distributions may package the same BubbleWM session entry point in place of LightDM or another display manager. This is a target design: the existing Winit and single-output DRM/KMS compositor backends do not yet provide a system greeter or create user sessions.
+BubbleWM owns the graphical login and session lifecycle for its Wayland desktop. In BubbleOS, the production integration is intended to replace the current `greetd`/`tuigreet` plus Wayfire launch path. Other distributions may package the same BubbleWM session entry point in place of LightDM or another display manager. This is a target design: the existing Winit and single-output DRM/KMS backends do not yet connect a system greeter, PAM session and user-identity compositor lifecycle.
 
 The system-facing supervisor is responsible for the greeter, PAM authentication and account checks, creating and ending the authenticated PAM/logind session, handing the seat/VT to the session, launching BubbleWM and the desktop under the selected user's identity, and reaping the complete session process tree on logout or failure. Privileged lifecycle work must be separated from the per-user compositor; the compositor and desktop clients must not run as root. Use the platform's supported seat/session interface (logind or libseat) and preserve the standard user-session environment, including `XDG_RUNTIME_DIR` and the user manager.
 
@@ -30,11 +30,16 @@ The greeter, compositor, and managed desktop session speak Wayland. BubbleWM doe
 
 The manager must support selecting a local user, successful and failed authentication, session startup failure, logout, compositor crash, system shutdown/reboot actions, and return to the greeter without leaving user processes or seat/VT ownership behind. Password handling stays inside the PAM conversation; credentials must not be written to logs or exposed over the compositor IPC socket.
 
-The current `auth::authenticate_login_user` primitive uses BubbleWM's fixed
-`bubblewm` PAM service and checks both authentication and account status for a
-selected login name. It does not open a PAM session, establish session
-credentials, or start a desktop process. The greeter and privileged lifecycle
-supervisor remain future work.
+`auth::authenticate_login_user` uses BubbleWM's fixed `bubblewm` PAM service
+and checks authentication and account status for a selected login name.
+`PamLoginSession::open` additionally prepares supplementary groups, establishes
+PAM credentials, opens a PAM session and captures the PAM environment. It must
+run in a dedicated single-threaded root helper because it changes process-wide
+groups. Dropping the handle closes the PAM session, deletes credentials and
+restores the helper's original groups. `spawn_user_command` starts a trusted
+absolute-path command with the selected user's IDs and a filtered Wayland
+environment. The greeter and supervisor do not coordinate these primitives
+yet, and the `bubblewm` PAM service still needs packaging.
 
 BubblePanel is a Wayland client. It should use layer-shell when available for panel placement, anchors and exclusive zones, and detect optional protocols before enabling dependent features. It must not assume every Wayland compositor exposes the same protocol set.
 
