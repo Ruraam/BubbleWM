@@ -668,9 +668,7 @@ mod tests {
         supervisor.read_exact(&mut ready).unwrap();
         assert_eq!(&ready, b"ready");
 
-        let status = worker
-            .terminate_and_reap(Duration::from_secs(1))
-            .unwrap();
+        let status = worker.terminate_and_reap(Duration::from_secs(1)).unwrap();
         assert_eq!(status.code(), Some(0));
         assert!(worker.try_wait().is_err());
     }
@@ -711,8 +709,15 @@ mod tests {
         )
         .unwrap();
 
-        assert!(worker.wait_timeout(Duration::from_millis(20)).unwrap().is_none());
-        let status = worker.terminate_and_reap(Duration::from_millis(20)).unwrap();
+        assert!(
+            worker
+                .wait_timeout(Duration::from_millis(20))
+                .unwrap()
+                .is_none()
+        );
+        let status = worker
+            .terminate_and_reap(Duration::from_millis(20))
+            .unwrap();
         assert_eq!(status.signal(), Some(libc::SIGTERM));
     }
 
