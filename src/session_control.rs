@@ -85,8 +85,10 @@ pub fn spawn_worker_with_channel(
                 .map_err(|_| invalid_input("worker argument contains a NUL byte"))?,
         );
     }
-    let mut argv_ptrs: Vec<*mut libc::c_char> =
-        argv.iter().map(|value| value.as_ptr() as *mut libc::c_char).collect();
+    let mut argv_ptrs: Vec<*mut libc::c_char> = argv
+        .iter()
+        .map(|value| value.as_ptr() as *mut libc::c_char)
+        .collect();
     argv_ptrs.push(std::ptr::null_mut());
     let mut envp = [std::ptr::null_mut()];
 
@@ -103,9 +105,7 @@ pub fn spawn_worker_with_channel(
     }
     let mut actions = SpawnFileActions(unsafe { actions.assume_init() });
 
-    let status = unsafe {
-        libc::posix_spawn_file_actions_adddup2(&mut actions.0, duplicate.0, 3)
-    };
+    let status = unsafe { libc::posix_spawn_file_actions_adddup2(&mut actions.0, duplicate.0, 3) };
     if status != 0 {
         return Err(io::Error::from_raw_os_error(status));
     }
@@ -329,7 +329,10 @@ mod tests {
         let (mut supervisor, worker) = private_channel_pair().unwrap();
         let pid = spawn_worker_with_channel(
             std::ffi::OsStr::new("/bin/sh"),
-            &[std::ffi::OsString::from("-c"), std::ffi::OsString::from("printf ok >&3")],
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from("printf ok >&3"),
+            ],
             worker,
         )
         .unwrap();
