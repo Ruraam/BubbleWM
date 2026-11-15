@@ -312,7 +312,7 @@ pub fn run(config: Config, config_path: Option<PathBuf>) -> Result<()> {
     unsafe {
         std::env::set_var("WAYLAND_DISPLAY", &socket_name);
         std::env::set_var("XDG_SESSION_TYPE", "wayland");
-        std::env::set_var("XDG_CURRENT_DESKTOP", "BubbleOS");
+        std::env::set_var("XDG_CURRENT_DESKTOP", "BubbleWM");
         std::env::set_var("XDG_SESSION_DESKTOP", "BubbleWM");
     }
     info!(name = %socket_name, "listening on the Wayland socket");
