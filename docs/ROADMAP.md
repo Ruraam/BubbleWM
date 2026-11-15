@@ -104,6 +104,7 @@
 - [x] Add a root-only PAM session handle that establishes/deletes PAM credentials, opens/closes the PAM session and restores supervisor groups.
 - [x] Add a trusted-command launcher that drops to the selected user and passes a filtered Wayland session environment.
 - [x] Add a managed process handle that signals a dedicated session process group and reaps the direct session leader.
+- [x] Compose PAM open/close, command execution and process-group cleanup into a one-login helper flow.
 - [ ] Add a production greeter and a system-facing BubbleWM session-supervisor entry point.
 - [ ] Package the `bubblewm` PAM service and connect greeter login to the helper and account/session policy.
 - [ ] Start the selected user's PAM/logind session and hand off the VT/seat through logind or libseat.
