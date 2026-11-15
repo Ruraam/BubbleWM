@@ -103,12 +103,13 @@
 - [x] Add a fixed-service PAM authentication/account-check helper for an explicitly selected login account.
 - [x] Add a root-only PAM session handle that establishes/deletes PAM credentials, opens/closes the PAM session and restores supervisor groups.
 - [x] Add a trusted-command launcher that drops to the selected user and passes a filtered Wayland session environment.
+- [x] Add a managed process handle that signals a dedicated session process group and reaps the direct session leader.
 - [ ] Add a production greeter and a system-facing BubbleWM session-supervisor entry point.
 - [ ] Package the `bubblewm` PAM service and connect greeter login to the helper and account/session policy.
 - [ ] Start the selected user's PAM/logind session and hand off the VT/seat through logind or libseat.
 - [ ] Run the compositor and desktop as the selected user, with a correct `XDG_RUNTIME_DIR` and user-manager environment; never run desktop clients as root.
-- [ ] Keep the PAM handle alive until the compositor exits, then terminate and reap its full process tree on logout or failure.
-- [ ] Track the full session process tree and handle logout, startup failure, compositor crash, user switching and greeter recovery.
+- [ ] Connect PAM cleanup to logout and startup-failure handling; use logind/systemd cgroups to contain descendants that leave the process group.
+- [ ] Track the full session lifecycle and handle compositor crash, user switching and greeter recovery.
 - [ ] Add shutdown/reboot actions and safe cleanup of session resources, device access and VT ownership.
 - [ ] Keep the managed login and desktop session Wayland-only; do not add Xorg session entries. Optional XWayland is limited to legacy clients inside Wayland.
 - [ ] Add security review and virtual-machine coverage for successful/failed login and each session termination path.
