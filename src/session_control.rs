@@ -4,6 +4,8 @@
 //! arbitrary command, or systemd unit-name field.
 
 use std::io::{self, Cursor, Read, Write};
+use std::os::unix::process::ExitStatusExt;
+use std::time::{Duration, Instant};
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::path::{Component, Path};
@@ -164,7 +166,7 @@ pub fn spawn_worker_with_channel(
     program: &std::ffi::OsStr,
     arguments: &[std::ffi::OsString],
     worker_channel: UnixStream,
-) -> io::Result<libc::pid_t> {
+) -> io::Result<WorkerProcess> {
     use std::os::unix::ffi::OsStrExt;
 
     if !Path::new(program).is_absolute() {
@@ -224,7 +226,137 @@ pub fn spawn_worker_with_channel(
     if status != 0 {
         return Err(io::Error::from_raw_os_error(status));
     }
-    Ok(pid)
+    Ok(WorkerProcess::new(pid))
+}
+
+/// Owns a spawned worker until its exit status has been collected.
+///
+/// The supervisor must explicitly wait for or terminate the worker. As a final
+/// safety net, dropping an unreaped handle sends SIGKILL and reaps the child.
+pub struct WorkerProcess {
+    pid: libc::pid_t,
+    reaped: bool,
+}
+
+impl WorkerProcess {
+    fn new(pid: libc::pid_t) -> Self {
+        Self { pid, reaped: false }
+    }
+
+    /// Returns the worker PID while the process is still owned by this handle.
+    pub fn id(&self) -> libc::pid_t {
+        self.pid
+    }
+
+    /// Checks for worker exit without blocking.
+    pub fn try_wait(&mut self) -> io::Result<Option<std::process::ExitStatus>> {
+        if self.reaped {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "worker has already been reaped"));
+        }
+
+        let mut status = 0;
+        loop {
+            let result = unsafe { libc::waitpid(self.pid, &mut status, libc::WNOHANG) };
+            if result == self.pid {
+                self.reaped = true;
+                return Ok(Some(std::process::ExitStatus::from_raw(status)));
+            }
+            if result == 0 {
+                return Ok(None);
+            }
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            if error.raw_os_error() == Some(libc::ECHILD) {
+                self.reaped = true;
+            }
+            return Err(error);
+        }
+    }
+
+    /// Waits for the worker to exit, retrying when interrupted by a signal.
+    pub fn wait(&mut self) -> io::Result<std::process::ExitStatus> {
+        if self.reaped {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "worker has already been reaped"));
+        }
+
+        let mut status = 0;
+        loop {
+            let result = unsafe { libc::waitpid(self.pid, &mut status, 0) };
+            if result == self.pid {
+                self.reaped = true;
+                return Ok(std::process::ExitStatus::from_raw(status));
+            }
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            if error.raw_os_error() == Some(libc::ECHILD) {
+                self.reaped = true;
+            }
+            return Err(error);
+        }
+    }
+
+    /// Waits up to `timeout` for normal worker termination.
+    pub fn wait_timeout(&mut self, timeout: Duration) -> io::Result<Option<std::process::ExitStatus>> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(status) = self.try_wait()? {
+                return Ok(Some(status));
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return Ok(None);
+            }
+            std::thread::sleep((deadline - now).min(Duration::from_millis(10)));
+        }
+    }
+
+    /// Requests graceful termination, then force-kills and reaps after `grace`.
+    pub fn terminate_and_reap(&mut self, grace: Duration) -> io::Result<std::process::ExitStatus> {
+        if self.reaped {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "worker has already been reaped"));
+        }
+        if unsafe { libc::kill(self.pid, libc::SIGTERM) } < 0 {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::ESRCH) {
+                return Err(error);
+            }
+        }
+        if let Some(status) = self.wait_timeout(grace)? {
+            return Ok(status);
+        }
+        if unsafe { libc::kill(self.pid, libc::SIGKILL) } < 0 {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::ESRCH) {
+                return Err(error);
+            }
+        }
+        self.wait()
+    }
+}
+
+impl Drop for WorkerProcess {
+    fn drop(&mut self) {
+        if self.reaped {
+            return;
+        }
+        // SAFETY: this handle exclusively owns the unreaped child PID.
+        unsafe { libc::kill(self.pid, libc::SIGKILL) };
+        let mut status = 0;
+        loop {
+            let result = unsafe { libc::waitpid(self.pid, &mut status, 0) };
+            if result == self.pid || (result < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD)) {
+                self.reaped = true;
+                break;
+            }
+            if result < 0 && io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                break;
+            }
+        }
+    }
 }
 
 struct OwnedFdGuard(libc::c_int);
@@ -483,7 +615,7 @@ mod tests {
     #[test]
     fn worker_spawn_receives_channel_on_fd_three() {
         let (mut supervisor, worker) = private_channel_pair().unwrap();
-        let pid = spawn_worker_with_channel(
+        let mut worker = spawn_worker_with_channel(
             std::ffi::OsStr::new("/bin/sh"),
             &[
                 std::ffi::OsString::from("-c"),
@@ -497,10 +629,8 @@ mod tests {
         supervisor.read_exact(&mut bytes).unwrap();
         assert_eq!(&bytes, b"ok");
 
-        let mut status = 0;
-        assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
-        assert!(libc::WIFEXITED(status));
-        assert_eq!(libc::WEXITSTATUS(status), 0);
+        let status = worker.wait().unwrap();
+        assert!(status.success());
     }
 
     #[test]
