@@ -4,11 +4,11 @@
 //! arbitrary command, or systemd unit-name field.
 
 use std::io::{self, Cursor, Read, Write};
-use std::os::unix::process::ExitStatusExt;
-use std::time::{Duration, Instant};
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Component, Path};
+use std::time::{Duration, Instant};
 
 const MAGIC: &[u8; 8] = b"BUBSESS1";
 const HEADER_LEN: usize = 12;
@@ -251,7 +251,10 @@ impl WorkerProcess {
     /// Checks for worker exit without blocking.
     pub fn try_wait(&mut self) -> io::Result<Option<std::process::ExitStatus>> {
         if self.reaped {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "worker has already been reaped"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "worker has already been reaped",
+            ));
         }
 
         let mut status = 0;
@@ -300,7 +303,10 @@ impl WorkerProcess {
     }
 
     /// Waits up to `timeout` for normal worker termination.
-    pub fn wait_timeout(&mut self, timeout: Duration) -> io::Result<Option<std::process::ExitStatus>> {
+    pub fn wait_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> io::Result<Option<std::process::ExitStatus>> {
         let deadline = Instant::now() + timeout;
         loop {
             if let Some(status) = self.try_wait()? {
@@ -348,7 +354,9 @@ impl Drop for WorkerProcess {
         let mut status = 0;
         loop {
             let result = unsafe { libc::waitpid(self.pid, &mut status, 0) };
-            if result == self.pid || (result < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD)) {
+            if result == self.pid
+                || (result < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD))
+            {
                 self.reaped = true;
                 break;
             }
