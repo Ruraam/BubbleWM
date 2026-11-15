@@ -44,6 +44,9 @@ a `ManagedUserProcess`: it creates a dedicated process group, supports
 graceful termination followed by SIGKILL, and reaps the session leader. This
 does not contain descendants that deliberately leave the process group; the
 production supervisor still needs logind/systemd session-scope cleanup.
+`run_login_session` composes PAM open, trusted command launch, exit wait,
+process-group cleanup and PAM close for one login in a dedicated single-threaded
+root helper. A system greeter and supervisor still need to invoke this flow.
 
 BubblePanel is a Wayland client. It should use layer-shell when available for panel placement, anchors and exclusive zones, and detect optional protocols before enabling dependent features. It must not assume every Wayland compositor exposes the same protocol set.
 
