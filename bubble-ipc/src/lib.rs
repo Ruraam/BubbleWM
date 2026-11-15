@@ -32,6 +32,7 @@ pub enum Request {
     GetCapabilities,
     GetWorkspaceState,
     GetThemePalette,
+    GetSystemStatus,
     ReloadConfig,
     WorkspacePrevious,
     WorkspaceNext,
@@ -61,6 +62,7 @@ pub enum ResponseData {
     Capabilities { workspace_control: bool },
     WorkspaceState { active: u32, count: u32 },
     ThemePalette { palette: Option<ThemePalette> },
+    SystemStatus { status: SystemStatus },
     Acknowledged,
 }
 
@@ -109,6 +111,18 @@ pub struct ThemePalette {
     pub neon_magenta: [u8; 3],
     pub neon_violet: [u8; 3],
     pub neon_lime: [u8; 3],
+}
+
+/// Compact network and audio snapshot for shell status modules.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SystemStatus {
+    pub network_manager: bool,
+    pub wifi_enabled: bool,
+    pub ssid: Option<String>,
+    pub signal: Option<u8>,
+    pub volume: Option<u8>,
+    pub muted: bool,
 }
 
 /// Stable machine-readable error category with a user-readable explanation.

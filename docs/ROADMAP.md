@@ -45,6 +45,7 @@
 - [x] Connect workspace IPC commands to authoritative workspace state.
 - [x] Integrate BubblePanel's IPC client for the BubbleThemeEngine palette.
 - [x] Integrate workspace state and navigation over IPC.
+- [x] Publish Wi-Fi and audio state to BubblePanel over IPC.
 
 ## 0.4.0 — BubbleDecor
 - [ ] Server-side decoration negotiation.
@@ -80,7 +81,8 @@
 - [x] Three-zone layout, placeholder workspaces, pointer hit testing and clock.
 - [x] Consume and refresh BubbleThemeEngine colors over Bubble IPC.
 - [x] Display live workspace state and handle click/scroll navigation over IPC.
-- [ ] Task list and system modules.
+- [x] Read-only Wi-Fi signal and audio volume/mute indicators.
+- [ ] Task list and richer interactive system modules.
 - [ ] Multi-monitor support, profiles and validated configuration.
 - [ ] BubbleSettings integration and graceful degradation.
 

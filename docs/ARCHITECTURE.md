@@ -29,7 +29,7 @@ BubbleThemeEngine is vendored as a workspace dependency from BubbleOS's `theme-e
 
 The shared protocol lives in the `bubble-ipc` workspace crate and is consumed by BubbleWM and BubblePanel. Protocol version 1 uses typed JSON request/response envelopes with a monotonically assigned request ID, explicit success/failure responses and stable error categories.
 
-- Commands are deliberately narrow: capability discovery, full theme-palette reads, workspace-state queries, previous/next workspace requests and activation of a workspace by index.
+- Commands are deliberately narrow: capability discovery, theme-palette and system-status snapshots, workspace-state queries, previous/next workspace requests and activation of a workspace by index.
 - Frames are newline-delimited UTF-8 JSON, limited to 64 KiB, and must carry the supported protocol version.
 - The Linux transport binds a Unix-domain socket at `$XDG_RUNTIME_DIR/bubblewm/control.sock`; no TCP listener or network-accessible endpoint is provided.
 - The runtime directory and application subdirectory are checked without following symlinks. The application directory is restricted to mode `0700`, and the socket to `0600`.
@@ -37,7 +37,7 @@ The shared protocol lives in the `bubble-ipc` workspace crate and is consumed by
 - Frames are bounded, each connection is limited to one request/response exchange, and client reads/writes have timeouts. The accept loop must run on a dedicated worker thread, never on the compositor event loop.
 - The server transport and tests are implemented in `bubble-ipc::unix`. BubbleWM exposes an application-side bridge in `bubblewm::ipc`: a dedicated worker forwards requests through a bounded channel (64 entries) and waits up to two seconds for the compositor thread to respond.
 - The compositor thread calls `CoreCommandReceiver::dispatch_pending` from the Winit event loop. This keeps state access on the owner thread and prevents the IPC worker from touching Smithay state.
-- `IpcRuntime` starts after Wayland/Winit initialization and is shut down when the nested compositor exits. It also joins the worker on drop. Workspace reads and commands run on the compositor thread, while BubblePanel polls and submits them from its own worker. See [IPC lifecycle](IPC.md).
+- `IpcRuntime` starts after Wayland/Winit initialization and is shut down when the nested compositor exits. It also joins the worker on drop. Workspace and system-status reads and commands run on the compositor thread, while BubblePanel polls and submits them from its own worker. See [IPC lifecycle](IPC.md).
 - Unsupported protocol versions receive structured errors. The application-level handler remains responsible for capability checks, workspace bounds and command execution.
 
 
@@ -52,6 +52,8 @@ Winit absolute pointer motion, mouse buttons and scroll-axis events are routed t
 XDG maximize requests configure the toplevel to the single output's logical geometry and retain the previous floating location and acknowledged size. Unmaximize restores that saved geometry. Minimize requests remove a toplevel and its transient descendants from the visible space without destroying their clients; the compositor can restore the most recently minimized family. The initial keyboard controls are `Super+H` to minimize, `Super+Tab` to restore the most recently minimized family, and `Super+Q` to send an XDG close request. Intercepted key presses and releases are both consumed so clients do not retain a stuck modifier/key state.
 
 Workspace count is configurable from 1 to 32. Each toplevel retains its workspace while unmapped; switching remaps only windows on the active workspace. `Super+Left`/`Super+Right` navigate, `Super+1` through `Super+9` select, and adding Shift moves the focused window. BubblePanel queries the active index/count over IPC, displays available workspace indicators, and sends click and scroll navigation requests through a background IPC worker.
+
+BubbleWM publishes a compact Wi-Fi and audio snapshot over IPC. Its status probes keep running even when the built-in bar is disabled, allowing BubblePanel to render actual connectivity, signal, volume and mute indicators without blocking its Wayland event loop.
 
 Transient toplevels are positioned relative to their known parent and participate in family raising/minimization. XDG popups are managed by Smithay's `PopupManager`: they are tracked across commits, rendered with their toplevel, constrained to the output bounds and repositioned in response to the XDG reposition request. Popup grabs use Smithay's keyboard and pointer grab implementations, with serial validation before a grab is installed.
 

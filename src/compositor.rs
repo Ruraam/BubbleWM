@@ -17,7 +17,9 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow};
-use bubble_ipc::{ErrorCode, ErrorResponse, Request, Response, ResponseData, ThemePalette};
+use bubble_ipc::{
+    ErrorCode, ErrorResponse, Request, Response, ResponseData, SystemStatus, ThemePalette,
+};
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, ButtonState, Event as BackendInputEvent, InputEvent,
@@ -422,7 +424,9 @@ impl CompositorStateData {
         let (notification_sender, notification_events) = mpsc::channel();
         crate::notifications::start_service(notification_sender);
         let workspace_count = config.core.workspaces.max(1);
-        let status_runtime = config.bar.enabled.then(StatusRuntime::start);
+        // Keep session status available to independent clients such as
+        // BubblePanel even when BubbleWM's built-in bar is disabled.
+        let status_runtime = Some(StatusRuntime::start());
 
         let mut state = Self {
             display_handle: display_handle.clone(),
@@ -852,7 +856,6 @@ impl CompositorStateData {
     fn reload_config(&mut self) {
         match Config::load(self.config_path.as_deref()) {
             Ok(config) => {
-                let bar_enabled = config.bar.enabled;
                 self.config = config;
                 self.animations.configure(&self.config.effects);
                 self.workspace_count = self.config.core.workspaces.max(1);
@@ -865,12 +868,7 @@ impl CompositorStateData {
                     }
                 }
                 self.remap_active_workspace();
-                match (bar_enabled, self.status_runtime.is_some()) {
-                    (true, false) => self.status_runtime = Some(StatusRuntime::start()),
-                    (false, true) => self.status_runtime = None,
-                    _ => {}
-                }
-                if !bar_enabled {
+                if !self.config.bar.enabled {
                     self.bar_hits.clear();
                 }
                 self.fonts = Fonts::load(Some(&self.config.theme.font));
@@ -4289,6 +4287,21 @@ impl CompositorStateData {
                     data: ResponseData::Acknowledged,
                 }
             }
+            Request::GetSystemStatus => {
+                let status = &self.bar_status;
+                Response::Success {
+                    data: ResponseData::SystemStatus {
+                        status: SystemStatus {
+                            network_manager: status.network_manager,
+                            wifi_enabled: status.wifi_enabled,
+                            ssid: status.ssid.clone(),
+                            signal: status.signal,
+                            volume: status.volume,
+                            muted: status.muted,
+                        },
+                    },
+                }
+            }
             other => handle_ipc_request(
                 other,
                 self.theme_palette(),
@@ -4326,7 +4339,8 @@ pub(crate) fn handle_ipc_request(
         Request::WorkspacePrevious
         | Request::WorkspaceNext
         | Request::ActivateWorkspace { .. }
-        | Request::ReloadConfig => Response::Failure {
+        | Request::ReloadConfig
+        | Request::GetSystemStatus => Response::Failure {
             error: ErrorResponse {
                 code: ErrorCode::Unavailable,
                 message: "this action requires a live compositor".into(),

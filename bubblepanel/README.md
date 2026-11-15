@@ -18,6 +18,7 @@ The initial executable:
 - Detects vertical, horizontal and diagonal scroll gestures; horizontal movement and scrolling over other regions do not switch workspaces.
 - Reads BubbleWM's semantic theme palette over the authenticated local IPC socket and refreshes it every five seconds.
 - Uses BubbleThemeEngine glass tint and opacity, primary, surface, text and outline roles; falls back to its built-in palette on other compositors.
+- Shows live Wi-Fi signal and audio volume/mute indicators from BubbleWM's compact status snapshot.
 
 Workspace state and commands are processed by BubbleWM on its compositor thread. BubblePanel sends requests from a separate worker so local socket delays do not block Wayland rendering.
 
@@ -37,8 +38,8 @@ Run it inside a Wayland session whose compositor supports wlr-layer-shell. Bubbl
 - Software rendering through wl_shm; no GPU renderer.
 - Fixed bottom placement and 40-pixel height.
 - Single surface; multi-monitor lifecycle is not implemented.
-- No task list or real system status modules yet.
-- No real network, audio, Bluetooth, battery, notification or media modules.
+- No task list or interactive system modules yet; the current Wi-Fi and audio indicators are read-only.
+- No Bluetooth, battery, notification or media indicators.
 - No user-facing configuration or blur. The themed panel background can use alpha transparency.
 
 These are intentional scope boundaries for the first milestone, not claims of completed functionality.

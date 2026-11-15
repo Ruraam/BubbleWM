@@ -14,7 +14,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use bubble_ipc::{Request, Response, ResponseData, ThemePalette, unix};
+use bubble_ipc::{Request, Response, ResponseData, SystemStatus, ThemePalette, unix};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_registry,
@@ -129,7 +129,7 @@ fn interactive_regions_with_count(width: u32, height: u32, workspace_count: u32)
 }
 
 fn visible_workspace_count(width: u32, workspace_count: u32) -> u32 {
-    let available = width.saturating_sub(222) / 24;
+    let available = width.saturating_sub(267) / 24;
     workspace_count.min(available).min(u8::MAX.into())
 }
 
@@ -395,7 +395,13 @@ impl BubblePanel {
             workspace_count,
             active_workspace,
         );
-        draw_status_and_clock(canvas, width, height, colors);
+        draw_status_and_clock(
+            canvas,
+            width,
+            height,
+            colors,
+            self.snapshot.system_status.as_ref(),
+        );
 
         self.layer
             .wl_surface()
@@ -432,6 +438,7 @@ struct PanelSnapshot {
     theme: Option<ThemePalette>,
     workspace: Option<WorkspaceState>,
     workspace_control: bool,
+    system_status: Option<SystemStatus>,
 }
 
 impl Default for PanelSnapshot {
@@ -440,6 +447,7 @@ impl Default for PanelSnapshot {
             theme: None,
             workspace: None,
             workspace_control: false,
+            system_status: None,
         }
     }
 }
@@ -505,6 +513,9 @@ impl PanelIpcRuntime {
                         }
                         if let Some(theme) = read_theme_palette() {
                             snapshot.theme = theme;
+                        }
+                        if let Some(status) = read_system_status() {
+                            snapshot.system_status = Some(status);
                         }
                         next_poll = Instant::now() + Duration::from_secs(5);
                     }
@@ -581,6 +592,15 @@ fn read_workspace_state() -> Option<WorkspaceState> {
         Response::Success {
             data: ResponseData::WorkspaceState { active, count },
         } => Some(WorkspaceState { active, count }),
+        _ => None,
+    }
+}
+
+fn read_system_status() -> Option<SystemStatus> {
+    match request_bubblewm(Request::GetSystemStatus)? {
+        Response::Success {
+            data: ResponseData::SystemStatus { status },
+        } => Some(status),
         _ => None,
     }
 }
@@ -955,38 +975,40 @@ fn draw_workspaces(
     }
 }
 
-fn draw_status_and_clock(canvas: &mut [u8], width: u32, height: u32, colors: PanelColors) {
+fn draw_status_and_clock(
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    colors: PanelColors,
+    status: Option<&SystemStatus>,
+) {
     let clock = chrono::Local::now().format("%H:%M").to_string();
     let origin = width.saturating_sub(106);
     fill_rect(
         canvas,
         width,
         height,
-        origin.saturating_sub(20),
+        origin.saturating_sub(38),
         17,
         2,
         6,
         colors.muted,
     );
-    fill_rect(
+    draw_network_indicator(
         canvas,
         width,
         height,
-        origin.saturating_sub(12),
-        16,
-        4,
-        8,
-        colors.primary,
+        origin.saturating_sub(58),
+        colors,
+        status,
     );
-    fill_rect(
+    draw_audio_indicator(
         canvas,
         width,
         height,
-        origin.saturating_sub(5),
-        13,
-        4,
-        11,
-        colors.primary,
+        origin.saturating_sub(29),
+        colors,
+        status,
     );
 
     let mut cursor = origin;
@@ -999,6 +1021,85 @@ fn draw_status_and_clock(canvas: &mut [u8], width: u32, height: u32, colors: Pan
             draw_digit(canvas, width, height, cursor, digit, colors.text);
             cursor += 18;
         }
+    }
+}
+
+fn draw_network_indicator(
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    x: u32,
+    colors: PanelColors,
+    status: Option<&SystemStatus>,
+) {
+    let connected = status.is_some_and(|status| {
+        status.network_manager
+            && status.wifi_enabled
+            && status.ssid.as_deref().is_some_and(|ssid| !ssid.is_empty())
+    });
+    let signal = status
+        .filter(|_| connected)
+        .and_then(|status| status.signal)
+        .unwrap_or(if connected { 100 } else { 0 });
+    for (index, threshold) in [1, 25, 50, 75].into_iter().enumerate() {
+        let bar_height = 4 + index as u32 * 3;
+        let color = if connected && signal >= threshold {
+            colors.primary
+        } else {
+            colors.muted
+        };
+        fill_rect(
+            canvas,
+            width,
+            height,
+            x + index as u32 * 4,
+            26 - bar_height,
+            2,
+            bar_height,
+            color,
+        );
+    }
+}
+
+fn draw_audio_indicator(
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    x: u32,
+    colors: PanelColors,
+    status: Option<&SystemStatus>,
+) {
+    let volume = status
+        .and_then(|status| status.volume)
+        .unwrap_or(0)
+        .min(100);
+    let available = status.is_some_and(|status| !status.muted && status.volume.is_some());
+    let speaker_color = if available && volume > 0 {
+        colors.primary
+    } else {
+        colors.muted
+    };
+    fill_rect(canvas, width, height, x, 18, 3, 6, speaker_color);
+    fill_rect(canvas, width, height, x + 3, 16, 3, 10, speaker_color);
+    fill_rect(canvas, width, height, x + 6, 18, 2, 6, speaker_color);
+
+    for (index, threshold) in [10, 35, 65].into_iter().enumerate() {
+        let bar_height = 4 + index as u32 * 3;
+        let color = if available && volume >= threshold {
+            colors.primary
+        } else {
+            colors.muted
+        };
+        fill_rect(
+            canvas,
+            width,
+            height,
+            x + 10 + index as u32 * 4,
+            26 - bar_height,
+            2,
+            bar_height,
+            color,
+        );
     }
 }
 
@@ -1041,7 +1142,7 @@ mod tests {
     #[test]
     fn digit_drawing_ignores_invalid_values() {
         let mut canvas = vec![0; 40 * 40 * 4];
-        draw_digit(&mut canvas, 40, 40, 0, 99);
+        draw_digit(&mut canvas, 40, 40, 0, 99, 0xFFFFFFFF);
         assert!(canvas.iter().all(|byte| *byte == 0));
     }
 
