@@ -72,7 +72,7 @@ fn validate_vt(tty: &str) -> Result<(), String> {
     };
     if number.is_empty()
         || !number.bytes().all(|byte| byte.is_ascii_digit())
-        || number.parse::<u32>().is_err_or(|value| !(1..=63).contains(&value))
+        || number.parse::<u32>().map_or(true, |value| !(1..=63).contains(&value))
     {
         return Err("terminal invalide: un VT /dev/ttyN entre 1 et 63 est requis".into());
     }
