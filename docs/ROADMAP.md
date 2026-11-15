@@ -108,10 +108,11 @@
 - [x] Add a root-only `bubblewm-session` entry point with bounded stdin password input, VT validation and a fixed compositor/configuration target.
 - [ ] Add a production greeter and a system-facing BubbleWM session supervisor that securely invokes the helper.
 - [ ] Install a distro-reviewed `bubblewm` PAM service (a Debian-compatible profile is available) and connect greeter login to the helper and account/session policy.
-- [ ] Start the selected user's PAM/logind session and hand off the VT/seat through logind or libseat.
+- [ ] Start the selected user's PAM/logind session through a reviewed stack with `pam_systemd` exactly once; validate the session scope, `XDG_RUNTIME_DIR`, seat and VT metadata before starting the compositor.
 - [ ] Run the compositor and desktop as the selected user, with a correct `XDG_RUNTIME_DIR` and user-manager environment; never run desktop clients as root.
-- [ ] Connect PAM cleanup to logout and startup-failure handling; use logind/systemd cgroups to contain descendants that leave the process group.
+- [ ] Split the root supervisor from the single-threaded PAM worker; keep the supervisor outside the user session cgroup and make it own final cleanup.
 - [ ] Track the full session lifecycle and handle compositor crash, user switching and greeter recovery.
+- [ ] On logout and every startup-failure path, have the external supervisor stop the retained logind session scope through systemd and verify cgroup emptiness; process-group signaling remains best-effort only.
 - [ ] Add shutdown/reboot actions and safe cleanup of session resources, device access and VT ownership.
 - [ ] Keep the managed login and desktop session Wayland-only; do not add Xorg session entries. Optional XWayland is limited to legacy clients inside Wayland.
 - [ ] Add security review and virtual-machine coverage for successful/failed login and each session termination path.
