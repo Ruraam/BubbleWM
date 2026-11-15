@@ -334,7 +334,8 @@ impl PamHandle {
         validate_credentials(user, password, service)?;
         let user_c = CString::new(user).map_err(|_| "Identifiant invalide".to_owned())?;
         let service_c = CString::new(service).map_err(|_| "Service PAM invalide".to_owned())?;
-        let password_c = CString::new(password).map_err(|_| "Mot de passe invalide".to_owned())?;
+        let mut password_c =
+            CString::new(password).map_err(|_| "Mot de passe invalide".to_owned())?;
         let conversation = PamConversation {
             conv: Some(conversation),
             appdata_ptr: password_c.as_ptr() as *mut c_void,
@@ -352,6 +353,7 @@ impl PamHandle {
             if !handle.is_null() {
                 unsafe { pam_end(handle, status) };
             }
+            erase_cstring(&mut password_c);
             return Err(format!("PAM initialisation ({status})"));
         }
 
@@ -493,13 +495,17 @@ impl PamHandle {
     }
 
     fn erase_password(&mut self) {
-        let password = self._password.as_ptr() as *mut u8;
-        let length = self._password.as_bytes_with_nul().len();
-        for index in 0..length {
-            unsafe { password.add(index).write_volatile(0) };
-        }
-        compiler_fence(Ordering::SeqCst);
+        erase_cstring(&mut self._password);
     }
+}
+
+fn erase_cstring(value: &mut CString) {
+    let password = value.as_ptr() as *mut u8;
+    let length = value.as_bytes_with_nul().len();
+    for index in 0..length {
+        unsafe { password.add(index).write_volatile(0) };
+    }
+    compiler_fence(Ordering::SeqCst);
 }
 
 impl Drop for PamHandle {
