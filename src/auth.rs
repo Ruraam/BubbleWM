@@ -405,6 +405,32 @@ impl Drop for ManagedUserProcess {
     }
 }
 
+/// Runs one authenticated Wayland session from an isolated single-threaded
+/// root helper. This composes PAM setup, user-command execution, process-group
+/// cleanup and PAM teardown in the required order.
+pub fn run_login_session(
+    user: &str,
+    password: &str,
+    tty: &str,
+    program: &std::ffi::OsStr,
+    arguments: &[std::ffi::OsString],
+    termination_grace: Duration,
+) -> Result<ExitStatus, String> {
+    let session = PamLoginSession::open(user, password, tty)?;
+    let mut process = session.spawn_user_command(program, arguments)?;
+    let status = process
+        .wait()
+        .map_err(|error| format!("Impossible d'attendre la fin de la session: {error}"))?;
+    let process_cleanup = process
+        .terminate(termination_grace)
+        .map_err(|error| format!("Impossible de terminer le groupe de session: {error}"));
+    drop(process);
+    let pam_cleanup = session.close();
+    process_cleanup?;
+    pam_cleanup?;
+    Ok(status)
+}
+
 fn signal_process_group(process_group: libc::pid_t, signal: libc::c_int) -> std::io::Result<()> {
     if unsafe { libc::kill(-process_group, signal) } == 0 {
         return Ok(());
