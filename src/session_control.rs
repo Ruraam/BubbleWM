@@ -87,7 +87,9 @@ fn take_worker_channel_from_fd(fd: RawFd) -> io::Result<UnixStream> {
         )
     } < 0
     {
-        return Err(invalid_input("worker control descriptor is not a Unix stream socket"));
+        return Err(invalid_input(
+            "worker control descriptor is not a Unix stream socket",
+        ));
     }
 
     let mut socket_type: libc::c_int = 0;
@@ -120,7 +122,9 @@ fn take_worker_channel_from_fd(fd: RawFd) -> io::Result<UnixStream> {
         )
     } < 0
     {
-        return Err(invalid_input("worker control socket is not connected to a peer"));
+        return Err(invalid_input(
+            "worker control socket is not connected to a peer",
+        ));
     }
 
     if unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) } < 0 {
