@@ -19,6 +19,7 @@ The initial executable:
 - Reads BubbleWM's semantic theme palette over the authenticated local IPC socket and refreshes it every five seconds.
 - Uses BubbleThemeEngine glass tint and opacity, primary, surface, text and outline roles; falls back to its built-in palette on other compositors.
 - Shows live Wi-Fi signal and audio volume/mute indicators from BubbleWM's compact status snapshot.
+- Clicking the Wi-Fi indicator toggles the radio; clicking the speaker toggles mute through BubbleWM's background status worker.
 - Shows up to six live window titles, highlights the active window and focuses/restores a window when its task button is clicked.
 
 Workspace state and commands are processed by BubbleWM on its compositor thread. BubblePanel sends requests from a separate worker so local socket delays do not block Wayland rendering.
@@ -40,7 +41,7 @@ Run it inside a Wayland session whose compositor supports wlr-layer-shell. Bubbl
 - Fixed bottom placement and 40-pixel height.
 - Single surface; multi-monitor lifecycle is not implemented.
 - The task list currently shows up to six windows and uses a compact built-in bitmap font.
-- Wi-Fi and audio indicators are read-only; interactive system modules are not implemented.
+- Network and audio controls currently provide only Wi-Fi radio and mute toggles; connection selection and volume adjustment are not implemented.
 - No Bluetooth, battery, notification or media indicators.
 - No user-facing configuration or blur. The themed panel background can use alpha transparency.
 

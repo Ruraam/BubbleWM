@@ -35,6 +35,8 @@ pub enum Request {
     GetSystemStatus,
     GetWindowList,
     ReloadConfig,
+    ToggleWifi,
+    ToggleMute,
     WorkspacePrevious,
     WorkspaceNext,
     ActivateWorkspace { index: u32 },

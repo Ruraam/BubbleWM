@@ -71,10 +71,17 @@ pub struct SessionStatus {
     pub bluetooth_devices: Vec<BluetoothDevice>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum StatusCommand {
+    Refresh,
+    ToggleWifi,
+    ToggleMute,
+}
+
 /// Non-blocking status worker owned by the compositor.
 pub struct StatusRuntime {
     updates: Receiver<SessionStatus>,
-    refresh_requests: Sender<()>,
+    commands: Sender<StatusCommand>,
     shutdown: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
 }
@@ -82,7 +89,7 @@ pub struct StatusRuntime {
 impl StatusRuntime {
     pub fn start() -> Self {
         let (sender, updates) = mpsc::channel();
-        let (refresh_requests, refresh_receiver) = mpsc::channel();
+        let (commands, command_receiver) = mpsc::channel();
         let shutdown = Arc::new(AtomicBool::new(false));
         let worker_shutdown = shutdown.clone();
         let worker = thread::Builder::new()
@@ -131,10 +138,12 @@ impl StatusRuntime {
                     let mut waited = Duration::ZERO;
                     loop {
                         let remaining = POLL_INTERVAL.saturating_sub(waited);
-                        match refresh_receiver.recv_timeout(remaining.min(SHUTDOWN_SLICE)) {
-                            Ok(()) => {
-                                // Drain burst requests and refresh immediately.
-                                while refresh_receiver.try_recv().is_ok() {}
+                        match command_receiver.recv_timeout(remaining.min(SHUTDOWN_SLICE)) {
+                            Ok(command) => {
+                                run_status_command(command, &mut network);
+                                while let Ok(command) = command_receiver.try_recv() {
+                                    run_status_command(command, &mut network);
+                                }
                                 network = probe_network();
                                 bluetooth = probe_bluetooth();
                                 network_age = Duration::ZERO;
@@ -163,7 +172,7 @@ impl StatusRuntime {
             .ok();
         Self {
             updates,
-            refresh_requests,
+            commands,
             shutdown,
             worker,
         }
@@ -179,7 +188,28 @@ impl StatusRuntime {
 
     /// Asks the worker to re-probe NetworkManager immediately.
     pub fn refresh(&self) {
-        let _ = self.refresh_requests.send(());
+        let _ = self.commands.send(StatusCommand::Refresh);
+    }
+
+    /// Toggles Wi-Fi on the status worker, then refreshes its snapshot.
+    pub fn toggle_wifi(&self) {
+        let _ = self.commands.send(StatusCommand::ToggleWifi);
+    }
+
+    /// Toggles audio mute on the status worker, then refreshes its snapshot.
+    pub fn toggle_mute(&self) {
+        let _ = self.commands.send(StatusCommand::ToggleMute);
+    }
+}
+
+fn run_status_command(command: StatusCommand, network: &mut NetworkSnapshot) {
+    match command {
+        StatusCommand::Refresh => {}
+        StatusCommand::ToggleWifi => {
+            network.wifi_enabled = !network.wifi_enabled;
+            set_wifi_enabled(network.wifi_enabled);
+        }
+        StatusCommand::ToggleMute => toggle_mute(),
     }
 }
 

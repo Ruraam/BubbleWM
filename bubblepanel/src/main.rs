@@ -70,6 +70,8 @@ pub enum PanelAction {
     Launcher,
     Workspace(u8),
     Window(u64),
+    Wifi,
+    Audio,
     Clock,
 }
 
@@ -133,6 +135,28 @@ fn interactive_regions_with_state(
                 height: 24.min(panel_height.saturating_sub(8)),
             },
             action: PanelAction::Window(task.id),
+        });
+    }
+
+    let status_origin = width.saturating_sub(106);
+    if width >= 190 {
+        regions.push(HitRegion {
+            bounds: HitRect {
+                x: status_origin.saturating_sub(62),
+                y: 8,
+                width: 20,
+                height: 24.min(panel_height.saturating_sub(8)),
+            },
+            action: PanelAction::Wifi,
+        });
+        regions.push(HitRegion {
+            bounds: HitRect {
+                x: status_origin.saturating_sub(35),
+                y: 8,
+                width: 26,
+                height: 24.min(panel_height.saturating_sub(8)),
+            },
+            action: PanelAction::Audio,
         });
     }
 
@@ -529,6 +553,8 @@ enum PanelCommand {
     NextWorkspace,
     ActivateWorkspace(u32),
     FocusWindow(u64),
+    ToggleWifi,
+    ToggleMute,
 }
 
 /// Polls compositor state and sends control requests outside BubblePanel's
@@ -560,6 +586,8 @@ impl PanelIpcRuntime {
                                 Request::ActivateWorkspace { index }
                             }
                             PanelCommand::FocusWindow(id) => Request::FocusWindow { id },
+                            PanelCommand::ToggleWifi => Request::ToggleWifi,
+                            PanelCommand::ToggleMute => Request::ToggleMute,
                         };
                         match request_bubblewm(request) {
                             Some(Response::Success {
@@ -569,11 +597,13 @@ impl PanelIpcRuntime {
                             }
                             Some(Response::Success {
                                 data: ResponseData::Acknowledged,
-                            }) => {}
-                            Some(Response::Failure { error }) => {
-                                warn!(%error.message, "BubbleWM rejected a workspace request");
+                            }) => {
+                                next_poll = Instant::now() + Duration::from_secs(1);
                             }
-                            _ => warn!("BubbleWM did not return workspace state after a request"),
+                            Some(Response::Failure { error }) => {
+                                warn!(%error.message, "BubbleWM rejected a panel command");
+                            }
+                            _ => warn!("BubbleWM returned an unexpected panel command response"),
                         }
                     }
 
@@ -902,6 +932,24 @@ impl PointerHandler for BubblePanel {
                             PanelAction::Window(id) if self.snapshot.windows.is_some() => {
                                 self.ipc_runtime.send_command(PanelCommand::FocusWindow(id));
                             }
+                            PanelAction::Wifi
+                                if self
+                                    .snapshot
+                                    .system_status
+                                    .as_ref()
+                                    .is_some_and(|status| status.network_manager) =>
+                            {
+                                self.ipc_runtime.send_command(PanelCommand::ToggleWifi);
+                            }
+                            PanelAction::Audio
+                                if self
+                                    .snapshot
+                                    .system_status
+                                    .as_ref()
+                                    .is_some_and(|status| status.volume.is_some()) =>
+                            {
+                                self.ipc_runtime.send_command(PanelCommand::ToggleMute);
+                            }
                             _ => info!(?action, x, y, "BubblePanel left-click completed"),
                         }
                     }
@@ -1210,32 +1258,34 @@ fn draw_status_and_clock(
 ) {
     let clock = chrono::Local::now().format("%H:%M").to_string();
     let origin = width.saturating_sub(106);
-    fill_rect(
-        canvas,
-        width,
-        height,
-        origin.saturating_sub(38),
-        17,
-        2,
-        6,
-        colors.muted,
-    );
-    draw_network_indicator(
-        canvas,
-        width,
-        height,
-        origin.saturating_sub(58),
-        colors,
-        status,
-    );
-    draw_audio_indicator(
-        canvas,
-        width,
-        height,
-        origin.saturating_sub(29),
-        colors,
-        status,
-    );
+    if width >= 190 {
+        fill_rect(
+            canvas,
+            width,
+            height,
+            origin.saturating_sub(38),
+            17,
+            2,
+            6,
+            colors.muted,
+        );
+        draw_network_indicator(
+            canvas,
+            width,
+            height,
+            origin.saturating_sub(58),
+            colors,
+            status,
+        );
+        draw_audio_indicator(
+            canvas,
+            width,
+            height,
+            origin.saturating_sub(29),
+            colors,
+            status,
+        );
+    }
 
     let mut cursor = origin;
     for character in clock.chars() {

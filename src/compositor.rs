@@ -4343,6 +4343,48 @@ impl CompositorStateData {
                     data: ResponseData::Acknowledged,
                 }
             }
+            Request::ToggleWifi if self.bar_status.network_manager => {
+                if let Some(runtime) = self.status_runtime.as_ref() {
+                    runtime.toggle_wifi();
+                    Response::Success {
+                        data: ResponseData::Acknowledged,
+                    }
+                } else {
+                    Response::Failure {
+                        error: ErrorResponse {
+                            code: ErrorCode::Unavailable,
+                            message: "session status worker is unavailable".into(),
+                        },
+                    }
+                }
+            }
+            Request::ToggleWifi => Response::Failure {
+                error: ErrorResponse {
+                    code: ErrorCode::Unavailable,
+                    message: "NetworkManager is unavailable".into(),
+                },
+            },
+            Request::ToggleMute if self.bar_status.volume.is_some() => {
+                if let Some(runtime) = self.status_runtime.as_ref() {
+                    runtime.toggle_mute();
+                    Response::Success {
+                        data: ResponseData::Acknowledged,
+                    }
+                } else {
+                    Response::Failure {
+                        error: ErrorResponse {
+                            code: ErrorCode::Unavailable,
+                            message: "session status worker is unavailable".into(),
+                        },
+                    }
+                }
+            }
+            Request::ToggleMute => Response::Failure {
+                error: ErrorResponse {
+                    code: ErrorCode::Unavailable,
+                    message: "audio status is unavailable".into(),
+                },
+            },
             other => handle_ipc_request(
                 other,
                 self.theme_palette(),
@@ -4382,6 +4424,8 @@ pub(crate) fn handle_ipc_request(
         | Request::ActivateWorkspace { .. }
         | Request::FocusWindow { .. }
         | Request::GetWindowList
+        | Request::ToggleWifi
+        | Request::ToggleMute
         | Request::ReloadConfig
         | Request::GetSystemStatus => Response::Failure {
             error: ErrorResponse {

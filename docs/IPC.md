@@ -28,6 +28,7 @@ The event-loop handler must remain quick and must not perform blocking I/O. It m
 - GetWorkspaceState returns the current zero-based active index and configured workspace count.
 - GetSystemStatus returns a compact snapshot of NetworkManager/Wi-Fi availability, the active Wi-Fi signal, and current audio volume/mute state. Status probing runs independently of BubbleWM's built-in bar so BubblePanel can use it on its own.
 - GetWindowList returns stable window IDs, titles, workspace indices, minimized state and active state; FocusWindow restores and focuses a listed window on the compositor thread.
+- ToggleWifi and ToggleMute queue radio and audio commands on the status worker, then refresh its snapshot. The compositor IPC handler only queues these actions and stays non-blocking.
 - WorkspacePrevious, WorkspaceNext and ActivateWorkspace update compositor-owned state and return the resulting active index and count.
 
 Workspace commands validate target indices and remap visible windows on the compositor thread. BubblePanel sends these requests from its own IPC worker, so its Wayland event loop remains responsive.
