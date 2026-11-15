@@ -281,7 +281,10 @@ impl WorkerProcess {
     /// Waits for the worker to exit, retrying when interrupted by a signal.
     pub fn wait(&mut self) -> io::Result<std::process::ExitStatus> {
         if self.reaped {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "worker has already been reaped"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "worker has already been reaped",
+            ));
         }
 
         let mut status = 0;
@@ -321,9 +324,15 @@ impl WorkerProcess {
     }
 
     /// Requests graceful termination, then force-kills and reaps after `grace`.
-    pub fn terminate_and_reap(&mut self, grace: Duration) -> io::Result<std::process::ExitStatus> {
+    pub fn terminate_and_reap(
+        &mut self,
+        grace: Duration,
+    ) -> io::Result<std::process::ExitStatus> {
         if self.reaped {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "worker has already been reaped"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "worker has already been reaped",
+            ));
         }
         if unsafe { libc::kill(self.pid, libc::SIGTERM) } < 0 {
             let error = io::Error::last_os_error();
