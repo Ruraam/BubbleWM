@@ -2,7 +2,7 @@
 
 A native, lightweight and customizable Wayland desktop for BubbleOS, written in Rust and built on Smithay. Its target role includes the Wayland login and session lifecycle currently handled by display managers such as greetd or LightDM.
 
-> **Status:** early development. BubbleWM has a nested Winit compositor and an initial native DRM/KMS backend for one primary GPU and one connected output, using libseat, GBM/EGL and libinput. It also has core Wayland globals, tracked xdg-toplevel lifecycle, pointer routing, interactive move/resize, maximize/restore, minimize/restore, transient stacking, XDG popup management and prototype server-side decorations. The built-in PAM lock screen locks an already-running user session; a graphical login greeter and system user-session lifecycle are not implemented. The native backend still needs broader hardware validation, multi-output and hotplug support. BubbleWM is not yet a complete or daily-usable desktop environment.
+> **Status:** early development. BubbleWM has a nested Winit compositor and an initial native DRM/KMS backend for one primary GPU and one connected output, using libseat, GBM/EGL and libinput. It also has core Wayland globals, tracked xdg-toplevel lifecycle, pointer routing, interactive move/resize, maximize/restore, minimize/restore, transient stacking, XDG popup management and prototype server-side decorations. The built-in PAM lock screen locks an already-running user session. PAM helpers can authenticate a selected account and open/close its session in an isolated root process, but the login greeter and session supervisor are not connected. The native backend still needs broader hardware validation, multi-output and hotplug support. BubbleWM is not yet a complete or daily-usable desktop environment.
 
 ## Project principles
 
@@ -70,7 +70,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Polished decorations: the current server-side titlebar uses BubbleThemeEngine surfaces but remains a prototype with colored controls and no title text, icons or full accessibility behavior.
 - Tiling layout policy and workspace-specific layout behavior.
 - Output-management protocols, multiple outputs and connector hotplug.
-- A login greeter and session supervisor: `auth::authenticate_login_user` can check a selected account against BubbleWM's fixed PAM service, but no greeter calls it yet. BubbleWM does not open or close the user's PAM/logind session, launch the compositor under that user's identity, or reap the session process tree. The built-in lock screen only unlocks the user who already owns the running compositor; BubbleWM does not replace greetd or LightDM today.
+- A login greeter and session supervisor: `auth::authenticate_login_user` checks a selected account, `PamLoginSession::open` manages PAM credentials/session state in an isolated root process, and `spawn_user_command` starts a trusted command as that account. No greeter coordinates these helpers yet, and BubbleWM does not supervise the desktop process tree or replace greetd or LightDM today.
 - Richer BubblePanel task-list presentation, Bluetooth and battery modules.
 
 ## BubblePanel prototype
