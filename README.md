@@ -70,7 +70,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Polished decorations: the current server-side titlebar uses BubbleThemeEngine surfaces but remains a prototype with colored controls and no title text, icons or full accessibility behavior.
 - Tiling layout policy and workspace-specific layout behavior.
 - Output-management protocols, multiple outputs and connector hotplug.
-- A login greeter and session supervisor: BubbleWM cannot yet authenticate a login, create a PAM/logind user session, launch the compositor as that user, or cleanly end and reap it. The current built-in lock screen only unlocks the user who already owns the running compositor; it does not replace greetd or LightDM today.
+- A login greeter and session supervisor: `auth::authenticate_login_user` can check a selected account against BubbleWM's fixed PAM service, but no greeter calls it yet. BubbleWM does not open or close the user's PAM/logind session, launch the compositor under that user's identity, or reap the session process tree. The built-in lock screen only unlocks the user who already owns the running compositor; BubbleWM does not replace greetd or LightDM today.
 - Richer BubblePanel task-list presentation, Bluetooth and battery modules.
 
 ## BubblePanel prototype
