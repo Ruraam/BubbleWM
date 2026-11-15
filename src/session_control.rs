@@ -4,6 +4,8 @@
 //! arbitrary command, or systemd unit-name field.
 
 use std::io::{self, Cursor, Read, Write};
+use std::os::fd::AsRawFd;
+use std::os::unix::net::UnixStream;
 use std::path::{Component, Path};
 
 const MAGIC: &[u8; 8] = b"BUBSESS1";
@@ -25,6 +27,32 @@ pub struct SessionReady {
     pub runtime_dir: String,
     pub seat: Option<String>,
     pub vt_number: Option<u32>,
+}
+
+
+/// Creates a private, connected supervisor/worker channel.
+///
+/// Both ends are local Unix stream sockets with `FD_CLOEXEC` enforced. The
+/// supervisor keeps one endpoint and passes the other to a dedicated worker
+/// using an explicit file-descriptor inheritance step. The descriptor is not
+/// advertised through argv, environment variables or a filesystem pathname.
+pub fn private_channel_pair() -> io::Result<(UnixStream, UnixStream)> {
+    let (supervisor, worker) = UnixStream::pair()?;
+    set_close_on_exec(&supervisor)?;
+    set_close_on_exec(&worker)?;
+    Ok((supervisor, worker))
+}
+
+fn set_close_on_exec(stream: &UnixStream) -> io::Result<()> {
+    let fd = stream.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    if flags < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 /// Writes one versioned, bounded SessionReady frame to a private stream.
@@ -180,6 +208,21 @@ mod tests {
             runtime_dir: "/run/user/1000".into(),
             seat: Some("seat0".into()),
             vt_number: Some(2),
+        }
+    }
+
+    #[test]
+    fn private_channel_is_connected_and_close_on_exec() {
+        let (mut supervisor, mut worker) = private_channel_pair().unwrap();
+        worker.write_all(b"ok").unwrap();
+        let mut bytes = [0_u8; 2];
+        supervisor.read_exact(&mut bytes).unwrap();
+        assert_eq!(&bytes, b"ok");
+
+        for stream in [&supervisor, &worker] {
+            let flags = unsafe { libc::fcntl(stream.as_raw_fd(), libc::F_GETFD) };
+            assert!(flags >= 0);
+            assert_ne!(flags & libc::FD_CLOEXEC, 0);
         }
     }
 
