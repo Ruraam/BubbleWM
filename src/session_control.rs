@@ -71,11 +71,11 @@ pub fn spawn_worker_with_channel(
 ) -> io::Result<libc::pid_t> {
     use std::os::unix::ffi::OsStrExt;
 
-    let program = std::ffi::CString::new(program.as_bytes())
-        .map_err(|_| invalid_input("worker path contains a NUL byte"))?;
-    if !Path::new(program.to_str().map_err(|_| invalid_input("worker path is not UTF-8"))?).is_absolute() {
+    if !Path::new(program).is_absolute() {
         return Err(invalid_input("worker path must be absolute"));
     }
+    let program = std::ffi::CString::new(program.as_bytes())
+        .map_err(|_| invalid_input("worker path contains a NUL byte"))?;
 
     let mut argv = Vec::with_capacity(arguments.len() + 1);
     argv.push(program.clone());
@@ -101,15 +101,15 @@ pub fn spawn_worker_with_channel(
     if status != 0 {
         return Err(io::Error::from_raw_os_error(status));
     }
-    let mut actions = SpawnFileActions(actions.assume_init());
+    let mut actions = SpawnFileActions(unsafe { actions.assume_init() });
 
     let status = unsafe {
-        libc::posix_spawn_file_actions_adddup2(actions.0.as_mut(), duplicate.0, 3)
+        libc::posix_spawn_file_actions_adddup2(&mut actions.0, duplicate.0, 3)
     };
     if status != 0 {
         return Err(io::Error::from_raw_os_error(status));
     }
-    let status = unsafe { libc::posix_spawn_file_actions_addclose(actions.0.as_mut(), duplicate.0) };
+    let status = unsafe { libc::posix_spawn_file_actions_addclose(&mut actions.0, duplicate.0) };
     if status != 0 {
         return Err(io::Error::from_raw_os_error(status));
     }
@@ -322,6 +322,29 @@ mod tests {
             assert!(flags >= 0);
             assert_ne!(flags & libc::FD_CLOEXEC, 0);
         }
+    }
+
+    #[test]
+    fn worker_spawn_receives_channel_on_fd_three() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let (mut supervisor, worker) = private_channel_pair().unwrap();
+        let pid = spawn_worker_with_channel(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[std::ffi::OsString::from("-c"), std::ffi::OsString::from("printf ok >&3")],
+            worker,
+        )
+        .unwrap();
+
+        let mut bytes = [0_u8; 2];
+        supervisor.read_exact(&mut bytes).unwrap();
+        assert_eq!(&bytes, b"ok");
+
+        let mut status = 0;
+        assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
+        assert!(libc::WIFEXITED(status));
+        assert_eq!(libc::WEXITSTATUS(status), 0);
+        let _ = OsStrExt::as_bytes(std::ffi::OsStr::new("test"));
     }
 
     #[test]
