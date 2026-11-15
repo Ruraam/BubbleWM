@@ -54,6 +54,105 @@ fn set_close_on_exec(stream: &UnixStream) -> io::Result<()> {
     Ok(())
 }
 
+/// Spawns a trusted absolute-path worker and maps its private channel to fd 3.
+///
+/// The worker endpoint is consumed by this function. The child receives only
+/// that endpoint at fd 3; the original descriptor is duplicated with
+/// close-on-exec semantics and closed in the child after the dup2 action.
+/// The child starts with an empty environment. The caller must pass only
+/// fixed, non-secret arguments and retain the supervisor endpoint separately.
+///
+/// This uses `posix_spawn` file actions rather than a post-fork Rust callback,
+/// which avoids running Rust code in a potentially multithreaded child.
+pub fn spawn_worker_with_channel(
+    program: &std::ffi::OsStr,
+    arguments: &[std::ffi::OsString],
+    worker_channel: UnixStream,
+) -> io::Result<libc::pid_t> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let program = std::ffi::CString::new(program.as_bytes())
+        .map_err(|_| invalid_input("worker path contains a NUL byte"))?;
+    if !Path::new(program.to_str().map_err(|_| invalid_input("worker path is not UTF-8"))?).is_absolute() {
+        return Err(invalid_input("worker path must be absolute"));
+    }
+
+    let mut argv = Vec::with_capacity(arguments.len() + 1);
+    argv.push(program.clone());
+    for argument in arguments {
+        argv.push(
+            std::ffi::CString::new(argument.as_bytes())
+                .map_err(|_| invalid_input("worker argument contains a NUL byte"))?,
+        );
+    }
+    let mut argv_ptrs: Vec<*mut libc::c_char> =
+        argv.iter().map(|value| value.as_ptr() as *mut libc::c_char).collect();
+    argv_ptrs.push(std::ptr::null_mut());
+    let mut envp = [std::ptr::null_mut()];
+
+    let duplicate = unsafe { libc::fcntl(worker_channel.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 4) };
+    if duplicate < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let duplicate = OwnedFdGuard(duplicate);
+
+    let mut actions = std::mem::MaybeUninit::<libc::posix_spawn_file_actions_t>::uninit();
+    let status = unsafe { libc::posix_spawn_file_actions_init(actions.as_mut_ptr()) };
+    if status != 0 {
+        return Err(io::Error::from_raw_os_error(status));
+    }
+    let mut actions = SpawnFileActions(actions.assume_init());
+
+    let status = unsafe {
+        libc::posix_spawn_file_actions_adddup2(actions.0.as_mut(), duplicate.0, 3)
+    };
+    if status != 0 {
+        return Err(io::Error::from_raw_os_error(status));
+    }
+    let status = unsafe { libc::posix_spawn_file_actions_addclose(actions.0.as_mut(), duplicate.0) };
+    if status != 0 {
+        return Err(io::Error::from_raw_os_error(status));
+    }
+
+    let mut pid = 0;
+    let status = unsafe {
+        libc::posix_spawn(
+            &mut pid,
+            program.as_ptr(),
+            actions.as_ptr(),
+            std::ptr::null(),
+            argv_ptrs.as_mut_ptr(),
+            envp.as_mut_ptr(),
+        )
+    };
+    if status != 0 {
+        return Err(io::Error::from_raw_os_error(status));
+    }
+    Ok(pid)
+}
+
+struct OwnedFdGuard(libc::c_int);
+
+impl Drop for OwnedFdGuard {
+    fn drop(&mut self) {
+        unsafe { libc::close(self.0) };
+    }
+}
+
+struct SpawnFileActions(libc::posix_spawn_file_actions_t);
+
+impl SpawnFileActions {
+    fn as_ptr(&self) -> *const libc::posix_spawn_file_actions_t {
+        &self.0
+    }
+}
+
+impl Drop for SpawnFileActions {
+    fn drop(&mut self) {
+        unsafe { libc::posix_spawn_file_actions_destroy(&mut self.0) };
+    }
+}
+
 /// Writes one versioned, bounded SessionReady frame to a private stream.
 pub fn write_session_ready<W: Write>(writer: &mut W, ready: &SessionReady) -> io::Result<()> {
     validate(ready)?;
