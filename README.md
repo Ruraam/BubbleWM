@@ -58,28 +58,28 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Clients negotiating XDG server-side decorations receive a prototype 32-pixel titlebar with close, maximize/restore and minimize controls. Client-side decoration requests are respected. The titlebar can also initiate an interactive move.
 - Window geometry is refreshed after root-surface and subsurface commits.
 - Frame pacing is throttled to approximately 60 updates per second in the nested development loop.
-- The IPC server starts and stops with the compositor. Capability discovery works, but workspace commands correctly return `unavailable` until workspace management exists.
+- Configurable virtual workspaces keep independent window sets. `Super+Left` and `Super+Right` switch between them; `Super+1` through `Super+9` select one, and adding Shift moves the focused window.
+- The IPC server starts and stops with the compositor. It reports the active workspace and count, accepts navigation requests and publishes the BubbleThemeEngine palette.
 - BubbleThemeEngine generates wallpaper-based semantic roles. BubbleWM uses them in glass panels, notifications, launcher, lock screen and window surfaces; BubblePanel reads the full palette over local IPC and refreshes it every five seconds.
 
 ### Not implemented yet
 
 - Pointer cursor rendering, touch input, and a complete focus/grab policy.
 - Polished decorations: the current server-side titlebar uses BubbleThemeEngine surfaces but remains a prototype with colored controls and no title text, icons or full accessibility behavior.
-- Tiling and virtual workspaces.
-- Virtual workspaces and workspace switching.
+- Tiling layout policy and workspace-specific layout behavior.
 - Output-management protocols, multiple outputs and native DRM/KMS.
 - BubblePanel workspace actions and real system status modules.
 
 ## BubblePanel prototype
 
-The independent panel connects to a Wayland compositor, creates a bottom `wlr-layer-shell` surface, reserves a 40-pixel exclusive zone and renders a three-zone layout with workspace/status placeholders and a seven-segment local-time clock. When BubbleWM's local IPC endpoint is available, the panel reads BubbleThemeEngine's semantic palette and refreshes it every five seconds. Pointer click and scroll gestures are detected; workspace control is still pending.
+The independent panel connects to a Wayland compositor, creates a bottom `wlr-layer-shell` surface, reserves a 40-pixel exclusive zone and renders a three-zone layout with workspace indicators, status placeholders and a seven-segment local-time clock. Through BubbleWM's local IPC endpoint it reads the semantic palette and current workspace state, switches workspaces when an indicator is clicked and handles vertical scroll navigation. Theme and workspace state refresh every five seconds.
 
 ```sh
 cargo build -p bubblepanel
 cargo run -p bubblepanel
 ```
 
-BubblePanel requires a compositor that supports `wlr-layer-shell`; its BubbleWM-specific theme colors also require BubbleWM's local IPC endpoint. Real workspace state and system modules remain future work.
+BubblePanel requires a compositor that supports `wlr-layer-shell`; live theme colors and workspace control require BubbleWM's local IPC endpoint. Real system status modules remain future work.
 
 See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANEL.md).
 

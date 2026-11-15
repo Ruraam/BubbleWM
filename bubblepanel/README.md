@@ -11,14 +11,15 @@ The initial executable:
 - Creates a top-layer surface anchored to the bottom edge.
 - Reserves a 40-pixel exclusive zone.
 - Draws a compact three-zone prototype using shared-memory buffers.
-- Shows workspace placeholders, status placeholders and a local-time seven-segment clock.
+- Shows live workspace indicators, status placeholders and a local-time seven-segment clock when BubbleWM IPC is available.
 - Refreshes the clock when the displayed minute changes.
 - Tracks pointer hover and left-click press/release targets.
-- Detects vertical, horizontal and diagonal scroll gestures, including workspace navigation intent.
+- Activates a workspace when its indicator is clicked and sends vertical workspace navigation requests over IPC.
+- Detects vertical, horizontal and diagonal scroll gestures; horizontal movement and scrolling over other regions do not switch workspaces.
 - Reads BubbleWM's semantic theme palette over the authenticated local IPC socket and refreshes it every five seconds.
 - Uses BubbleThemeEngine glass tint and opacity, primary, surface, text and outline roles; falls back to its built-in palette on other compositors.
 
-The panel currently logs workspace navigation intent. It does not yet send commands to BubbleWM or switch workspaces.
+Workspace state and commands are processed by BubbleWM on its compositor thread. BubblePanel sends requests from a separate worker so local socket delays do not block Wayland rendering.
 
 ## Build and run
 
@@ -36,7 +37,7 @@ Run it inside a Wayland session whose compositor supports wlr-layer-shell. Bubbl
 - Software rendering through wl_shm; no GPU renderer.
 - Fixed bottom placement and 40-pixel height.
 - Single surface; multi-monitor lifecycle is not implemented.
-- No live workspace data or task list yet. The IPC client currently reads the theme palette; workspace commands remain unavailable until BubbleWM implements workspaces.
+- No task list or real system status modules yet.
 - No real network, audio, Bluetooth, battery, notification or media modules.
 - No user-facing configuration or blur. The themed panel background can use alpha transparency.
 

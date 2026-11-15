@@ -10,7 +10,7 @@ use std::{
     os::fd::{AsFd, AsRawFd},
     sync::mpsc::{self, Receiver, Sender},
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result};
@@ -87,6 +87,10 @@ pub fn hit_test(regions: &[HitRegion], x: u32, y: u32) -> Option<PanelAction> {
 
 /// Describes the initial launcher, workspace and clock hit regions.
 pub fn interactive_regions(width: u32, height: u32) -> Vec<HitRegion> {
+    interactive_regions_with_count(width, height, 4)
+}
+
+fn interactive_regions_with_count(width: u32, height: u32, workspace_count: u32) -> Vec<HitRegion> {
     let panel_height = height.min(PANEL_HEIGHT);
     let launcher_x = 8;
     let mut regions = vec![HitRegion {
@@ -99,8 +103,8 @@ pub fn interactive_regions(width: u32, height: u32) -> Vec<HitRegion> {
         action: PanelAction::Launcher,
     }];
 
-    for index in 0..4_u8 {
-        let x = 82 + u32::from(index) * 24;
+    for index in 0..visible_workspace_count(width, workspace_count) {
+        let x = 82 + index * 24;
         regions.push(HitRegion {
             bounds: HitRect {
                 x,
@@ -108,7 +112,7 @@ pub fn interactive_regions(width: u32, height: u32) -> Vec<HitRegion> {
                 width: 16.min(width.saturating_sub(x)),
                 height: 12.min(panel_height.saturating_sub(14)),
             },
-            action: PanelAction::Workspace(index + 1),
+            action: PanelAction::Workspace((index + 1) as u8),
         });
     }
 
@@ -122,6 +126,11 @@ pub fn interactive_regions(width: u32, height: u32) -> Vec<HitRegion> {
         action: PanelAction::Clock,
     });
     regions
+}
+
+fn visible_workspace_count(width: u32, workspace_count: u32) -> u32 {
+    let available = width.saturating_sub(222) / 24;
+    workspace_count.min(available).min(u8::MAX.into())
 }
 
 fn main() -> Result<()> {
@@ -175,9 +184,8 @@ fn main() -> Result<()> {
         first_configure: true,
         closed: false,
         clock_minute: current_clock_minute(),
-        theme_palette: None,
-        theme_runtime: ThemePaletteRuntime::start()
-            .context("cannot start BubblePanel theme worker")?,
+        snapshot: PanelSnapshot::default(),
+        ipc_runtime: PanelIpcRuntime::start().context("cannot start BubblePanel IPC worker")?,
         pointer: None,
         pointer_interaction: PointerInteraction::default(),
     };
@@ -210,8 +218,8 @@ fn main() -> Result<()> {
                 .blocking_dispatch(&mut panel)
                 .context("Wayland event dispatch failed")?;
         }
-        let theme_changed = panel.adopt_theme_update();
-        if theme_changed || panel.clock_minute != current_clock_minute() {
+        let state_changed = panel.adopt_ipc_update();
+        if state_changed || panel.clock_minute != current_clock_minute() {
             panel.draw().context("cannot refresh the panel clock")?;
         }
     }
@@ -344,8 +352,8 @@ struct BubblePanel {
     first_configure: bool,
     closed: bool,
     clock_minute: String,
-    theme_palette: Option<ThemePalette>,
-    theme_runtime: ThemePaletteRuntime,
+    snapshot: PanelSnapshot,
+    ipc_runtime: PanelIpcRuntime,
     pointer: Option<wl_pointer::WlPointer>,
     pointer_interaction: PointerInteraction,
 }
@@ -366,10 +374,27 @@ impl BubblePanel {
             .context("cannot create a shared-memory panel buffer")?;
 
         canvas.fill(0);
-        let colors = PanelColors::from_palette(self.theme_palette.as_ref());
+        let colors = PanelColors::from_snapshot(&self.snapshot);
         fill_rect(canvas, width, height, 0, 0, width, height, colors.glass);
         draw_brand(canvas, width, height, colors);
-        draw_workspaces(canvas, width, height, colors);
+        let workspace_count = self
+            .snapshot
+            .workspace
+            .as_ref()
+            .map_or(4, |state| state.count);
+        let active_workspace = self
+            .snapshot
+            .workspace
+            .as_ref()
+            .map_or(0, |state| state.active);
+        draw_workspaces(
+            canvas,
+            width,
+            height,
+            colors,
+            workspace_count,
+            active_workspace,
+        );
         draw_status_and_clock(canvas, width, height, colors);
 
         self.layer
@@ -383,45 +408,114 @@ impl BubblePanel {
         Ok(())
     }
 
-    fn adopt_theme_update(&mut self) -> bool {
-        let Some(palette) = self.theme_runtime.try_take_update() else {
+    fn adopt_ipc_update(&mut self) -> bool {
+        let Some(snapshot) = self.ipc_runtime.try_take_update() else {
             return false;
         };
-        if palette == self.theme_palette {
+        if snapshot == self.snapshot {
             return false;
         }
-        self.theme_palette = palette;
-        info!("BubblePanel adopted the current BubbleThemeEngine palette");
+        self.snapshot = snapshot;
+        info!("BubblePanel adopted the current theme and workspace state");
         true
     }
 }
 
-/// Fetches the compositor palette outside BubblePanel's Wayland event loop.
-/// The worker coalesces identical snapshots and exits promptly when dropped.
-struct ThemePaletteRuntime {
-    updates: Receiver<Option<ThemePalette>>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WorkspaceState {
+    active: u32,
+    count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct PanelSnapshot {
+    theme: Option<ThemePalette>,
+    workspace: Option<WorkspaceState>,
+    workspace_control: bool,
+}
+
+impl Default for PanelSnapshot {
+    fn default() -> Self {
+        Self {
+            theme: None,
+            workspace: None,
+            workspace_control: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PanelCommand {
+    PreviousWorkspace,
+    NextWorkspace,
+    ActivateWorkspace(u32),
+}
+
+/// Polls compositor state and sends control requests outside BubblePanel's
+/// Wayland event loop. Identical snapshots are coalesced before publication.
+struct PanelIpcRuntime {
+    updates: Receiver<PanelSnapshot>,
+    commands: Sender<PanelCommand>,
     shutdown: Sender<()>,
     worker: Option<JoinHandle<()>>,
 }
 
-impl ThemePaletteRuntime {
+impl PanelIpcRuntime {
     fn start() -> std::io::Result<Self> {
         let (update_tx, updates) = mpsc::channel();
+        let (commands, command_rx) = mpsc::channel();
         let (shutdown, shutdown_rx) = mpsc::channel();
         let worker = thread::Builder::new()
-            .name("bubblepanel-theme".into())
+            .name("bubblepanel-ipc".into())
             .spawn(move || {
-                let mut previous: Option<Option<ThemePalette>> = None;
+                let mut snapshot = PanelSnapshot::default();
+                let mut published: Option<PanelSnapshot> = None;
+                let mut next_poll = Instant::now();
                 loop {
-                    if let Some(palette) = read_theme_palette()
-                        && previous.as_ref() != Some(&palette)
-                    {
-                        if update_tx.send(palette.clone()).is_err() {
+                    while let Ok(command) = command_rx.try_recv() {
+                        let request = match command {
+                            PanelCommand::PreviousWorkspace => Request::WorkspacePrevious,
+                            PanelCommand::NextWorkspace => Request::WorkspaceNext,
+                            PanelCommand::ActivateWorkspace(index) => {
+                                Request::ActivateWorkspace { index }
+                            }
+                        };
+                        match request_bubblewm(request) {
+                            Some(Response::Success {
+                                data: ResponseData::WorkspaceState { active, count },
+                            }) => {
+                                snapshot.workspace = Some(WorkspaceState { active, count });
+                            }
+                            Some(Response::Failure { error }) => {
+                                warn!(%error.message, "BubbleWM rejected a workspace request");
+                            }
+                            _ => warn!("BubbleWM did not return workspace state after a request"),
+                        }
+                    }
+
+                    if Instant::now() >= next_poll {
+                        if let Some(workspace_control) = read_workspace_capability() {
+                            snapshot.workspace_control = workspace_control;
+                            if !workspace_control {
+                                snapshot.workspace = None;
+                            }
+                        }
+                        if let Some(workspace) = read_workspace_state() {
+                            snapshot.workspace = Some(workspace);
+                        }
+                        if let Some(theme) = read_theme_palette() {
+                            snapshot.theme = theme;
+                        }
+                        next_poll = Instant::now() + Duration::from_secs(5);
+                    }
+
+                    if published.as_ref() != Some(&snapshot) {
+                        if update_tx.send(snapshot.clone()).is_err() {
                             break;
                         }
-                        previous = Some(palette);
+                        published = Some(snapshot.clone());
                     }
-                    match shutdown_rx.recv_timeout(Duration::from_secs(5)) {
+                    match shutdown_rx.recv_timeout(Duration::from_millis(50)) {
                         Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
                         Err(mpsc::RecvTimeoutError::Timeout) => {}
                     }
@@ -429,21 +523,28 @@ impl ThemePaletteRuntime {
             })?;
         Ok(Self {
             updates,
+            commands,
             shutdown,
             worker: Some(worker),
         })
     }
 
-    fn try_take_update(&self) -> Option<Option<ThemePalette>> {
+    fn try_take_update(&self) -> Option<PanelSnapshot> {
         let mut latest = None;
-        while let Ok(palette) = self.updates.try_recv() {
-            latest = Some(palette);
+        while let Ok(snapshot) = self.updates.try_recv() {
+            latest = Some(snapshot);
         }
         latest
     }
+
+    fn send_command(&self, command: PanelCommand) {
+        if let Err(error) = self.commands.send(command) {
+            warn!(%error, "BubblePanel IPC worker stopped before handling an action");
+        }
+    }
 }
 
-impl Drop for ThemePaletteRuntime {
+impl Drop for PanelIpcRuntime {
     fn drop(&mut self) {
         let _ = self.shutdown.send(());
         if let Some(worker) = self.worker.take() {
@@ -452,15 +553,34 @@ impl Drop for ThemePaletteRuntime {
     }
 }
 
-/// `None` means the local IPC request failed; `Some(None)` means the
-/// compositor has not generated a wallpaper theme yet.
-fn read_theme_palette() -> Option<Option<ThemePalette>> {
+fn request_bubblewm(request: Request) -> Option<Response> {
     let socket_path = unix::default_socket_path().ok()?;
-    let response = unix::send_request(socket_path, Request::GetThemePalette).ok()?;
-    match response {
+    unix::send_request(socket_path, request).ok()
+}
+
+fn read_theme_palette() -> Option<Option<ThemePalette>> {
+    match request_bubblewm(Request::GetThemePalette)? {
         Response::Success {
             data: ResponseData::ThemePalette { palette },
         } => Some(palette),
+        _ => None,
+    }
+}
+
+fn read_workspace_capability() -> Option<bool> {
+    match request_bubblewm(Request::GetCapabilities)? {
+        Response::Success {
+            data: ResponseData::Capabilities { workspace_control },
+        } => Some(workspace_control),
+        _ => None,
+    }
+}
+
+fn read_workspace_state() -> Option<WorkspaceState> {
+    match request_bubblewm(Request::GetWorkspaceState)? {
+        Response::Success {
+            data: ResponseData::WorkspaceState { active, count },
+        } => Some(WorkspaceState { active, count }),
         _ => None,
     }
 }
@@ -638,7 +758,12 @@ impl PointerHandler for BubblePanel {
             else {
                 continue;
             };
-            let regions = interactive_regions(self.width, self.height);
+            let workspace_count = self
+                .snapshot
+                .workspace
+                .as_ref()
+                .map_or(4, |state| state.count);
+            let regions = interactive_regions_with_count(self.width, self.height, workspace_count);
             let action = hit_test(&regions, x, y);
 
             match &event.kind {
@@ -652,7 +777,17 @@ impl PointerHandler for BubblePanel {
                 }
                 PointerEventKind::Release { button, .. } if *button == BTN_LEFT => {
                     if let Some(action) = self.pointer_interaction.release(action) {
-                        info!(?action, x, y, "BubblePanel left-click completed");
+                        match action {
+                            PanelAction::Workspace(workspace)
+                                if self.snapshot.workspace_control =>
+                            {
+                                self.ipc_runtime
+                                    .send_command(PanelCommand::ActivateWorkspace(u32::from(
+                                        workspace - 1,
+                                    )));
+                            }
+                            _ => info!(?action, x, y, "BubblePanel left-click completed"),
+                        }
                     }
                 }
                 PointerEventKind::Axis {
@@ -664,13 +799,15 @@ impl PointerHandler for BubblePanel {
                         if let Some(workspace_direction) =
                             workspace_scroll_direction(action, directions)
                         {
-                            info!(
-                                ?workspace_direction,
-                                ?action,
-                                x,
-                                y,
-                                "BubblePanel workspace navigation requested"
-                            );
+                            if self.snapshot.workspace_control {
+                                let command = match workspace_direction {
+                                    WorkspaceScrollDirection::Previous => {
+                                        PanelCommand::PreviousWorkspace
+                                    }
+                                    WorkspaceScrollDirection::Next => PanelCommand::NextWorkspace,
+                                };
+                                self.ipc_runtime.send_command(command);
+                            }
                         } else {
                             info!(
                                 ?directions,
@@ -759,8 +896,8 @@ struct PanelColors {
 }
 
 impl PanelColors {
-    fn from_palette(palette: Option<&ThemePalette>) -> Self {
-        let Some(palette) = palette else {
+    fn from_snapshot(snapshot: &PanelSnapshot) -> Self {
+        let Some(palette) = snapshot.theme.as_ref() else {
             return Self {
                 glass: 0xFF1B202B,
                 surface: 0xFF1B202B,
@@ -796,16 +933,23 @@ fn draw_brand(canvas: &mut [u8], width: u32, height: u32, colors: PanelColors) {
     fill_rect(canvas, width, height, 54, 18, 2, 4, colors.text);
 }
 
-fn draw_workspaces(canvas: &mut [u8], width: u32, height: u32, colors: PanelColors) {
-    for index in 0..4 {
+fn draw_workspaces(
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    colors: PanelColors,
+    workspace_count: u32,
+    active_workspace: u32,
+) {
+    for index in 0..visible_workspace_count(width, workspace_count) {
         let x = 82 + index * 24;
-        let color = if index == 0 {
+        let color = if index == active_workspace {
             colors.primary
         } else {
             colors.muted
         };
         fill_rect(canvas, width, height, x, 14, 16, 12, color);
-        if index != 0 {
+        if index != active_workspace {
             fill_rect(canvas, width, height, x + 3, 17, 10, 6, colors.surface);
         }
     }

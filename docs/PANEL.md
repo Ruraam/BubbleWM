@@ -16,14 +16,13 @@ The first implementation lives in the bubblepanel/ workspace member. It is inten
 - Low-overhead clock refresh: the event loop polls Wayland with a one-second timeout and redraws only when the displayed minute changes.
 - Pointer enter/motion/leave tracking and left-click press/release handling. A click is confirmed only when press and release target the same panel action.
 - Pointer scroll detection for vertical, horizontal and diagonal movement. Direction is resolved from high-resolution, discrete or continuous axis data.
-- Workspace scroll intent: vertical scrolling over a workspace hit region identifies previous/next navigation; horizontal scrolling and scrolling over other modules are ignored. The panel still logs this intent and does not yet send it over IPC.
+- Workspace state and capabilities over Bubble IPC. The panel displays the active workspace, renders the configured number of indicators and activates a workspace when its indicator is clicked.
+- Workspace navigation over Bubble IPC. Vertical scrolling over the workspace region selects the previous or next workspace; horizontal scrolling and scrolling over other modules are ignored.
 - Bubble IPC client support for fetching the current BubbleThemeEngine palette. The panel uses the engine's glass tint, opacity, primary, surface, text and outline roles and polls every five seconds so wallpaper changes propagate without decoding images in the client.
 
 ### Explicitly not implemented yet
 
-- Actual workspace state or task-list integration.
-- Live workspace state and capability display. The panel currently requests only the shared theme palette; workspace commands remain unavailable until workspace management exists.
-- Actual workspace switching. BubbleWM currently returns unavailable for workspace commands because no workspace manager exists.
+- Task-list integration and real status modules.
 - Real network, audio, Bluetooth, battery or notification modules.
 - Multi-monitor surface management.
 - User-facing panel configuration.
@@ -31,9 +30,8 @@ The first implementation lives in the bubblepanel/ workspace member. It is inten
 
 ### Development order after the prototype
 
-1. Implement BubbleWM workspace state and connect the existing IPC commands to that authoritative state.
-2. Display live workspace and capability state in BubblePanel.
-3. Introduce typed panel configuration, configurable placement and per-output management.
-4. Add keyboard/popup interactions, module contracts and BubbleSettings integration.
+1. Add task-list and system-status modules.
+2. Introduce typed panel configuration, configurable placement and per-output management.
+3. Add keyboard/popup interactions, module contracts and BubbleSettings integration.
 
 The panel must remain an optional Wayland client. A missing panel or panel crash must never terminate BubbleWM or its clients.

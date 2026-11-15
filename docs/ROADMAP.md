@@ -42,9 +42,9 @@
 - [ ] Window title text, icons and accessibility refinements.
 - [ ] Tiling layout policy and virtual workspace foundations.
 - [ ] Floating layout policy and virtual workspace foundations.
-- [ ] Connect workspace IPC commands to authoritative workspace state.
+- [x] Connect workspace IPC commands to authoritative workspace state.
 - [x] Integrate BubblePanel's IPC client for the BubbleThemeEngine palette.
-- [ ] Integrate workspace state and navigation over IPC.
+- [x] Integrate workspace state and navigation over IPC.
 
 ## 0.4.0 — BubbleDecor
 - [ ] Server-side decoration negotiation.
@@ -79,7 +79,8 @@
 - [x] Layer-shell integration and capability detection on the client side.
 - [x] Three-zone layout, placeholder workspaces, pointer hit testing and clock.
 - [x] Consume and refresh BubbleThemeEngine colors over Bubble IPC.
-- [ ] Real workspace state, task list and system modules.
+- [x] Display live workspace state and handle click/scroll navigation over IPC.
+- [ ] Task list and system modules.
 - [ ] Multi-monitor support, profiles and validated configuration.
 - [ ] BubbleSettings integration and graceful degradation.
 
