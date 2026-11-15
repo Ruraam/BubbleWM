@@ -1,4 +1,4 @@
-//! PAM authentication for the built-in lock screen.
+//! PAM authentication primitives for BubbleWM's lock and login flows.
 
 use std::{
     ffi::{CStr, CString, c_char, c_int, c_void},
@@ -11,6 +11,7 @@ const PAM_PROMPT_ECHO_ON: c_int = 2;
 const PAM_ERROR_MSG: c_int = 3;
 const PAM_TEXT_INFO: c_int = 4;
 const PAM_CONV_ERR: c_int = 19;
+const LOGIN_PAM_SERVICE: &str = "bubblewm";
 
 #[repr(C)]
 struct PamMessage {
@@ -119,13 +120,33 @@ pub fn current_user() -> Option<String> {
 
 /// Authenticates the current user against a PAM service.
 pub fn authenticate(password: &str, service: &str) -> Result<(), String> {
+    let user = current_user().ok_or_else(|| "Utilisateur inconnu".to_owned())?;
+    authenticate_user(&user, password, service)
+}
+
+/// Authenticates a selected login account using BubbleWM's fixed PAM service.
+pub fn authenticate_login_user(user: &str, password: &str) -> Result<(), String> {
+    authenticate_user(user, password, LOGIN_PAM_SERVICE)
+}
+
+/// Authenticates a selected local account against a PAM service.
+///
+/// This checks authentication and account policy only. A login manager must
+/// still open and close the PAM session and establish the user's process
+/// credentials before it starts the desktop.
+pub fn authenticate_user(user: &str, password: &str, service: &str) -> Result<(), String> {
+    if user.is_empty() || user.len() > 256 || user.chars().any(char::is_control) {
+        return Err("Identifiant invalide".into());
+    }
     if password.is_empty() {
         return Err("Mot de passe vide".into());
     }
     if password.len() > 1024 {
         return Err("Mot de passe trop long".into());
     }
-    let user = current_user().ok_or_else(|| "Utilisateur inconnu".to_owned())?;
+    if service.is_empty() || service.len() > 128 {
+        return Err("Service PAM invalide".into());
+    }
     let user_c = CString::new(user).map_err(|_| "Identifiant invalide".to_owned())?;
     let service_c = CString::new(service).map_err(|_| "Service PAM invalide".to_owned())?;
     let password_c = CString::new(password).map_err(|_| "Mot de passe invalide".to_owned())?;
