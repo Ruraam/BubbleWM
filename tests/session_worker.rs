@@ -33,10 +33,9 @@ fn worker_handshakes_and_exits_after_supervisor_closes_channel() {
         }
     }
 
+    let exit_status = std::process::ExitStatus::from_raw(status);
     assert!(
-        libc::WIFEXITED(status),
-        "worker terminated by signal {:?}",
-        ExitStatusExt::from_raw(status)
+        exit_status.success(),
+        "worker did not exit successfully: {exit_status:?}"
     );
-    assert_eq!(libc::WEXITSTATUS(status), 0);
 }
