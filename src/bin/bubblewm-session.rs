@@ -81,10 +81,14 @@ fn validate_vt(tty: &str) -> Result<(), String> {
 
 fn read_password<R: Read>(reader: R) -> Result<String, String> {
     let mut bytes = Vec::new();
-    reader
+    if reader
         .take((MAX_PASSWORD_BYTES + 3) as u64)
         .read_to_end(&mut bytes)
-        .map_err(|_| "impossible de lire le secret depuis stdin".to_owned())?;
+        .is_err()
+    {
+        wipe_bytes(&mut bytes);
+        return Err("impossible de lire le secret depuis stdin".into());
+    }
 
     if bytes.len() > MAX_PASSWORD_BYTES + 2 {
         wipe_bytes(&mut bytes);
