@@ -324,10 +324,7 @@ impl WorkerProcess {
     }
 
     /// Requests graceful termination, then force-kills and reaps after `grace`.
-    pub fn terminate_and_reap(
-        &mut self,
-        grace: Duration,
-    ) -> io::Result<std::process::ExitStatus> {
+    pub fn terminate_and_reap(&mut self, grace: Duration) -> io::Result<std::process::ExitStatus> {
         if self.reaped {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
