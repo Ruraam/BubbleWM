@@ -14,6 +14,20 @@ const MAX_PAYLOAD: usize = 4_240;
 const MAX_SESSION_ID: usize = 64;
 const MAX_RUNTIME_DIR: usize = 4_096;
 const MAX_SEAT: usize = 64;
+const WORKER_HELLO: &[u8; 8] = b"BUBWORK1";
+
+/// Waits for the fixed bootstrap marker sent by a freshly started worker.
+///
+/// This is intentionally a narrow, exact handshake. No session metadata or
+/// credentials are accepted until a later reviewed protocol stage.
+pub fn read_worker_hello<R: Read>(reader: &mut R) -> io::Result<()> {
+    let mut hello = [0_u8; WORKER_HELLO.len()];
+    reader.read_exact(&mut hello)?;
+    if hello != *WORKER_HELLO {
+        return Err(invalid_data("invalid BubbleWM session worker handshake"));
+    }
+    Ok(())
+}
 
 /// Non-secret metadata reported by a worker after PAM has opened the session.
 ///
@@ -390,6 +404,30 @@ mod tests {
             seat: Some("seat0".into()),
             vt_number: Some(2),
         }
+    }
+
+    #[test]
+    fn worker_hello_accepts_exact_bootstrap_marker() {
+        let mut bytes = Cursor::new(WORKER_HELLO);
+        read_worker_hello(&mut bytes).unwrap();
+    }
+
+    #[test]
+    fn worker_hello_rejects_wrong_marker() {
+        let mut bytes = Cursor::new(*b"BUBWORKX");
+        assert_eq!(
+            read_worker_hello(&mut bytes).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn worker_hello_rejects_truncated_marker() {
+        let mut bytes = Cursor::new(&WORKER_HELLO[..7]);
+        assert_eq!(
+            read_worker_hello(&mut bytes).unwrap_err().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
     }
 
     #[test]
