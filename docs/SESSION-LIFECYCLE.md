@@ -3,9 +3,10 @@
 ## Status
 
 Design note for the production login/session supervisor. The current
-`bubblewm-session` binary is still a root-only prototype helper. It does not
-yet implement the supervisor/worker split or systemd unit cleanup described
-here.
+`bubblewm-session` binary is still a root-only prototype helper. The bounded
+metadata protocol in `src/session_control.rs` is implemented and unit-tested,
+but worker spawning, PAM integration, supervisor ownership and systemd unit
+cleanup are not yet wired together.
 
 ## Ownership boundaries
 
@@ -71,13 +72,17 @@ The production design must keep the supervisor outside the user session scope:
 
 1. The root supervisor starts a dedicated worker and creates a private,
    close-on-exec control channel.
-2. The worker opens PAM. After `pam_open_session` succeeds, it reports only
-   non-secret session metadata to the supervisor: the opaque
-   `XDG_SESSION_ID`, the logind session object/scope identity, and the
-   validated runtime/seat/VT metadata. Passwords never cross this channel.
-3. The supervisor resolves and retains the systemd scope unit name while the
-   logind session object is present. It validates that the unit is a session
-   scope associated with the expected UID and session.
+2. The worker opens PAM. After `pam_open_session` succeeds, it sends one
+   versioned `SessionReady` frame over the private control stream. The bounded
+   frame contains only the numeric UID, opaque `XDG_SESSION_ID`, validated
+   `XDG_RUNTIME_DIR`, optional seat name and optional VT number. The protocol
+   has no password, command, object-path or systemd-unit field. Passwords
+   never cross this channel.
+3. The supervisor resolves the logind session object and systemd scope from
+   the received session ID using the system bus. It retains the unit name while
+   the logind session object is present and validates that the unit is a
+   session scope associated with the expected UID and session. The worker must
+   never supply a unit name or object path for the supervisor to trust.
 4. The worker starts the fixed compositor as the authenticated user, waits for
    it, performs process-group cleanup, closes PAM, and exits. Startup failure
    follows the same cleanup path.
