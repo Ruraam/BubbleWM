@@ -4,7 +4,7 @@
 //! arbitrary command, or systemd unit-name field.
 
 use std::io::{self, Cursor, Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::path::{Component, Path};
 
@@ -87,7 +87,7 @@ fn take_worker_channel_from_fd(fd: RawFd) -> io::Result<UnixStream> {
         )
     } < 0
     {
-        return Err(io::Error::last_os_error());
+        return Err(invalid_input("worker control descriptor is not a Unix stream socket"));
     }
 
     let mut socket_type: libc::c_int = 0;
@@ -102,7 +102,7 @@ fn take_worker_channel_from_fd(fd: RawFd) -> io::Result<UnixStream> {
         )
     } < 0
     {
-        return Err(io::Error::last_os_error());
+        return Err(invalid_input("worker control descriptor is not a Unix stream socket"));
     }
     if domain != libc::AF_UNIX || socket_type != libc::SOCK_STREAM {
         return Err(invalid_input(
@@ -120,7 +120,7 @@ fn take_worker_channel_from_fd(fd: RawFd) -> io::Result<UnixStream> {
         )
     } < 0
     {
-        return Err(io::Error::last_os_error());
+        return Err(invalid_input("worker control socket is not connected to a peer"));
     }
 
     if unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) } < 0 {
@@ -374,6 +374,7 @@ fn invalid_data(message: &'static str) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::fd::IntoRawFd;
 
     fn sample() -> SessionReady {
         SessionReady {
@@ -499,7 +500,7 @@ mod tests {
 
     #[test]
     fn reader_rejects_bad_magic_and_oversized_frame() {
-        let mut bad_magic = [0_u8; HEADER_LEN];
+        let bad_magic = [0_u8; HEADER_LEN];
         assert_eq!(
             read_session_ready(&mut bad_magic.as_slice())
                 .unwrap_err()
