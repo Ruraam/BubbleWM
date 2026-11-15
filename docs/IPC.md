@@ -1,6 +1,6 @@
 # BubbleWM IPC lifecycle
 
-The Linux socket transport is implemented by bubble-ipc::unix. BubbleWM's application-side bridge is exposed by bubblewm::ipc and is now owned by the Winit compositor lifecycle.
+The Linux socket transport is implemented by bubble-ipc::unix. BubbleWM's application-side bridge is exposed by bubblewm::ipc and is owned by both the Winit and native DRM compositor lifecycles.
 
 ## Thread ownership
 
@@ -13,11 +13,11 @@ The IPC worker waits up to two seconds for a response. Queue saturation, a stopp
 ## Current lifecycle
 
 1. BubbleWM loads and validates its configuration.
-2. It creates the Wayland display, core compositor, shm, seat and xdg-shell state, then advertises the single Winit-backed wl_output.
-3. It binds a Wayland listening socket and initializes the Winit/EGL backend.
+2. It creates the Wayland display and backend-independent compositor state.
+3. It selects either the nested Winit/EGL backend or the native DRM/KMS backend. Both publish a Wayland output; the current DRM path supports one connected output and handles libseat pause/resume.
 4. It starts IpcRuntime::start_default() and retains the runtime owner for the compositor lifetime.
-5. Each Winit event-loop iteration calls CoreCommandReceiver::dispatch_pending on the compositor thread.
-6. Closing the Winit window ends the loop; BubbleWM calls IpcRuntime::shutdown() before returning. Dropping the runtime also requests shutdown and joins its worker as a fallback.
+5. The selected backend's event loop calls CoreCommandReceiver::dispatch_pending on the compositor thread.
+6. Closing the Winit window, requesting shutdown, or leaving the DRM loop ends the compositor; BubbleWM shuts down IpcRuntime before returning. Dropping the runtime also requests shutdown and joins its worker as a fallback.
 
 The event-loop handler must remain quick and must not perform blocking I/O. It must validate workspace indices and feature availability against authoritative compositor state before returning success.
 
@@ -36,7 +36,7 @@ Workspace commands validate target indices and remap visible windows on the comp
 
 ## Current implementation boundary
 
-The compositor is still an early nested prototype. It advertises wl_compositor, wl_shm, wl_seat, xdg-shell, xdg-decoration and one wl_output, accepts clients and renders mapped xdg toplevel windows through a Smithay Space. Its current window manager tracks toplevel map/unmap/remap/destruction, supports XDG interactive move/resize using validated pointer grabs, preserves floating geometry across maximize/unmaximize, tracks transient toplevel relationships, supports minimizing/restoring whole transient families and manages XDG popup placement, repositioning and grabs. A prototype server-side titlebar is available to clients negotiating XDG decorations.
+The compositor is still an early prototype: the nested Winit path is for development, while the native DRM path currently targets a single connected output. Both advertise wl_compositor, wl_shm, wl_seat, xdg-shell, xdg-decoration and wl_output, accept clients and render mapped xdg toplevel windows through a Smithay Space. The window manager tracks toplevel map/unmap/remap/destruction, supports XDG interactive move/resize using validated pointer grabs, preserves floating geometry across maximize/unmaximize, tracks transient toplevel relationships, supports minimizing/restoring whole transient families and manages XDG popup placement, repositioning and grabs. A prototype server-side titlebar is available to clients negotiating XDG decorations.
 
 Protocol v1 provides capability discovery, theme-palette, system-status, window-list and Wi-Fi network-list reads, plus workspace, window focus, network connection and audio controls. The compositor does not yet implement output-management protocols or multiple outputs, pointer cursor rendering, touch, polished/title-bearing decorations or tiling.
 
