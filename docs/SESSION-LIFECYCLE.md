@@ -4,8 +4,9 @@
 
 Design note for the production login/session supervisor. The current
 `bubblewm-session` binary is still a root-only prototype helper. The bounded
-metadata protocol in `src/session_control.rs` is implemented and unit-tested,
-but worker spawning, PAM integration, supervisor ownership and systemd unit
+metadata protocol and the low-level `posix_spawn` descriptor handoff primitives
+in `src/session_control.rs` are implemented and unit-tested. The dedicated
+worker executable, PAM integration, supervisor ownership and systemd unit
 cleanup are not yet wired together.
 
 ## Ownership boundaries
@@ -72,9 +73,15 @@ The production design must keep the supervisor outside the user session scope:
 
 1. The root supervisor creates a connected Unix socket pair with
    `FD_CLOEXEC` enforced on both endpoints, keeps one endpoint private, and
-   starts a dedicated worker with the other endpoint through an explicit
-   descriptor-inheritance step. The channel has no filesystem pathname and is
-   never exposed through argv or environment variables.
+   starts a dedicated worker with the other endpoint through
+   `spawn_worker_with_channel`. The worker receives the socket on fixed
+   descriptor 3, without advertising the descriptor in argv or environment
+   variables. At process startup, before creating threads, it must call
+   `take_worker_channel`; that validates a connected Unix stream socket and
+   sets `FD_CLOEXEC` again to prevent the channel leaking into later execs.
+   The spawn primitive uses an empty environment and does not yet enforce a
+   general close-all-unrelated-descriptors policy, so the production
+   supervisor must retain a strict descriptor hygiene policy.
 2. The worker opens PAM. After `pam_open_session` succeeds, it sends one
    versioned `SessionReady` frame over the private control stream. The bounded
    frame contains only the numeric UID, opaque `XDG_SESSION_ID`, validated
