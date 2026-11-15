@@ -419,19 +419,17 @@ mod tests {
     #[test]
     fn worker_channel_take_closes_invalid_descriptors() {
         let mut pipe_fds = [-1; 2];
-        assert_eq!(unsafe { libc::pipe2(pipe_fds.as_mut_ptr(), libc::O_CLOEXEC) }, 0);
+        assert_eq!(
+            unsafe { libc::pipe2(pipe_fds.as_mut_ptr(), libc::O_CLOEXEC) },
+            0
+        );
         let error = take_worker_channel_from_fd(pipe_fds[0]).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         assert_eq!(unsafe { libc::fcntl(pipe_fds[0], libc::F_GETFD) }, -1);
         unsafe { libc::close(pipe_fds[1]) };
 
-        let socket = unsafe {
-            libc::socket(
-                libc::AF_UNIX,
-                libc::SOCK_STREAM | libc::SOCK_CLOEXEC,
-                0,
-            )
-        };
+        let socket =
+            unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
         assert!(socket >= 0);
         assert!(take_worker_channel_from_fd(socket).is_err());
         assert_eq!(unsafe { libc::fcntl(socket, libc::F_GETFD) }, -1);
