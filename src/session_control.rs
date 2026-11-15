@@ -648,6 +648,75 @@ mod tests {
     }
 
     #[test]
+    fn worker_terminate_and_reap_allows_graceful_sigterm_exit() {
+        use std::io::Read;
+
+        let (mut supervisor, worker_channel) = private_channel_pair().unwrap();
+        let mut worker = spawn_worker_with_channel(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from(
+                    "trap 'exit 0' TERM; printf ready >&3; while :; do :; done",
+                ),
+            ],
+            worker_channel,
+        )
+        .unwrap();
+
+        let mut ready = [0_u8; 5];
+        supervisor.read_exact(&mut ready).unwrap();
+        assert_eq!(&ready, b"ready");
+
+        let status = worker
+            .terminate_and_reap(Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(status.code(), Some(0));
+        assert!(worker.try_wait().is_err());
+    }
+
+    #[test]
+    fn worker_terminate_and_reap_escalates_to_sigkill() {
+        use std::io::Read;
+
+        let (mut supervisor, worker_channel) = private_channel_pair().unwrap();
+        let mut worker = spawn_worker_with_channel(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from("trap '' TERM; printf ready >&3; exec /bin/sleep 30"),
+            ],
+            worker_channel,
+        )
+        .unwrap();
+
+        let mut ready = [0_u8; 5];
+        supervisor.read_exact(&mut ready).unwrap();
+        assert_eq!(&ready, b"ready");
+
+        let status = worker
+            .terminate_and_reap(Duration::from_millis(30))
+            .unwrap();
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
+        assert!(worker.wait().is_err());
+    }
+
+    #[test]
+    fn worker_wait_timeout_returns_none_while_process_is_running() {
+        let (_supervisor, worker_channel) = private_channel_pair().unwrap();
+        let mut worker = spawn_worker_with_channel(
+            std::ffi::OsStr::new("/bin/sleep"),
+            &[std::ffi::OsString::from("30")],
+            worker_channel,
+        )
+        .unwrap();
+
+        assert!(worker.wait_timeout(Duration::from_millis(20)).unwrap().is_none());
+        let status = worker.terminate_and_reap(Duration::from_millis(20)).unwrap();
+        assert_eq!(status.signal(), Some(libc::SIGTERM));
+    }
+
+    #[test]
     fn session_ready_round_trips_over_a_stream() {
         let expected = sample();
         let mut frame = Vec::new();
