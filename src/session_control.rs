@@ -99,7 +99,9 @@ fn take_worker_channel_from_fd(fd: RawFd) -> io::Result<UnixStream> {
         return Err(io::Error::last_os_error());
     }
     if domain != libc::AF_UNIX || socket_type != libc::SOCK_STREAM {
-        return Err(invalid_input("worker control descriptor is not a Unix stream socket"));
+        return Err(invalid_input(
+            "worker control descriptor is not a Unix stream socket",
+        ));
     }
 
     let mut peer: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
