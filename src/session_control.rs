@@ -4,7 +4,7 @@
 //! arbitrary command, or systemd unit-name field.
 
 use std::io::{self, Cursor, Read, Write};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::path::{Component, Path};
 
@@ -52,6 +52,77 @@ fn set_close_on_exec(stream: &UnixStream) -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+/// Takes ownership of the worker control socket inherited on descriptor 3.
+///
+/// Call this at the very beginning of the single-threaded worker, before
+/// starting threads or executing other programs. The descriptor is marked
+/// close-on-exec again immediately so it cannot leak into the desktop session.
+pub fn take_worker_channel() -> io::Result<UnixStream> {
+    take_worker_channel_from_fd(3)
+}
+
+fn take_worker_channel_from_fd(fd: RawFd) -> io::Result<UnixStream> {
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    if flags < 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let mut domain: libc::c_int = 0;
+    let mut domain_len = std::mem::size_of_val(&domain) as libc::socklen_t;
+    let domain_result = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_DOMAIN,
+            &mut domain as *mut _ as *mut libc::c_void,
+            &mut domain_len,
+        )
+    };
+    if domain_result < 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let mut socket_type: libc::c_int = 0;
+    let mut type_len = std::mem::size_of_val(&socket_type) as libc::socklen_t;
+    let type_result = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_TYPE,
+            &mut socket_type as *mut _ as *mut libc::c_void,
+            &mut type_len,
+        )
+    };
+    if type_result < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if domain != libc::AF_UNIX || socket_type != libc::SOCK_STREAM {
+        return Err(invalid_input("worker control descriptor is not a Unix stream socket"));
+    }
+
+    let mut peer: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+    let mut peer_len = std::mem::size_of_val(&peer) as libc::socklen_t;
+    if unsafe {
+        libc::getpeername(
+            fd,
+            &mut peer as *mut _ as *mut libc::sockaddr,
+            &mut peer_len,
+        )
+    } < 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+
+    if unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    // SAFETY: the descriptor has been verified as a connected AF_UNIX
+    // SOCK_STREAM socket. Ownership is transferred exactly once here.
+    let owned_fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) };
+    Ok(UnixStream::from(owned_fd))
 }
 
 /// Spawns a trusted absolute-path worker and maps its private channel to fd 3.
@@ -322,6 +393,22 @@ mod tests {
             assert!(flags >= 0);
             assert_ne!(flags & libc::FD_CLOEXEC, 0);
         }
+    }
+
+    #[test]
+    fn worker_channel_take_owns_connected_unix_stream_and_sets_cloexec() {
+        let (mut supervisor, worker) = private_channel_pair().unwrap();
+        let raw_fd = worker.into_raw_fd();
+        let mut worker = take_worker_channel_from_fd(raw_fd).unwrap();
+
+        let flags = unsafe { libc::fcntl(worker.as_raw_fd(), libc::F_GETFD) };
+        assert!(flags >= 0);
+        assert_ne!(flags & libc::FD_CLOEXEC, 0);
+
+        supervisor.write_all(b"ready").unwrap();
+        let mut bytes = [0_u8; 5];
+        worker.read_exact(&mut bytes).unwrap();
+        assert_eq!(&bytes, b"ready");
     }
 
     #[test]
