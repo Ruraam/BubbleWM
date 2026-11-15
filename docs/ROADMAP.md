@@ -98,5 +98,17 @@
 - [ ] Multi-output and per-monitor settings.
 - [ ] Robustness, accessibility and performance testing.
 
-## 1.0.0 — BubbleOS integration
-- [ ] Packaging, session integration, documentation and release hardening.
+## 0.11.0 — Wayland login and session manager
+- [ ] Add a production greeter and a system-facing BubbleWM session-supervisor entry point.
+- [ ] Authenticate local users through PAM and enforce account/session policy.
+- [ ] Start the selected user's PAM/logind session and hand off the VT/seat through logind or libseat.
+- [ ] Run the compositor and desktop as the selected user, with a correct `XDG_RUNTIME_DIR` and user-manager environment; never run desktop clients as root.
+- [ ] Track the full session process tree and handle logout, startup failure, compositor crash, user switching and greeter recovery.
+- [ ] Add shutdown/reboot actions and safe cleanup of session resources, device access and VT ownership.
+- [ ] Keep the managed login and desktop session Wayland-only; do not add Xorg session entries. Optional XWayland is limited to legacy clients inside Wayland.
+- [ ] Add security review and virtual-machine coverage for successful/failed login and each session termination path.
+
+## 1.0.0 — Distribution integration
+- [ ] Package BubbleWM as the Wayland-only graphical login/session manager and compositor for BubbleOS, replacing greetd/tuigreet and Wayfire.
+- [ ] Document integration with other distributions as a replacement for LightDM or their existing display manager.
+- [ ] Provide install, upgrade, recovery and disable paths, then complete release hardening.
