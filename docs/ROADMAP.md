@@ -100,8 +100,10 @@
 - [ ] Hardware validation, robustness, accessibility and performance review.
 
 ## 0.11.0 — Wayland login and session manager
+- [x] Add a fixed-service PAM authentication/account-check helper for an explicitly selected login account.
 - [ ] Add a production greeter and a system-facing BubbleWM session-supervisor entry point.
-- [ ] Authenticate local users through PAM and enforce account/session policy.
+- [ ] Package the `bubblewm` PAM service and connect greeter login to the helper and account/session policy.
+- [ ] Open and close a PAM session and manage PAM credentials for the full desktop process lifetime.
 - [ ] Start the selected user's PAM/logind session and hand off the VT/seat through logind or libseat.
 - [ ] Run the compositor and desktop as the selected user, with a correct `XDG_RUNTIME_DIR` and user-manager environment; never run desktop clients as root.
 - [ ] Track the full session process tree and handle logout, startup failure, compositor crash, user switching and greeter recovery.
