@@ -106,6 +106,8 @@
 - [x] Add a managed process handle that signals a dedicated session process group and reaps the direct session leader.
 - [x] Compose PAM open/close, command execution and process-group cleanup into a one-login helper flow.
 - [x] Add a root-only `bubblewm-session` entry point with bounded stdin password input, VT validation and a fixed compositor/configuration target.
+- [x] Define and test a versioned, bounded worker-to-supervisor metadata frame with no password, command, D-Bus object path or systemd unit field.
+- [ ] Wire a private close-on-exec control socket into the worker lifecycle and validate the reported session against logind.
 - [ ] Add a production greeter and a system-facing BubbleWM session supervisor that securely invokes the helper.
 - [ ] Install a distro-reviewed `bubblewm` PAM service (a Debian-compatible profile is available) and connect greeter login to the helper and account/session policy.
 - [ ] Start the selected user's PAM/logind session through a reviewed stack with `pam_systemd` exactly once; validate the session scope, `XDG_RUNTIME_DIR`, seat and VT metadata before starting the compositor.
