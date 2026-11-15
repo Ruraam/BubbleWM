@@ -3,7 +3,7 @@
 //! The protocol carries session metadata only. It has no password, credential,
 //! arbitrary command, or systemd unit-name field.
 
-use std::io::{self, Read, Write, Cursor};
+use std::io::{self, Cursor, Read, Write};
 use std::path::{Component, Path};
 
 const MAGIC: &[u8; 8] = b"BUBSESS1";
@@ -59,7 +59,7 @@ pub fn read_session_ready<R: Read>(reader: &mut R) -> io::Result<SessionReady> {
     }
 
     let payload_len = u32::from_be_bytes(header[8..12].try_into().expect("fixed header")) as usize;
-    if !(10..=MAX_PAYLOAD).contains(&payload_len) {
+    if !(14..=MAX_PAYLOAD).contains(&payload_len) {
         return Err(invalid_data("invalid session control frame length"));
     }
 
@@ -82,7 +82,11 @@ pub fn read_session_ready<R: Read>(reader: &mut R) -> io::Result<SessionReady> {
         session_id,
         runtime_dir,
         seat: if seat.is_empty() { None } else { Some(seat) },
-        vt_number: if vt_number == 0 { None } else { Some(vt_number) },
+        vt_number: if vt_number == 0 {
+            None
+        } else {
+            Some(vt_number)
+        },
     };
     validate(&ready)?;
     Ok(ready)
@@ -105,7 +109,9 @@ fn validate(ready: &SessionReady) -> io::Result<()> {
     let runtime = Path::new(&ready.runtime_dir);
     if ready.runtime_dir.len() > MAX_RUNTIME_DIR
         || !runtime.is_absolute()
-        || runtime.components().any(|part| matches!(part, Component::ParentDir))
+        || runtime
+            .components()
+            .any(|part| matches!(part, Component::ParentDir))
         || ready.runtime_dir.chars().any(char::is_control)
     {
         return Err(invalid_input("invalid XDG_RUNTIME_DIR metadata"));
@@ -130,7 +136,8 @@ fn validate(ready: &SessionReady) -> io::Result<()> {
 }
 
 fn put_string(output: &mut Vec<u8>, value: &str) -> io::Result<()> {
-    let length = u16::try_from(value.len()).map_err(|_| invalid_input("metadata field too long"))?;
+    let length =
+        u16::try_from(value.len()).map_err(|_| invalid_input("metadata field too long"))?;
     output.extend_from_slice(&length.to_be_bytes());
     output.extend_from_slice(value.as_bytes());
     Ok(())
@@ -200,7 +207,9 @@ mod tests {
         let mut invalid = sample();
         invalid.uid = 0;
         assert_eq!(
-            write_session_ready(&mut Vec::new(), &invalid).unwrap_err().kind(),
+            write_session_ready(&mut Vec::new(), &invalid)
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::InvalidInput
         );
 
@@ -217,14 +226,18 @@ mod tests {
     fn reader_rejects_bad_magic_and_oversized_frame() {
         let mut bad_magic = [0_u8; HEADER_LEN];
         assert_eq!(
-            read_session_ready(&mut bad_magic.as_slice()).unwrap_err().kind(),
+            read_session_ready(&mut bad_magic.as_slice())
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::InvalidData
         );
 
         let mut oversized = Vec::from(*MAGIC);
         oversized.extend_from_slice(&((MAX_PAYLOAD as u32) + 1).to_be_bytes());
         assert_eq!(
-            read_session_ready(&mut oversized.as_slice()).unwrap_err().kind(),
+            read_session_ready(&mut oversized.as_slice())
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::InvalidData
         );
     }
@@ -235,7 +248,9 @@ mod tests {
         write_session_ready(&mut frame, &sample()).unwrap();
         frame.pop();
         assert_eq!(
-            read_session_ready(&mut frame.as_slice()).unwrap_err().kind(),
+            read_session_ready(&mut frame.as_slice())
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::UnexpectedEof
         );
     }
