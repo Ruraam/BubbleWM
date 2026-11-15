@@ -222,7 +222,7 @@ impl LockScreen {
         canvas.stroke_round_rect(x, y, card_width, card_height, 24, 1, border);
         canvas.fill_round_rect(x + card_width / 2 - 56, y + 1, 112, 2, 1, accent);
 
-        // HUD corner brackets around the login card.
+        // HUD corner brackets around the lock card.
         let bracket = 18;
         let inset = 10;
         for (corner_x, corner_y, dx, dy) in [
