@@ -3,11 +3,15 @@
 ## Status
 
 Design note for the production login/session supervisor. The current
-`bubblewm-session` binary is still a root-only prototype helper. The bounded
-metadata protocol and the low-level `posix_spawn` descriptor handoff primitives
-in `src/session_control.rs` are implemented and unit-tested. The dedicated
-worker executable, PAM integration, supervisor ownership and systemd unit
-cleanup are not yet wired together.
+`bubblewm-session` binary is still a root-only prototype helper. A dedicated
+`bubblewm-session-worker` bootstrap executable now takes ownership of fd 3
+immediately, validates the private Unix stream, sends the fixed `BUBWORK1`
+bootstrap marker, and remains alive until the supervisor closes the channel.
+This is only a transport/bootstrap milestone: it does not authenticate, open
+PAM, launch the compositor, or implement a production shutdown protocol. The
+bounded metadata protocol and low-level `posix_spawn` handoff primitives are
+implemented and unit-tested; supervisor ownership and systemd unit cleanup
+are not yet wired together.
 
 ## Ownership boundaries
 
