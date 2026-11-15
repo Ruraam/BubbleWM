@@ -11,7 +11,7 @@ The initial executable:
 - Creates a top-layer surface anchored to the bottom edge.
 - Reserves a 40-pixel exclusive zone.
 - Draws a compact three-zone prototype using shared-memory buffers.
-- Shows live workspace indicators, status placeholders and a local-time seven-segment clock when BubbleWM IPC is available.
+- Shows live workspace and Wi-Fi/audio indicators plus a local-time seven-segment clock when BubbleWM IPC is available.
 - Refreshes the clock when the displayed minute changes.
 - Tracks pointer hover and left-click press/release targets.
 - Activates a workspace when its indicator is clicked and sends vertical workspace navigation requests over IPC.

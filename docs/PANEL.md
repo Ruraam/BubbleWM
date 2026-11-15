@@ -11,7 +11,7 @@ The first implementation lives in the bubblepanel/ workspace member. It is inten
 - wlr-layer-shell top-layer surface anchored to the bottom edge.
 - A 40-pixel exclusive zone.
 - Software drawing through wl_shm and an SCTK SlotPool.
-- Three visual zones: BubbleOS mark and workspace placeholders on the left, reserved center area, and status placeholders plus local-time digits on the right.
+- Three visual zones: BubbleOS mark and workspace indicators on the left, reserved center area, and Wi-Fi/audio indicators plus local-time digits on the right.
 - Graceful error messages when Wayland, shared memory or layer-shell support is unavailable.
 - Low-overhead clock refresh: the event loop polls Wayland with a one-second timeout and redraws only when the displayed minute changes.
 - Pointer enter/motion/leave tracking and left-click press/release handling. A click is confirmed only when press and release target the same panel action.
@@ -24,10 +24,9 @@ The first implementation lives in the bubblepanel/ workspace member. It is inten
 ### Explicitly not implemented yet
 
 - Task-list integration and richer interactive status modules.
-- Real network, audio, Bluetooth, battery or notification modules.
+- Bluetooth, battery, notification and media modules.
 - Multi-monitor surface management.
 - User-facing panel configuration.
-- Bluetooth, battery, notification and media indicators.
 - Blur and GPU rendering. The panel's themed background can be translucent when its compositor supports alpha blending.
 
 ### Development order after the prototype
