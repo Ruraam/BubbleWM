@@ -8,7 +8,7 @@ use std::path::{Component, Path};
 
 const MAGIC: &[u8; 8] = b"BUBSESS1";
 const HEADER_LEN: usize = 12;
-const MAX_PAYLOAD: usize = 4_200;
+const MAX_PAYLOAD: usize = 4_240;
 const MAX_SESSION_ID: usize = 64;
 const MAX_RUNTIME_DIR: usize = 4_096;
 const MAX_SEAT: usize = 64;
