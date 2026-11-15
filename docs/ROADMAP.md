@@ -105,7 +105,8 @@
 - [x] Add a trusted-command launcher that drops to the selected user and passes a filtered Wayland session environment.
 - [x] Add a managed process handle that signals a dedicated session process group and reaps the direct session leader.
 - [x] Compose PAM open/close, command execution and process-group cleanup into a one-login helper flow.
-- [ ] Add a production greeter and a system-facing BubbleWM session-supervisor entry point.
+- [x] Add a root-only `bubblewm-session` entry point with bounded stdin password input, VT validation and a fixed compositor/configuration target.
+- [ ] Add a production greeter and a system-facing BubbleWM session supervisor that securely invokes the helper.
 - [ ] Install a distro-reviewed `bubblewm` PAM service (a Debian-compatible profile is available) and connect greeter login to the helper and account/session policy.
 - [ ] Start the selected user's PAM/logind session and hand off the VT/seat through logind or libseat.
 - [ ] Run the compositor and desktop as the selected user, with a correct `XDG_RUNTIME_DIR` and user-manager environment; never run desktop clients as root.
