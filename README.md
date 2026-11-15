@@ -85,7 +85,7 @@ cargo run -p bubblepanel
 
 BubblePanel requires a compositor that supports `wlr-layer-shell`; live theme colors, workspace/window control and system-status modules require BubbleWM's local IPC endpoint. Bluetooth, battery and notification indicators remain future work.
 
-See [bubblepanel/README.md](bubblepanel/README.md) and [docs/PANEL.md](docs/PANEL.md).
+See [bubblepanel/README.md](bubblepanel/README.md), [docs/PANEL.md](docs/PANEL.md) and [docs/SESSION-LIFECYCLE.md](docs/SESSION-LIFECYCLE.md) for the planned PAM/logind/cgroup lifecycle.
 
 ## Requirements
 
