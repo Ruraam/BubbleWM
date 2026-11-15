@@ -20,10 +20,11 @@ The first implementation lives in the bubblepanel/ workspace member. It is inten
 - Workspace navigation over Bubble IPC. Vertical scrolling over the workspace region selects the previous or next workspace; horizontal scrolling and scrolling over other modules are ignored.
 - Bubble IPC client support for fetching the current BubbleThemeEngine palette. The panel uses the engine's glass tint, opacity, primary, surface, text and outline roles and polls every five seconds so wallpaper changes propagate without decoding images in the client.
 - Compact Wi-Fi signal and audio volume/mute indicators from BubbleWM's status snapshot. These indicators update with the existing five-second IPC poll and show a muted style when the data is unavailable or disabled.
+- A live task list for up to six windows, showing titles and highlighting the active window. Clicking a task asks BubbleWM to restore/focus it and switch workspaces when needed.
 
 ### Explicitly not implemented yet
 
-- Task-list integration and richer interactive status modules.
+- Richer task-list presentation and interactive status modules.
 - Bluetooth, battery, notification and media modules.
 - Multi-monitor surface management.
 - User-facing panel configuration.
@@ -31,7 +32,7 @@ The first implementation lives in the bubblepanel/ workspace member. It is inten
 
 ### Development order after the prototype
 
-1. Add task-list integration and richer interactive system-status modules.
+1. Add richer task-list presentation and interactive system-status modules.
 2. Introduce typed panel configuration, configurable placement and per-output management.
 3. Add keyboard/popup interactions, module contracts and BubbleSettings integration.
 

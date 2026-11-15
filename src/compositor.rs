@@ -19,6 +19,7 @@ use std::{
 use anyhow::{Context, Result, anyhow};
 use bubble_ipc::{
     ErrorCode, ErrorResponse, Request, Response, ResponseData, SystemStatus, ThemePalette,
+    WindowSummary,
 };
 use smithay::{
     backend::input::{
@@ -2551,6 +2552,35 @@ impl CompositorStateData {
             .map(|window| self.window_title(window))
     }
 
+    fn window_list_snapshot(&self) -> Vec<WindowSummary> {
+        let focused = self
+            .space
+            .elements()
+            .last()
+            .and_then(|window| self.windows.iter().find(|entry| entry.window == *window))
+            .map(|entry| entry.id);
+        let mut entries = self.windows.iter().collect::<Vec<_>>();
+        entries.sort_by_key(|entry| {
+            if Some(entry.id) == focused {
+                0
+            } else if entry.workspace == self.active_workspace && !entry.minimized {
+                1
+            } else {
+                2
+            }
+        });
+        entries
+            .into_iter()
+            .map(|entry| WindowSummary {
+                id: entry.id,
+                title: self.window_title(&entry.window),
+                workspace: entry.workspace,
+                minimized: entry.minimized,
+                active: Some(entry.id) == focused,
+            })
+            .collect()
+    }
+
     /// Stable, top-to-bottom list of every managed window.
     fn window_summaries(&self) -> Vec<PopupItem> {
         let mut ordered = Vec::new();
@@ -4256,8 +4286,8 @@ fn run_winit(config: Config, config_path: Option<PathBuf>) -> Result<()> {
 impl CompositorStateData {
     /// Dispatches a control request on the compositor thread.
     ///
-    /// Workspace actions mutate live state; the remaining requests are
-    /// stateless snapshots handled by [`handle_ipc_request`].
+    /// Workspace and focus actions mutate live state; the remaining requests
+    /// are stateless snapshots handled by [`handle_ipc_request`].
     pub(crate) fn handle_ipc_request(&mut self, request: Request) -> Response {
         let workspace_response = |active: u32, count: u32| Response::Success {
             data: ResponseData::WorkspaceState { active, count },
@@ -4302,6 +4332,17 @@ impl CompositorStateData {
                     },
                 }
             }
+            Request::GetWindowList => Response::Success {
+                data: ResponseData::WindowList {
+                    windows: self.window_list_snapshot(),
+                },
+            },
+            Request::FocusWindow { id } => {
+                self.focus_window_by_id(id);
+                Response::Success {
+                    data: ResponseData::Acknowledged,
+                }
+            }
             other => handle_ipc_request(
                 other,
                 self.theme_palette(),
@@ -4339,6 +4380,8 @@ pub(crate) fn handle_ipc_request(
         Request::WorkspacePrevious
         | Request::WorkspaceNext
         | Request::ActivateWorkspace { .. }
+        | Request::FocusWindow { .. }
+        | Request::GetWindowList
         | Request::ReloadConfig
         | Request::GetSystemStatus => Response::Failure {
             error: ErrorResponse {

@@ -33,10 +33,12 @@ pub enum Request {
     GetWorkspaceState,
     GetThemePalette,
     GetSystemStatus,
+    GetWindowList,
     ReloadConfig,
     WorkspacePrevious,
     WorkspaceNext,
     ActivateWorkspace { index: u32 },
+    FocusWindow { id: u64 },
 }
 
 /// Response envelope matching a request ID.
@@ -63,6 +65,7 @@ pub enum ResponseData {
     WorkspaceState { active: u32, count: u32 },
     ThemePalette { palette: Option<ThemePalette> },
     SystemStatus { status: SystemStatus },
+    WindowList { windows: Vec<WindowSummary> },
     Acknowledged,
 }
 
@@ -123,6 +126,29 @@ pub struct SystemStatus {
     pub signal: Option<u8>,
     pub volume: Option<u8>,
     pub muted: bool,
+}
+
+/// Small window record for shell clients that show a task list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WindowSummary {
+    pub id: u64,
+    pub title: String,
+    pub workspace: u32,
+    pub minimized: bool,
+    pub active: bool,
+}
+
+impl Default for WindowSummary {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            title: String::new(),
+            workspace: 0,
+            minimized: false,
+            active: false,
+        }
+    }
 }
 
 /// Stable machine-readable error category with a user-readable explanation.

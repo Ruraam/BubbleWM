@@ -29,7 +29,7 @@ BubbleThemeEngine is vendored as a workspace dependency from BubbleOS's `theme-e
 
 The shared protocol lives in the `bubble-ipc` workspace crate and is consumed by BubbleWM and BubblePanel. Protocol version 1 uses typed JSON request/response envelopes with a monotonically assigned request ID, explicit success/failure responses and stable error categories.
 
-- Commands are deliberately narrow: capability discovery, theme-palette and system-status snapshots, workspace-state queries, previous/next workspace requests and activation of a workspace by index.
+- Commands are deliberately narrow: capability discovery, theme-palette, system-status and window-list snapshots, workspace-state queries, workspace navigation, activation by index and window focus by stable ID.
 - Frames are newline-delimited UTF-8 JSON, limited to 64 KiB, and must carry the supported protocol version.
 - The Linux transport binds a Unix-domain socket at `$XDG_RUNTIME_DIR/bubblewm/control.sock`; no TCP listener or network-accessible endpoint is provided.
 - The runtime directory and application subdirectory are checked without following symlinks. The application directory is restricted to mode `0700`, and the socket to `0600`.
@@ -51,7 +51,7 @@ Winit absolute pointer motion, mouse buttons and scroll-axis events are routed t
 
 XDG maximize requests configure the toplevel to the single output's logical geometry and retain the previous floating location and acknowledged size. Unmaximize restores that saved geometry. Minimize requests remove a toplevel and its transient descendants from the visible space without destroying their clients; the compositor can restore the most recently minimized family. The initial keyboard controls are `Super+H` to minimize, `Super+Tab` to restore the most recently minimized family, and `Super+Q` to send an XDG close request. Intercepted key presses and releases are both consumed so clients do not retain a stuck modifier/key state.
 
-Workspace count is configurable from 1 to 32. Each toplevel retains its workspace while unmapped; switching remaps only windows on the active workspace. `Super+Left`/`Super+Right` navigate, `Super+1` through `Super+9` select, and adding Shift moves the focused window. BubblePanel queries the active index/count over IPC, displays available workspace indicators, and sends click and scroll navigation requests through a background IPC worker.
+Workspace count is configurable from 1 to 32. Each toplevel retains its workspace while unmapped; switching remaps only windows on the active workspace. `Super+Left`/`Super+Right` navigate, `Super+1` through `Super+9` select, and adding Shift moves the focused window. BubblePanel queries the active index/count and live window list over IPC, displays workspace and task indicators, and sends click and scroll navigation requests through a background IPC worker. Selecting a task restores its window and switches to the window's workspace when needed.
 
 BubbleWM publishes a compact Wi-Fi and audio snapshot over IPC. Its status probes keep running even when the built-in bar is disabled, allowing BubblePanel to render actual connectivity, signal, volume and mute indicators without blocking its Wayland event loop.
 

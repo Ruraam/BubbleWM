@@ -14,7 +14,9 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use bubble_ipc::{Request, Response, ResponseData, SystemStatus, ThemePalette, unix};
+use bubble_ipc::{
+    Request, Response, ResponseData, SystemStatus, ThemePalette, WindowSummary, unix,
+};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_registry,
@@ -67,6 +69,7 @@ impl HitRect {
 pub enum PanelAction {
     Launcher,
     Workspace(u8),
+    Window(u64),
     Clock,
 }
 
@@ -87,10 +90,15 @@ pub fn hit_test(regions: &[HitRegion], x: u32, y: u32) -> Option<PanelAction> {
 
 /// Describes the initial launcher, workspace and clock hit regions.
 pub fn interactive_regions(width: u32, height: u32) -> Vec<HitRegion> {
-    interactive_regions_with_count(width, height, 4)
+    interactive_regions_with_state(width, height, 4, &[])
 }
 
-fn interactive_regions_with_count(width: u32, height: u32, workspace_count: u32) -> Vec<HitRegion> {
+fn interactive_regions_with_state(
+    width: u32,
+    height: u32,
+    workspace_count: u32,
+    windows: &[WindowSummary],
+) -> Vec<HitRegion> {
     let panel_height = height.min(PANEL_HEIGHT);
     let launcher_x = 8;
     let mut regions = vec![HitRegion {
@@ -116,6 +124,18 @@ fn interactive_regions_with_count(width: u32, height: u32, workspace_count: u32)
         });
     }
 
+    for task in task_button_layout(width, workspace_count, windows) {
+        regions.push(HitRegion {
+            bounds: HitRect {
+                x: task.x,
+                y: 8,
+                width: task.width,
+                height: 24.min(panel_height.saturating_sub(8)),
+            },
+            action: PanelAction::Window(task.id),
+        });
+    }
+
     regions.push(HitRegion {
         bounds: HitRect {
             x: width.saturating_sub(106),
@@ -131,6 +151,52 @@ fn interactive_regions_with_count(width: u32, height: u32, workspace_count: u32)
 fn visible_workspace_count(width: u32, workspace_count: u32) -> u32 {
     let available = width.saturating_sub(267) / 24;
     workspace_count.min(available).min(u8::MAX.into())
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TaskButton {
+    id: u64,
+    x: u32,
+    width: u32,
+}
+
+fn task_button_layout(
+    width: u32,
+    workspace_count: u32,
+    windows: &[WindowSummary],
+) -> Vec<TaskButton> {
+    const GAP: u32 = 8;
+    const MIN_WIDTH: u32 = 110;
+    const MAX_VISIBLE: usize = 6;
+
+    let workspace_end = 82 + visible_workspace_count(width, workspace_count) * 24;
+    let left = workspace_end.saturating_add(20);
+    let right = width.saturating_sub(174);
+    let available = right.saturating_sub(left);
+    let max_buttons = ((available + GAP) / (MIN_WIDTH + GAP)) as usize;
+    let count = windows.len().min(max_buttons).min(MAX_VISIBLE);
+    if count == 0 {
+        return Vec::new();
+    }
+
+    let count_u32 = count as u32;
+    let width_per_button = (available - GAP * (count_u32 - 1)) / count_u32;
+    let button_width = width_per_button.min(180);
+    let total_width = button_width * count_u32 + GAP * (count_u32 - 1);
+    let mut x = left + available.saturating_sub(total_width) / 2;
+    windows
+        .iter()
+        .take(count)
+        .map(|window| {
+            let button = TaskButton {
+                id: window.id,
+                x,
+                width: button_width,
+            };
+            x += button_width + GAP;
+            button
+        })
+        .collect()
 }
 
 fn main() -> Result<()> {
@@ -395,6 +461,9 @@ impl BubblePanel {
             workspace_count,
             active_workspace,
         );
+        if let Some(windows) = self.snapshot.windows.as_ref() {
+            draw_task_list(canvas, width, height, colors, workspace_count, windows);
+        }
         draw_status_and_clock(
             canvas,
             width,
@@ -422,7 +491,7 @@ impl BubblePanel {
             return false;
         }
         self.snapshot = snapshot;
-        info!("BubblePanel adopted the current theme and workspace state");
+        info!("BubblePanel adopted the current theme, workspace and window state");
         true
     }
 }
@@ -439,6 +508,7 @@ struct PanelSnapshot {
     workspace: Option<WorkspaceState>,
     workspace_control: bool,
     system_status: Option<SystemStatus>,
+    windows: Option<Vec<WindowSummary>>,
 }
 
 impl Default for PanelSnapshot {
@@ -448,6 +518,7 @@ impl Default for PanelSnapshot {
             workspace: None,
             workspace_control: false,
             system_status: None,
+            windows: None,
         }
     }
 }
@@ -457,6 +528,7 @@ enum PanelCommand {
     PreviousWorkspace,
     NextWorkspace,
     ActivateWorkspace(u32),
+    FocusWindow(u64),
 }
 
 /// Polls compositor state and sends control requests outside BubblePanel's
@@ -487,6 +559,7 @@ impl PanelIpcRuntime {
                             PanelCommand::ActivateWorkspace(index) => {
                                 Request::ActivateWorkspace { index }
                             }
+                            PanelCommand::FocusWindow(id) => Request::FocusWindow { id },
                         };
                         match request_bubblewm(request) {
                             Some(Response::Success {
@@ -494,6 +567,9 @@ impl PanelIpcRuntime {
                             }) => {
                                 snapshot.workspace = Some(WorkspaceState { active, count });
                             }
+                            Some(Response::Success {
+                                data: ResponseData::Acknowledged,
+                            }) => {}
                             Some(Response::Failure { error }) => {
                                 warn!(%error.message, "BubbleWM rejected a workspace request");
                             }
@@ -516,6 +592,9 @@ impl PanelIpcRuntime {
                         }
                         if let Some(status) = read_system_status() {
                             snapshot.system_status = Some(status);
+                        }
+                        if let Some(windows) = read_window_list() {
+                            snapshot.windows = Some(windows);
                         }
                         next_poll = Instant::now() + Duration::from_secs(5);
                     }
@@ -601,6 +680,15 @@ fn read_system_status() -> Option<SystemStatus> {
         Response::Success {
             data: ResponseData::SystemStatus { status },
         } => Some(status),
+        _ => None,
+    }
+}
+
+fn read_window_list() -> Option<Vec<WindowSummary>> {
+    match request_bubblewm(Request::GetWindowList)? {
+        Response::Success {
+            data: ResponseData::WindowList { windows },
+        } => Some(windows),
         _ => None,
     }
 }
@@ -783,7 +871,12 @@ impl PointerHandler for BubblePanel {
                 .workspace
                 .as_ref()
                 .map_or(4, |state| state.count);
-            let regions = interactive_regions_with_count(self.width, self.height, workspace_count);
+            let regions = interactive_regions_with_state(
+                self.width,
+                self.height,
+                workspace_count,
+                self.snapshot.windows.as_deref().unwrap_or(&[]),
+            );
             let action = hit_test(&regions, x, y);
 
             match &event.kind {
@@ -805,6 +898,9 @@ impl PointerHandler for BubblePanel {
                                     .send_command(PanelCommand::ActivateWorkspace(u32::from(
                                         workspace - 1,
                                     )));
+                            }
+                            PanelAction::Window(id) if self.snapshot.windows.is_some() => {
+                                self.ipc_runtime.send_command(PanelCommand::FocusWindow(id));
                             }
                             _ => info!(?action, x, y, "BubblePanel left-click completed"),
                         }
@@ -911,6 +1007,7 @@ struct PanelColors {
     glass: u32,
     surface: u32,
     primary: u32,
+    on_primary: u32,
     text: u32,
     muted: u32,
 }
@@ -922,6 +1019,7 @@ impl PanelColors {
                 glass: 0xFF1B202B,
                 surface: 0xFF1B202B,
                 primary: 0xFF62D6E8,
+                on_primary: 0xFF102029,
                 text: 0xFFE7EDF5,
                 muted: 0xFF657184,
             };
@@ -935,6 +1033,7 @@ impl PanelColors {
             glass: argb(palette.glass_tint, (opacity * 255.0).round() as u32),
             surface: argb(palette.surface, 255),
             primary: argb(palette.primary, 255),
+            on_primary: argb(palette.on_primary, 255),
             text: argb(palette.on_surface, 255),
             muted: argb(palette.outline_variant, 255),
         }
@@ -972,6 +1071,133 @@ fn draw_workspaces(
         if index != active_workspace {
             fill_rect(canvas, width, height, x + 3, 17, 10, 6, colors.surface);
         }
+    }
+}
+
+fn draw_task_list(
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    colors: PanelColors,
+    workspace_count: u32,
+    windows: &[WindowSummary],
+) {
+    for (window, button) in windows
+        .iter()
+        .zip(task_button_layout(width, workspace_count, windows))
+    {
+        let background = if window.active {
+            colors.primary
+        } else {
+            colors.surface
+        };
+        let foreground = if window.active {
+            colors.on_primary
+        } else if window.minimized {
+            colors.muted
+        } else {
+            colors.text
+        };
+        fill_rect(
+            canvas,
+            width,
+            height,
+            button.x,
+            8,
+            button.width,
+            24,
+            background,
+        );
+        let max_chars = button.width.saturating_sub(16) / 4;
+        draw_mini_text(
+            canvas,
+            width,
+            height,
+            button.x + 8,
+            17,
+            &window.title,
+            max_chars,
+            foreground,
+        );
+    }
+}
+
+fn draw_mini_text(
+    canvas: &mut [u8],
+    width: u32,
+    height: u32,
+    x: u32,
+    y: u32,
+    text: &str,
+    max_chars: u32,
+    color: u32,
+) {
+    for (index, character) in text.chars().take(max_chars as usize).enumerate() {
+        let glyph = mini_glyph(character.to_ascii_uppercase());
+        for (row, bits) in glyph.into_iter().enumerate() {
+            for column in 0..3 {
+                if bits & (1 << (2 - column)) != 0 {
+                    fill_rect(
+                        canvas,
+                        width,
+                        height,
+                        x + index as u32 * 4 + column,
+                        y + row as u32,
+                        1,
+                        1,
+                        color,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn mini_glyph(character: char) -> [u8; 5] {
+    match character {
+        'A' => [0b010, 0b101, 0b111, 0b101, 0b101],
+        'B' => [0b110, 0b101, 0b110, 0b101, 0b110],
+        'C' => [0b011, 0b100, 0b100, 0b100, 0b011],
+        'D' => [0b110, 0b101, 0b101, 0b101, 0b110],
+        'E' => [0b111, 0b100, 0b110, 0b100, 0b111],
+        'F' => [0b111, 0b100, 0b110, 0b100, 0b100],
+        'G' => [0b011, 0b100, 0b101, 0b101, 0b011],
+        'H' => [0b101, 0b101, 0b111, 0b101, 0b101],
+        'I' => [0b111, 0b010, 0b010, 0b010, 0b111],
+        'J' => [0b001, 0b001, 0b001, 0b101, 0b010],
+        'K' => [0b101, 0b101, 0b110, 0b101, 0b101],
+        'L' => [0b100, 0b100, 0b100, 0b100, 0b111],
+        'M' => [0b101, 0b111, 0b111, 0b101, 0b101],
+        'N' => [0b101, 0b111, 0b111, 0b111, 0b101],
+        'O' => [0b010, 0b101, 0b101, 0b101, 0b010],
+        'P' => [0b110, 0b101, 0b110, 0b100, 0b100],
+        'Q' => [0b010, 0b101, 0b101, 0b111, 0b011],
+        'R' => [0b110, 0b101, 0b110, 0b101, 0b101],
+        'S' => [0b011, 0b100, 0b010, 0b001, 0b110],
+        'T' => [0b111, 0b010, 0b010, 0b010, 0b010],
+        'U' => [0b101, 0b101, 0b101, 0b101, 0b111],
+        'V' => [0b101, 0b101, 0b101, 0b101, 0b010],
+        'W' => [0b101, 0b101, 0b111, 0b111, 0b101],
+        'X' => [0b101, 0b101, 0b010, 0b101, 0b101],
+        'Y' => [0b101, 0b101, 0b010, 0b010, 0b010],
+        'Z' => [0b111, 0b001, 0b010, 0b100, 0b111],
+        '0' => [0b111, 0b101, 0b101, 0b101, 0b111],
+        '1' => [0b010, 0b110, 0b010, 0b010, 0b111],
+        '2' => [0b110, 0b001, 0b010, 0b100, 0b111],
+        '3' => [0b110, 0b001, 0b010, 0b001, 0b110],
+        '4' => [0b101, 0b101, 0b111, 0b001, 0b001],
+        '5' => [0b111, 0b100, 0b110, 0b001, 0b110],
+        '6' => [0b011, 0b100, 0b110, 0b101, 0b010],
+        '7' => [0b111, 0b001, 0b010, 0b010, 0b010],
+        '8' => [0b010, 0b101, 0b010, 0b101, 0b010],
+        '9' => [0b010, 0b101, 0b011, 0b001, 0b110],
+        '.' => [0, 0, 0, 0, 0b010],
+        '-' => [0, 0, 0b111, 0, 0],
+        '_' => [0, 0, 0, 0, 0b111],
+        '/' => [0b001, 0b001, 0b010, 0b100, 0b100],
+        ':' => [0, 0b010, 0, 0b010, 0],
+        ' ' => [0; 5],
+        _ => [0b110, 0b001, 0b010, 0, 0b010],
     }
 }
 

@@ -27,6 +27,7 @@ The event-loop handler must remain quick and must not perform blocking I/O. It m
 - GetThemePalette returns the active BubbleThemeEngine snapshot, including container, elevated-surface, glass, status and neon roles. Older protocol-v1 clients ignore the additive fields; new clients default fields omitted by an older server.
 - GetWorkspaceState returns the current zero-based active index and configured workspace count.
 - GetSystemStatus returns a compact snapshot of NetworkManager/Wi-Fi availability, the active Wi-Fi signal, and current audio volume/mute state. Status probing runs independently of BubbleWM's built-in bar so BubblePanel can use it on its own.
+- GetWindowList returns stable window IDs, titles, workspace indices, minimized state and active state; FocusWindow restores and focuses a listed window on the compositor thread.
 - WorkspacePrevious, WorkspaceNext and ActivateWorkspace update compositor-owned state and return the resulting active index and count.
 
 Workspace commands validate target indices and remap visible windows on the compositor thread. BubblePanel sends these requests from its own IPC worker, so its Wayland event loop remains responsive.
@@ -35,6 +36,6 @@ Workspace commands validate target indices and remap visible windows on the comp
 
 The compositor is still an early nested prototype. It advertises wl_compositor, wl_shm, wl_seat, xdg-shell, xdg-decoration and one wl_output, accepts clients and renders mapped xdg toplevel windows through a Smithay Space. Its current window manager tracks toplevel map/unmap/remap/destruction, supports XDG interactive move/resize using validated pointer grabs, preserves floating geometry across maximize/unmaximize, tracks transient toplevel relationships, supports minimizing/restoring whole transient families and manages XDG popup placement, repositioning and grabs. A prototype server-side titlebar is available to clients negotiating XDG decorations.
 
-Protocol v1 provides capability discovery, theme-palette and system-status reads, and workspace state/control. The compositor does not yet implement output-management protocols or multiple outputs, pointer cursor rendering, touch, polished/title-bearing decorations or tiling.
+Protocol v1 provides capability discovery, theme-palette, system-status and window-list reads, plus workspace and window focus control. The compositor does not yet implement output-management protocols or multiple outputs, pointer cursor rendering, touch, polished/title-bearing decorations or tiling.
 
 See docs/ARCHITECTURE.md and docs/ROADMAP.md for the next integration milestones.
