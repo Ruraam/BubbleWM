@@ -32,10 +32,10 @@ fn run() -> Result<i32, String> {
     }
 
     let arguments: Vec<OsString> = std::env::args_os().collect();
-    if arguments.len() != 4
-        || arguments[1] != OsStr::new("run")
-    {
-        return Err("usage: bubblewm-session run UTILISATEUR /dev/ttyN (mot de passe sur stdin)".into());
+    if arguments.len() != 4 || arguments[1] != OsStr::new("run") {
+        return Err(
+            "usage: bubblewm-session run UTILISATEUR /dev/ttyN (mot de passe sur stdin)".into(),
+        );
     }
 
     let user = arguments[2]
@@ -47,7 +47,10 @@ fn run() -> Result<i32, String> {
     validate_vt(tty)?;
 
     if unsafe { libc::isatty(libc::STDIN_FILENO) } != 0 {
-        return Err("le mot de passe doit être transmis sur un pipe stdin, jamais saisi dans le helper".into());
+        return Err(
+            "le mot de passe doit être transmis sur un pipe stdin, jamais saisi dans le helper"
+                .into(),
+        );
     }
 
     let mut password = read_password(io::stdin().lock())?;
@@ -72,7 +75,9 @@ fn validate_vt(tty: &str) -> Result<(), String> {
     };
     if number.is_empty()
         || !number.bytes().all(|byte| byte.is_ascii_digit())
-        || number.parse::<u32>().map_or(true, |value| !(1..=63).contains(&value))
+        || number
+            .parse::<u32>()
+            .map_or(true, |value| !(1..=63).contains(&value))
     {
         return Err("terminal invalide: un VT /dev/ttyN entre 1 et 63 est requis".into());
     }
@@ -163,7 +168,13 @@ mod tests {
     fn only_virtual_terminal_paths_are_accepted() {
         assert!(validate_vt("/dev/tty1").is_ok());
         assert!(validate_vt("/dev/tty63").is_ok());
-        for invalid in ["/dev/tty0", "/dev/tty64", "/dev/pts/2", "/dev/tty1/../null", "/dev/tty"] {
+        for invalid in [
+            "/dev/tty0",
+            "/dev/tty64",
+            "/dev/pts/2",
+            "/dev/tty1/../null",
+            "/dev/tty",
+        ] {
             assert!(validate_vt(invalid).is_err(), "{invalid}");
         }
     }
