@@ -69,9 +69,15 @@ fn take_worker_channel_from_fd(fd: RawFd) -> io::Result<UnixStream> {
         return Err(io::Error::last_os_error());
     }
 
+    // Take ownership as soon as we know this is an open descriptor. Every
+    // validation failure below then closes it instead of leaking fd 3.
+    // SAFETY: callers transfer ownership of this descriptor to this function.
+    let owned_fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) };
+    let fd = owned_fd.as_raw_fd();
+
     let mut domain: libc::c_int = 0;
     let mut domain_len = std::mem::size_of_val(&domain) as libc::socklen_t;
-    let domain_result = unsafe {
+    if unsafe {
         libc::getsockopt(
             fd,
             libc::SOL_SOCKET,
@@ -79,14 +85,14 @@ fn take_worker_channel_from_fd(fd: RawFd) -> io::Result<UnixStream> {
             &mut domain as *mut _ as *mut libc::c_void,
             &mut domain_len,
         )
-    };
-    if domain_result < 0 {
+    } < 0
+    {
         return Err(io::Error::last_os_error());
     }
 
     let mut socket_type: libc::c_int = 0;
     let mut type_len = std::mem::size_of_val(&socket_type) as libc::socklen_t;
-    let type_result = unsafe {
+    if unsafe {
         libc::getsockopt(
             fd,
             libc::SOL_SOCKET,
@@ -94,8 +100,8 @@ fn take_worker_channel_from_fd(fd: RawFd) -> io::Result<UnixStream> {
             &mut socket_type as *mut _ as *mut libc::c_void,
             &mut type_len,
         )
-    };
-    if type_result < 0 {
+    } < 0
+    {
         return Err(io::Error::last_os_error());
     }
     if domain != libc::AF_UNIX || socket_type != libc::SOCK_STREAM {
@@ -121,9 +127,6 @@ fn take_worker_channel_from_fd(fd: RawFd) -> io::Result<UnixStream> {
         return Err(io::Error::last_os_error());
     }
 
-    // SAFETY: the descriptor has been verified as a connected AF_UNIX
-    // SOCK_STREAM socket. Ownership is transferred exactly once here.
-    let owned_fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) };
     Ok(UnixStream::from(owned_fd))
 }
 
@@ -411,6 +414,27 @@ mod tests {
         let mut bytes = [0_u8; 5];
         worker.read_exact(&mut bytes).unwrap();
         assert_eq!(&bytes, b"ready");
+    }
+
+    #[test]
+    fn worker_channel_take_closes_invalid_descriptors() {
+        let mut pipe_fds = [-1; 2];
+        assert_eq!(unsafe { libc::pipe2(pipe_fds.as_mut_ptr(), libc::O_CLOEXEC) }, 0);
+        let error = take_worker_channel_from_fd(pipe_fds[0]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(unsafe { libc::fcntl(pipe_fds[0], libc::F_GETFD) }, -1);
+        unsafe { libc::close(pipe_fds[1]) };
+
+        let socket = unsafe {
+            libc::socket(
+                libc::AF_UNIX,
+                libc::SOCK_STREAM | libc::SOCK_CLOEXEC,
+                0,
+            )
+        };
+        assert!(socket >= 0);
+        assert!(take_worker_channel_from_fd(socket).is_err());
+        assert_eq!(unsafe { libc::fcntl(socket, libc::F_GETFD) }, -1);
     }
 
     #[test]
