@@ -93,10 +93,11 @@
 - [ ] Multi-monitor support, profiles and validated configuration.
 - [ ] BubbleSettings integration and graceful degradation.
 
-## 0.10.0 — Native backend
-- [ ] DRM/KMS session support.
-- [ ] Multi-output and per-monitor settings.
-- [ ] Robustness, accessibility and performance testing.
+## 0.10.0 — Native backend bring-up
+- [x] Initial DRM/KMS output through libseat, GBM and EGL for one primary GPU and one connected output.
+- [x] libinput input and libseat pause/resume handling for VT/session switches.
+- [ ] Multi-output, connector hotplug and per-monitor settings.
+- [ ] Hardware validation, robustness, accessibility and performance review.
 
 ## 0.11.0 — Wayland login and session manager
 - [ ] Add a production greeter and a system-facing BubbleWM session-supervisor entry point.
