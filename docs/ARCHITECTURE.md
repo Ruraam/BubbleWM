@@ -46,9 +46,16 @@ does not contain descendants that deliberately leave the process group; the
 production supervisor still needs logind/systemd session-scope cleanup.
 `run_login_session` composes PAM open, trusted command launch, exit wait,
 process-group cleanup and PAM close for one login in a dedicated single-threaded
-root helper. A Debian-compatible PAM service profile is available under
-`packaging/pam/`, but BubbleWM does not install it yet. A system greeter and
-supervisor still need to invoke this flow.
+root helper. The `bubblewm-session` binary is the first executable boundary for
+that flow: it requires effective UID 0, accepts the password only on non-TTY
+stdin (bounded to 1024 bytes), validates a Linux VT path, and invokes only the
+fixed `/usr/bin/bubblewm` command with `/etc/bubblewm/session.toml`. The
+matching DRM configuration template is `packaging/session.toml`. The helper
+wipes its input buffer after use and does not accept a command or password in
+argv or environment variables. It is not yet a production supervisor: no
+greeter invokes it, no package installs the helper/configuration/PAM profile,
+and logind session-scope cleanup and seat/VT ownership still need integration.
+A Debian-compatible PAM service profile is available under `packaging/pam/`.
 
 BubblePanel is a Wayland client. It should use layer-shell when available for panel placement, anchors and exclusive zones, and detect optional protocols before enabling dependent features. It must not assume every Wayland compositor exposes the same protocol set.
 
