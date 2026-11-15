@@ -2,7 +2,7 @@
 
 A native, lightweight and customizable Wayland desktop for BubbleOS, written in Rust and built on Smithay. Its target role includes the Wayland login and session lifecycle currently handled by display managers such as greetd or LightDM.
 
-> **Status:** early development. BubbleWM has a nested Winit compositor and an initial native DRM/KMS backend for one primary GPU and one connected output, using libseat, GBM/EGL and libinput. It also has core Wayland globals, tracked xdg-toplevel lifecycle, pointer routing, interactive move/resize, maximize/restore, minimize/restore, transient stacking, XDG popup management and prototype server-side decorations. The built-in PAM lock screen locks an already-running user session. PAM helpers can authenticate a selected account and open/close its session in an isolated root process, but the login greeter and session supervisor are not connected. The native backend still needs broader hardware validation, multi-output and hotplug support. BubbleWM is not yet a complete or daily-usable desktop environment.
+> **Status:** early development. BubbleWM has a nested Winit compositor and an initial native DRM/KMS backend for one primary GPU and one connected output, using libseat, GBM/EGL and libinput. It also has core Wayland globals, tracked xdg-toplevel lifecycle, pointer routing, interactive move/resize, maximize/restore, minimize/restore, transient stacking, XDG popup management and prototype server-side decorations. The built-in PAM lock screen locks an already-running user session. A root-only `bubblewm-session` helper now accepts a bounded password on stdin and launches the fixed compositor command with a system session configuration; it is not yet connected to a greeter or a production system supervisor. The native backend still needs broader hardware validation, multi-output and hotplug support. BubbleWM is not yet a complete or daily-usable desktop environment.
 
 ## Project principles
 
@@ -16,7 +16,8 @@ A native, lightweight and customizable Wayland desktop for BubbleOS, written in 
 
 ## Workspace
 
-- **bubblewm:** Smithay compositor, configuration, login/session lifecycle and application lifecycle (login/session management is planned, not implemented).
+- **bubblewm:** Smithay compositor, configuration, login/session primitives and application lifecycle.
+- **bubblewm-session:** root-only, single-login helper entry point; the production greeter and system supervisor remain planned.
 - **bubblepanel:** independent Wayland panel client using Smithay Client Toolkit.
 - **bubble-ipc:** shared, versioned local-control protocol and Linux Unix-socket transport.
 - **bubble-theme-engine:** vendored BubbleOS wallpaper palette generator used by BubbleWM and companion clients.
@@ -70,7 +71,7 @@ The Winit backend uses the host session's EGL/OpenGL environment. The native DRM
 - Polished decorations: the current server-side titlebar uses BubbleThemeEngine surfaces but remains a prototype with colored controls and no title text, icons or full accessibility behavior.
 - Tiling layout policy and workspace-specific layout behavior.
 - Output-management protocols, multiple outputs and connector hotplug.
-- A login greeter and system-session supervisor: `auth::run_login_session` composes PAM open/close, trusted user-command startup and process-group cleanup for one login in an isolated root helper. A Debian-compatible PAM profile exists under `packaging/pam/`, but no package installs it yet. Production still needs logind/cgroup cleanup for processes that escape the group, and no greeter invokes this flow. BubbleWM does not replace greetd or LightDM today.
+- A login greeter and production system-session supervisor. The `bubblewm-session` helper accepts exactly one bounded UTF-8 password from non-terminal stdin, rejects non-VT terminal paths, requires effective UID 0, and launches only `/usr/bin/bubblewm` with `/etc/bubblewm/session.toml`. The matching DRM configuration template is `packaging/session.toml`. The helper is not yet installed by a package or invoked by a greeter; the PAM profile is also not installed. Production still needs logind/systemd cgroup cleanup for descendants that escape the process group, logind session and seat/VT ownership, greeter recovery, and shutdown/reboot handling. BubbleWM does not replace greetd or LightDM today.
 - Richer BubblePanel task-list presentation, Bluetooth and battery modules.
 
 ## BubblePanel prototype
