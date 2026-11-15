@@ -820,7 +820,6 @@ fn combine_cleanup_results(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
