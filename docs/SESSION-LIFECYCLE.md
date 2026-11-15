@@ -70,8 +70,11 @@ it is not the authoritative session boundary. The session scope cgroup is.
 
 The production design must keep the supervisor outside the user session scope:
 
-1. The root supervisor starts a dedicated worker and creates a private,
-   close-on-exec control channel.
+1. The root supervisor creates a connected Unix socket pair with
+   `FD_CLOEXEC` enforced on both endpoints, keeps one endpoint private, and
+   starts a dedicated worker with the other endpoint through an explicit
+   descriptor-inheritance step. The channel has no filesystem pathname and is
+   never exposed through argv or environment variables.
 2. The worker opens PAM. After `pam_open_session` succeeds, it sends one
    versioned `SessionReady` frame over the private control stream. The bounded
    frame contains only the numeric UID, opaque `XDG_SESSION_ID`, validated
