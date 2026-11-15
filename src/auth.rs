@@ -6,9 +6,11 @@ use std::{
     os::unix::fs::MetadataExt,
     os::unix::process::CommandExt,
     path::PathBuf,
-    process::{Child, Command},
+    process::{Child, Command, ExitStatus},
     ptr,
     sync::atomic::{Ordering, compiler_fence},
+    thread,
+    time::{Duration, Instant},
 };
 
 const PAM_SUCCESS: c_int = 0;
@@ -250,7 +252,7 @@ impl PamLoginSession {
         &self,
         program: &std::ffi::OsStr,
         arguments: &[std::ffi::OsString],
-    ) -> Result<Child, String> {
+    ) -> Result<ManagedUserProcess, String> {
         if !self.groups.changed {
             return Err("La session PAM est déjà fermée".into());
         }
@@ -284,13 +286,14 @@ impl PamLoginSession {
                 command.env(name, value);
             }
         }
-        command
+        let child = command
             .current_dir(&self.identity.home)
             .gid(self.identity.gid)
             .uid(self.identity.uid)
             .process_group(0)
             .spawn()
-            .map_err(|error| format!("Impossible de lancer le processus de session: {error}"))
+            .map_err(|error| format!("Impossible de lancer le processus de session: {error}"))?;
+        Ok(ManagedUserProcess::new(child))
     }
 
     fn environment_value(&self, name: &str) -> Option<&std::ffi::OsStr> {
@@ -316,6 +319,113 @@ impl Drop for PamLoginSession {
         if let Err(error) = self.groups.restore() {
             tracing::error!(%error, "supervisor group restoration failed");
         }
+    }
+}
+
+/// Owns the session leader and its dedicated process group.
+///
+/// Call `terminate` when the user logs out or the compositor fails. Dropping
+/// the handle force-stops any remaining processes in the group and reaps the
+/// direct child, so an early return cannot leave ordinary session children
+/// running under the user's account.
+pub struct ManagedUserProcess {
+    child: Child,
+    process_group: libc::pid_t,
+    child_status: Option<ExitStatus>,
+}
+
+impl ManagedUserProcess {
+    fn new(child: Child) -> Self {
+        let process_group = child.id() as libc::pid_t;
+        Self {
+            child,
+            process_group,
+            child_status: None,
+        }
+    }
+
+    /// PID of the session leader.
+    pub fn id(&self) -> u32 {
+        self.child.id()
+    }
+
+    /// Returns the leader's exit status when it has exited.
+    pub fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        if self.child_status.is_some() {
+            return Ok(self.child_status);
+        }
+        self.child_status = self.child.try_wait()?;
+        Ok(self.child_status)
+    }
+
+    /// Waits for and reaps the session leader.
+    pub fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        if let Some(status) = self.child_status {
+            return Ok(status);
+        }
+        let status = self.child.wait()?;
+        self.child_status = Some(status);
+        Ok(status)
+    }
+
+    /// Sends SIGTERM to the session process group, then SIGKILL after the
+    /// grace period if any member remains. The direct child is always reaped.
+    pub fn terminate(&mut self, grace_period: Duration) -> std::io::Result<ExitStatus> {
+        signal_process_group(self.process_group, libc::SIGTERM)?;
+        let deadline = Instant::now() + grace_period;
+        loop {
+            let status = self.try_wait()?;
+            if !process_group_exists(self.process_group)? {
+                return match status {
+                    Some(status) => Ok(status),
+                    None => self.wait(),
+                };
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                break;
+            }
+            thread::sleep((deadline - now).min(Duration::from_millis(25)));
+        }
+        signal_process_group(self.process_group, libc::SIGKILL)?;
+        self.wait()
+    }
+}
+
+impl Drop for ManagedUserProcess {
+    fn drop(&mut self) {
+        if let Err(error) = signal_process_group(self.process_group, libc::SIGKILL) {
+            tracing::error!(%error, "failed to stop user session process group");
+        }
+        if self.child_status.is_none()
+            && let Err(error) = self.child.wait()
+        {
+            tracing::error!(%error, "failed to reap user session leader");
+        }
+    }
+}
+
+fn signal_process_group(process_group: libc::pid_t, signal: libc::c_int) -> std::io::Result<()> {
+    if unsafe { libc::kill(-process_group, signal) } == 0 {
+        return Ok(());
+    }
+    let error = std::io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        Ok(())
+    } else {
+        Err(error)
+    }
+}
+
+fn process_group_exists(process_group: libc::pid_t) -> std::io::Result<bool> {
+    if unsafe { libc::kill(-process_group, 0) } == 0 {
+        return Ok(true);
+    }
+    let error = std::io::Error::last_os_error();
+    match error.raw_os_error() {
+        Some(libc::ESRCH) => Ok(false),
+        Some(libc::EPERM) => Ok(true),
+        _ => Err(error),
     }
 }
 
