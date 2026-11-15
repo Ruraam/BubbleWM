@@ -30,6 +30,12 @@ The greeter, compositor, and managed desktop session speak Wayland. BubbleWM doe
 
 The manager must support selecting a local user, successful and failed authentication, session startup failure, logout, compositor crash, system shutdown/reboot actions, and return to the greeter without leaving user processes or seat/VT ownership behind. Password handling stays inside the PAM conversation; credentials must not be written to logs or exposed over the compositor IPC socket.
 
+The current `auth::authenticate_login_user` primitive uses BubbleWM's fixed
+`bubblewm` PAM service and checks both authentication and account status for a
+selected login name. It does not open a PAM session, establish session
+credentials, or start a desktop process. The greeter and privileged lifecycle
+supervisor remain future work.
+
 BubblePanel is a Wayland client. It should use layer-shell when available for panel placement, anchors and exclusive zones, and detect optional protocols before enabling dependent features. It must not assume every Wayland compositor exposes the same protocol set.
 
 The panel owns its module lifecycle and presentation. It obtains compositor information through supported Wayland protocols and reads BubbleWM-specific state or theme data through the versioned local IPC interface.
