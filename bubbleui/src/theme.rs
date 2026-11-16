@@ -149,12 +149,25 @@ pub fn install() {
 
 /// Installs BubbleUI styles using the supplied semantic palette.
 pub fn install_with_palette(palette: &BubblePalette) {
+    install_with_palette_and_css(palette, "");
+}
+
+/// Installs BubbleUI and application styles in one provider.
+///
+/// Keeping semantic color definitions and their consumers in the same CSS
+/// provider makes named colors available consistently across GTK versions.
+pub fn install_with_palette_and_css(palette: &BubblePalette, application_css: &str) {
     let Some(display) = gtk::gdk::Display::default() else {
         return;
     };
 
     let provider = gtk::CssProvider::new();
-    provider.load_from_data(&palette.stylesheet());
+    let mut stylesheet = palette.stylesheet();
+    if !application_css.is_empty() {
+        stylesheet.push('\n');
+        stylesheet.push_str(application_css);
+    }
+    provider.load_from_data(&stylesheet);
 
     INSTALLED_PROVIDER.with(|installed| {
         let mut installed = installed.borrow_mut();
