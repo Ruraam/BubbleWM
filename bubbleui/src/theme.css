@@ -1,18 +1,69 @@
-/* BubbleUI — initial visual foundation */
+/* BubbleUI — semantic styles driven by BubblePalette */
 
 .bubble-button {
     background-image: none;
-    background-color: #252b3e;
-    color: #edf1fb;
-    border: 1px solid #3a4562;
+    background-color: @bubble-surface-variant;
+    color: @bubble-on-surface;
+    border: 1px solid @bubble-outline;
     border-radius: 9px;
     padding: 8px 14px;
 }
 
 .bubble-button:hover {
-    background-color: #303b58;
+    background-color: @bubble-primary-container;
+    color: @bubble-on-primary-container;
+}
+
+.bubble-button:disabled {
+    opacity: 0.55;
 }
 
 .bubble-label {
-    color: #edf1fb;
+    color: @bubble-on-surface;
+}
+
+.bubble-text-muted {
+    color: @bubble-on-surface-variant;
+}
+
+.bubble-text-primary {
+    color: @bubble-primary;
+}
+
+.bubble-text-secondary {
+    color: @bubble-secondary;
+}
+
+.bubble-text-tertiary {
+    color: @bubble-tertiary;
+}
+
+.bubble-status-success {
+    color: @bubble-success;
+}
+
+.bubble-status-warning {
+    color: @bubble-warning;
+}
+
+.bubble-status-error {
+    color: @bubble-error;
+}
+
+.bubble-status-info {
+    color: @bubble-info;
+}
+
+.bubble-surface {
+    color: @bubble-on-surface;
+    background-color: @bubble-surface;
+    border: 1px solid @bubble-outline;
+    border-radius: 12px;
+}
+
+.bubble-glass {
+    background-color: @bubble-glass-tint;
+    border: 1px solid @bubble-glass-border;
+    color: @bubble-on-surface;
+    border-radius: 12px;
 }
