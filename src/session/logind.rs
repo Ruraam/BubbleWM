@@ -12,6 +12,8 @@ const LOGIND_DESTINATION: &str = "org.freedesktop.login1";
 const LOGIND_PATH: &str = "/org/freedesktop/login1";
 const LOGIND_MANAGER: &str = "org.freedesktop.login1.Manager";
 const LOGIND_SESSION: &str = "org.freedesktop.login1.Session";
+const LOGIND_USER: &str = "org.freedesktop.login1.User";
+const LOGIND_SEAT: &str = "org.freedesktop.login1.Seat";
 
 /// The result returned by logind's Can* methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +58,12 @@ pub struct LogindSession {
     pub session_type: String,
     pub class: String,
     pub active: bool,
+    /// Runtime directory reported by the owning logind user object.
+    pub runtime_dir: String,
+    /// Seat identifier reported by logind, when the session has a seat.
+    pub seat: Option<String>,
+    /// Virtual terminal number reported by logind, when assigned.
+    pub vt_number: Option<u32>,
 }
 
 impl LogindSession {
@@ -130,9 +138,43 @@ impl LogindProbe {
         let id: String = proxy
             .get_property("Id")
             .context("cannot read logind session ID")?;
-        let (uid, _user_path): (u32, OwnedObjectPath) = proxy
+        let (uid, user_path): (u32, OwnedObjectPath) = proxy
             .get_property("User")
             .context("cannot read logind session owner")?;
+        let user_proxy = Proxy::new(
+            &self.connection,
+            LOGIND_DESTINATION,
+            user_path.as_str(),
+            LOGIND_USER,
+        )
+        .context("cannot create logind user proxy")?;
+        let runtime_dir: String = user_proxy
+            .get_property("RuntimePath")
+            .context("cannot read logind user runtime directory")?;
+        validate_runtime_dir(&runtime_dir, uid)?;
+
+        let seat_path: OwnedObjectPath = proxy
+            .get_property("Seat")
+            .context("cannot read logind session seat")?;
+        let seat = if seat_path.as_str() == "/" {
+            None
+        } else {
+            let seat_proxy = Proxy::new(
+                &self.connection,
+                LOGIND_DESTINATION,
+                seat_path.as_str(),
+                LOGIND_SEAT,
+            )
+            .context("cannot create logind seat proxy")?;
+            let seat_id: String = seat_proxy
+                .get_property("Id")
+                .context("cannot read logind seat ID")?;
+            validate_seat_id(&seat_id)?;
+            Some(seat_id)
+        };
+        let vt_number: u32 = proxy
+            .get_property("VTNr")
+            .context("cannot read logind virtual terminal number")?;
         let session_type: String = proxy
             .get_property("Type")
             .context("cannot read logind session type")?;
@@ -149,6 +191,9 @@ impl LogindProbe {
             session_type,
             class,
             active,
+            runtime_dir,
+            seat,
+            vt_number: (vt_number != 0).then_some(vt_number),
         };
         session.validate(session_id, expected_uid)?;
         Ok(session)
@@ -184,6 +229,27 @@ impl LogindProbe {
 fn manager_proxy(connection: &Connection) -> Result<Proxy<'_>> {
     Proxy::new(connection, LOGIND_DESTINATION, LOGIND_PATH, LOGIND_MANAGER)
         .context("cannot create systemd-logind manager proxy")
+}
+
+fn validate_runtime_dir(runtime_dir: &str, uid: u32) -> Result<()> {
+    let expected = format!("/run/user/{uid}");
+    ensure!(
+        runtime_dir == expected,
+        "logind runtime directory does not match the expected user runtime path"
+    );
+    Ok(())
+}
+
+fn validate_seat_id(seat_id: &str) -> Result<()> {
+    ensure!(
+        !seat_id.is_empty()
+            && seat_id.len() <= 64
+            && seat_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')),
+        "logind returned a malformed seat identifier"
+    );
+    Ok(())
 }
 
 fn validate_session_id(session_id: &str) -> Result<()> {
@@ -226,6 +292,9 @@ mod tests {
             session_type: "wayland".to_owned(),
             class: "user".to_owned(),
             active: true,
+            runtime_dir: "/run/user/1000".to_owned(),
+            seat: Some("seat0".to_owned()),
+            vt_number: Some(2),
         }
     }
 
@@ -287,6 +356,21 @@ mod tests {
         let mut session = valid_session();
         session.active = false;
         assert!(session.validate("c2", 1000).is_err());
+    }
+
+    #[test]
+    fn validates_runtime_directory_against_the_logind_uid() {
+        assert!(validate_runtime_dir("/run/user/1000", 1000).is_ok());
+        assert!(validate_runtime_dir("/run/user/1001", 1000).is_err());
+        assert!(validate_runtime_dir("/tmp/user-1000", 1000).is_err());
+    }
+
+    #[test]
+    fn validates_optional_seat_identifier_syntax() {
+        assert!(validate_seat_id("seat0").is_ok());
+        assert!(validate_seat_id("seat-1").is_ok());
+        assert!(validate_seat_id("").is_err());
+        assert!(validate_seat_id("seat/0").is_err());
     }
 
     #[test]
