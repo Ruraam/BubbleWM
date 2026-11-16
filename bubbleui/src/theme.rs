@@ -1,5 +1,11 @@
 //! BubbleUI theme installation and semantic palette.
 
+use std::cell::RefCell;
+
+thread_local! {
+    static INSTALLED_PROVIDER: RefCell<Option<gtk::CssProvider>> = const { RefCell::new(None) };
+}
+
 /// An opaque sRGB color used by the BubbleUI theme contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Color {
@@ -135,16 +141,13 @@ impl BubblePalette {
 
 /// Installs the default BubbleUI stylesheet on the current display.
 ///
-/// GTK retains the registered provider for the display, so the local
-/// Rust wrapper does not need to be stored in a global static.
+/// The provider is retained and replaced on subsequent calls, allowing the
+/// active palette to be updated without accumulating GTK style providers.
 pub fn install() {
     install_with_palette(&BubblePalette::default());
 }
 
 /// Installs BubbleUI styles using the supplied semantic palette.
-///
-/// Calling this again replaces the application-priority provider's visual
-/// values for widgets using BubbleUI's semantic CSS colors.
 pub fn install_with_palette(palette: &BubblePalette) {
     let Some(display) = gtk::gdk::Display::default() else {
         return;
@@ -153,11 +156,18 @@ pub fn install_with_palette(palette: &BubblePalette) {
     let provider = gtk::CssProvider::new();
     provider.load_from_data(&palette.stylesheet());
 
-    gtk::style_context_add_provider_for_display(
-        &display,
-        &provider,
-        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-    );
+    INSTALLED_PROVIDER.with(|installed| {
+        let mut installed = installed.borrow_mut();
+        if let Some(previous) = installed.take() {
+            gtk::style_context_remove_provider_for_display(&display, &previous);
+        }
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+        *installed = Some(provider);
+    });
 }
 
 #[cfg(test)]
