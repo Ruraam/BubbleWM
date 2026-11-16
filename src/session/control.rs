@@ -201,6 +201,7 @@ pub(crate) fn spawn_worker_with_channel(
 }
 
 /// Owns a worker PID until its exit status has been collected.
+#[derive(Debug)]
 pub(crate) struct WorkerProcess {
     pid: libc::pid_t,
     reaped: bool,
