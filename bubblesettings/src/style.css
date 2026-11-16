@@ -1,102 +1,103 @@
-/* BubbleSettings — BubbleWM visual identity */
+/* BubbleSettings — semantic styles driven by BubblePalette */
 
 window.bubble-settings {
-    background-color: #11131c;
-    color: #edf1fb;
+    background-color: @bubble-background;
+    color: @bubble-on-background;
 }
 
 .bubble-settings .bubble-sidebar {
-    background-color: #171a27;
-    border-right: 1px solid #292e40;
+    background-color: @bubble-surface;
+    border-right: 1px solid @bubble-outline;
     padding: 18px 12px;
 }
 
 .bubble-settings .bubble-page {
-    background-color: #11131c;
+    background-color: @bubble-background;
     padding: 30px;
 }
 
 .bubble-settings .bubble-card {
-    background-color: #1b1f2e;
-    border: 1px solid #30364b;
+    background-color: @bubble-surface;
+    border: 1px solid @bubble-outline;
     border-radius: 14px;
     padding: 18px;
 }
 
 .bubble-settings .bubble-muted {
-    color: #9ba5bd;
+    color: @bubble-on-surface-variant;
 }
 
 .bubble-settings label.title-2 {
-    color: #f3f6ff;
+    color: @bubble-on-surface;
     font-weight: 700;
 }
 
 .bubble-settings button {
     background-image: none;
-    background-color: #252b3e;
-    color: #edf1fb;
-    border: 1px solid #3a4562;
+    background-color: @bubble-surface-variant;
+    color: @bubble-on-surface;
+    border: 1px solid @bubble-outline;
     border-radius: 9px;
     padding: 8px 14px;
     transition: background-color 150ms ease;
 }
 
 .bubble-settings button:hover {
-    background-color: #303b58;
+    background-color: @bubble-primary-container;
 }
 
 .bubble-settings button.bubble-primary {
-    background-color: #3478d4;
-    color: #ffffff;
-    border-color: #4b91f0;
+    background-color: @bubble-primary;
+    color: @bubble-on-primary;
+    border-color: @bubble-primary;
     font-weight: 700;
 }
 
 .bubble-settings button.bubble-primary:hover {
-    background-color: #438be8;
+    background-color: @bubble-primary-container;
+    color: @bubble-on-primary-container;
 }
 
 .bubble-settings entry,
 .bubble-settings dropdown,
 .bubble-settings combobox button {
-    background-color: #191e2c;
-    color: #edf1fb;
-    border: 1px solid #343d55;
+    background-color: @bubble-background;
+    color: @bubble-on-surface;
+    border: 1px solid @bubble-outline;
     border-radius: 8px;
     min-height: 36px;
 }
 
 .bubble-settings checkbutton {
-    color: #e2e8f5;
+    color: @bubble-on-surface;
 }
 
 .bubble-settings checkbutton check {
     border-radius: 5px;
-    border-color: #53617e;
-    background-color: #191e2c;
+    border-color: @bubble-outline;
+    background-color: @bubble-background;
 }
 
 .bubble-settings checkbutton:checked check {
-    background-color: #3478d4;
-    border-color: #5a9af0;
+    background-color: @bubble-primary;
+    border-color: @bubble-primary;
 }
 
 .bubble-settings .bubble-status {
-    color: #9fc5ff;
-    background-color: #1a2940;
-    border: 1px solid #2e4d75;
+    color: @bubble-info;
+    background-color: @bubble-primary-container;
+    border: 1px solid @bubble-outline;
     border-radius: 8px;
     padding: 9px 12px;
 }
 
 .bubble-settings .bubble-palette-swatch {
-    background-color: #1b1f2e;
-    border: 1px solid #343b50;
+    background-color: @bubble-surface;
+    border: 1px solid @bubble-outline;
     border-radius: 10px;
     padding: 12px;
 }
 
 .bubble-settings separator {
-    background-color: #292e40;
+    background-color: @bubble-outline;
 }
