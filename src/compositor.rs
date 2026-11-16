@@ -3229,7 +3229,8 @@ pub fn run_winit_with_theme(
                         let focus = keyboard.current_focus();
                         state.remember_input_serial(serial, focus);
                     }
-                    keyboard.input::<(), _>(
+                    let mut resolved_keysym = None;
+                    let intercepted = keyboard.input::<(), _>(
                         &mut state,
                         event.key_code(),
                         event.state(),
@@ -3238,6 +3239,7 @@ pub fn run_winit_with_theme(
                         |compositor, modifiers, key| {
                             compositor.logo_modifier_pressed = modifiers.logo;
                             let keysym = key.modified_sym();
+                            resolved_keysym = Some(keysym);
                             if event.state() == smithay::backend::input::KeyState::Pressed {
                                 if let Some(action) = compositor_shortcut(*modifiers, keysym) {
                                     if suppress_shortcut_press(
@@ -3289,6 +3291,21 @@ pub fn run_winit_with_theme(
                                 FilterResult::Forward
                             }
                         },
+                    );
+                    let focused_client = keyboard
+                        .current_focus()
+                        .and_then(|surface| state.display_handle.get_client(surface.id()).ok())
+                        .map(|client| format!("{:?}", client.id()))
+                        .unwrap_or_else(|| "<none>".into());
+                    info!(
+                        key_code = ?key_code,
+                        state = ?event.state(),
+                        keysym = ?resolved_keysym,
+                        intercepted = intercepted.is_some(),
+                        keyboard_focused = keyboard.is_focused(),
+                        keyboard_grabbed = keyboard.is_grabbed(),
+                        focused_client = %focused_client,
+                        "Keyboard input delivery decision"
                     );
                 }
             }
@@ -3481,7 +3498,14 @@ pub fn run_winit_with_theme(
                     pointer.frame(&mut state);
                 }
             }
-            WinitEvent::Focus(_) | WinitEvent::Redraw | WinitEvent::Input(_) => {}
+            WinitEvent::Focus(focused) => {
+                info!(
+                    host_focused = focused,
+                    keyboard_focused = state.keyboard.as_ref().is_some_and(|keyboard| keyboard.is_focused()),
+                    "Winit host window focus event"
+                );
+            }
+            WinitEvent::Redraw | WinitEvent::Input(_) => {}
         });
 
         if matches!(status, PumpStatus::Exit(_)) || !running {
