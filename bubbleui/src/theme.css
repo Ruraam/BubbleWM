@@ -18,8 +18,26 @@
     opacity: 0.55;
 }
 
+.bubble-button-primary {
+    background-color: @bubble-primary;
+    color: @bubble-on-primary;
+    border-color: @bubble-primary;
+    font-weight: 700;
+}
+
+.bubble-button-primary:hover {
+    background-color: @bubble-primary-container;
+    color: @bubble-on-primary-container;
+    border-color: @bubble-primary-container;
+}
+
 .bubble-label {
     color: @bubble-on-surface;
+}
+
+.bubble-heading {
+    color: @bubble-on-surface;
+    font-weight: 700;
 }
 
 .bubble-text-muted {
@@ -59,6 +77,7 @@
     background-color: @bubble-surface;
     border: 1px solid @bubble-outline;
     border-radius: 12px;
+    padding: 16px;
 }
 
 .bubble-glass {
