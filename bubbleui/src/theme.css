@@ -1,0 +1,88 @@
+/* BubbleUI — semantic styles driven by BubblePalette */
+
+.bubble-button {
+    background-image: none;
+    background-color: @bubble-surface-variant;
+    color: @bubble-on-surface;
+    border: 1px solid @bubble-outline;
+    border-radius: 9px;
+    padding: 8px 14px;
+}
+
+.bubble-button:hover {
+    background-color: @bubble-primary-container;
+    color: @bubble-on-primary-container;
+}
+
+.bubble-button:disabled {
+    opacity: 0.55;
+}
+
+.bubble-button-primary {
+    background-color: @bubble-primary;
+    color: @bubble-on-primary;
+    border-color: @bubble-primary;
+    font-weight: 700;
+}
+
+.bubble-button-primary:hover {
+    background-color: @bubble-primary-container;
+    color: @bubble-on-primary-container;
+    border-color: @bubble-primary-container;
+}
+
+.bubble-label {
+    color: @bubble-on-surface;
+}
+
+.bubble-heading {
+    color: @bubble-on-surface;
+    font-weight: 700;
+}
+
+.bubble-text-muted {
+    color: @bubble-on-surface-variant;
+}
+
+.bubble-text-primary {
+    color: @bubble-primary;
+}
+
+.bubble-text-secondary {
+    color: @bubble-secondary;
+}
+
+.bubble-text-tertiary {
+    color: @bubble-tertiary;
+}
+
+.bubble-status-success {
+    color: @bubble-success;
+}
+
+.bubble-status-warning {
+    color: @bubble-warning;
+}
+
+.bubble-status-error {
+    color: @bubble-error;
+}
+
+.bubble-status-info {
+    color: @bubble-info;
+}
+
+.bubble-surface {
+    color: @bubble-on-surface;
+    background-color: @bubble-surface;
+    border: 1px solid @bubble-outline;
+    border-radius: 12px;
+    padding: 16px;
+}
+
+.bubble-glass {
+    background-color: @bubble-glass-tint;
+    border: 1px solid @bubble-glass-border;
+    color: @bubble-on-surface;
+    border-radius: 12px;
+}

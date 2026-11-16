@@ -1,0 +1,12 @@
+[package]
+name = "bubbleui"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+license = "GPL-3.0-or-later"
+description = "Native UI toolkit and visual system for BubbleOS."
+repository = "https://github.com/Ruraam/BubbleWM"
+
+[dependencies]
+gtk = { package = "gtk4", version = "0.10" }
+glib = "0.21"

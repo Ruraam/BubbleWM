@@ -451,6 +451,75 @@ mod tests {
     }
 
     #[test]
+    fn appearance_preferences_survive_atomic_save_and_reload() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("config.toml");
+        let mut config = Config::default();
+
+        config.appearance.wallpaper = Some("/home/test/Pictures/wallpaper.webp".into());
+        config.appearance.wallpaper_mode = "cover".into();
+        config.appearance.icon_theme = "Bubble-Neon".into();
+        config.appearance.cursor_theme = "Bibata-Modern-Ice".into();
+        config.appearance.cursor_size = 32;
+        config.appearance.font_family = "Inter".into();
+        config.appearance.monospace_font_family = "JetBrains Mono".into();
+        config.appearance.font_size = 12;
+        config.appearance.color_scheme = "light".into();
+        config.appearance.accent_color = "#12ABEF".into();
+        config.bubble_color.enabled = false;
+        config.bubble_color.palette_variant = "neon".into();
+        config.bubble_color.enforce_contrast = false;
+
+        save_atomic(&path, &config).expect("appearance preferences should save");
+        let loaded = load(Some(path.to_str().expect("UTF-8 config path")))
+            .expect("saved appearance preferences should reload");
+
+        assert_eq!(
+            loaded.appearance.wallpaper.as_deref(),
+            Some("/home/test/Pictures/wallpaper.webp")
+        );
+        assert_eq!(loaded.appearance.wallpaper_mode, "cover");
+        assert_eq!(loaded.appearance.icon_theme, "Bubble-Neon");
+        assert_eq!(loaded.appearance.cursor_theme, "Bibata-Modern-Ice");
+        assert_eq!(loaded.appearance.cursor_size, 32);
+        assert_eq!(loaded.appearance.font_family, "Inter");
+        assert_eq!(loaded.appearance.monospace_font_family, "JetBrains Mono");
+        assert_eq!(loaded.appearance.font_size, 12);
+        assert_eq!(loaded.appearance.color_scheme, "light");
+        assert_eq!(loaded.appearance.accent_color, "#12ABEF");
+        assert!(!loaded.bubble_color.enabled);
+        assert_eq!(loaded.bubble_color.palette_variant, "neon");
+        assert!(!loaded.bubble_color.enforce_contrast);
+    }
+
+    #[test]
+    fn load_rejects_invalid_persisted_appearance_preferences() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("config.toml");
+
+        for (field, value) in [
+            ("color_scheme", "sepia"),
+            ("wallpaper_mode", "stretch"),
+            ("accent_color", "not-a-color"),
+        ] {
+            let mut config = Config::default();
+            match field {
+                "color_scheme" => config.appearance.color_scheme = value.into(),
+                "wallpaper_mode" => config.appearance.wallpaper_mode = value.into(),
+                "accent_color" => config.appearance.accent_color = value.into(),
+                _ => unreachable!("test case must target an appearance field"),
+            }
+            let serialized = toml::to_string_pretty(&config).expect("serialize test config");
+            fs::write(&path, serialized).expect("write invalid persisted config");
+
+            assert!(
+                load(Some(path.to_str().expect("UTF-8 config path"))).is_err(),
+                "load must reject invalid appearance.{field}"
+            );
+        }
+    }
+
+    #[test]
     fn invalid_config_does_not_replace_existing_file() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let path = directory.path().join("config.toml");
