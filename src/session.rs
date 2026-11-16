@@ -40,6 +40,26 @@ pub struct SessionSnapshot {
     pub vt_number: Option<u32>,
 }
 
+impl SessionSnapshot {
+    /// Builds the normalized snapshot from a session already validated by logind.
+    ///
+    /// This conversion must only be used with a value returned by
+    /// `LogindProbe::session` or `LogindProbe::current_session`. It does not
+    /// independently authenticate arbitrary worker-provided metadata.
+    pub(crate) fn from_validated_logind(session: logind::LogindSession) -> Self {
+        Self {
+            uid: session.uid,
+            session_id: session.id,
+            session_type: session.session_type,
+            class: session.class,
+            active: session.active,
+            runtime_dir: session.runtime_dir,
+            seat: session.seat,
+            vt_number: session.vt_number,
+        }
+    }
+}
+
 /// Session policy exposed to the compositor and shell clients.
 #[derive(Debug, Clone, Copy)]
 pub struct SessionManager {
