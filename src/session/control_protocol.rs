@@ -203,7 +203,7 @@ fn take_bytes<const N: usize>(input: &[u8], offset: &mut usize) -> io::Result<[u
         .map_err(|_| invalid_data("truncated session metadata"))
 }
 
-fn take_slice(input: &[u8], offset: &mut usize, length: usize) -> io::Result<&[u8]> {
+fn take_slice<'a>(input: &'a [u8], offset: &mut usize, length: usize) -> io::Result<&'a [u8]> {
     let end = offset
         .checked_add(length)
         .ok_or_else(|| invalid_data("session metadata length overflow"))?;
