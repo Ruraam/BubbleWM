@@ -34,20 +34,14 @@ pub(crate) struct SessionReady {
 }
 
 /// Writes the exact worker bootstrap marker before any metadata is sent.
-pub(crate) fn write_worker_hello(
-    stream: &mut UnixStream,
-    timeout: Duration,
-) -> io::Result<()> {
+pub(crate) fn write_worker_hello(stream: &mut UnixStream, timeout: Duration) -> io::Result<()> {
     let deadline = deadline_after(timeout)?;
     prepare_nonblocking(stream)?;
     write_all_until(stream, WORKER_HELLO, deadline)
 }
 
 /// Reads and verifies the exact worker bootstrap marker.
-pub(crate) fn read_worker_hello(
-    stream: &mut UnixStream,
-    timeout: Duration,
-) -> io::Result<()> {
+pub(crate) fn read_worker_hello(stream: &mut UnixStream, timeout: Duration) -> io::Result<()> {
     let deadline = deadline_after(timeout)?;
     prepare_nonblocking(stream)?;
     let mut hello = [0_u8; WORKER_HELLO.len()];
@@ -128,7 +122,11 @@ fn decode_payload(payload: &[u8]) -> io::Result<SessionReady> {
         session_id,
         runtime_dir,
         seat: if seat.is_empty() { None } else { Some(seat) },
-        vt_number: if vt_number == 0 { None } else { Some(vt_number) },
+        vt_number: if vt_number == 0 {
+            None
+        } else {
+            Some(vt_number)
+        },
     };
     validate(&ready).map_err(|_| invalid_data("invalid session metadata"))?;
     Ok(ready)
@@ -151,7 +149,9 @@ fn validate(ready: &SessionReady) -> io::Result<()> {
     let runtime = Path::new(&ready.runtime_dir);
     if ready.runtime_dir.len() > MAX_RUNTIME_DIR
         || !runtime.is_absolute()
-        || runtime.components().any(|part| matches!(part, Component::ParentDir))
+        || runtime
+            .components()
+            .any(|part| matches!(part, Component::ParentDir))
         || ready.runtime_dir.chars().any(char::is_control)
     {
         return Err(invalid_input("invalid XDG_RUNTIME_DIR metadata"));
@@ -234,7 +234,10 @@ fn wait_ready(stream: &UnixStream, events: i16, deadline: Instant) -> io::Result
             ));
         }
         let remaining = deadline - now;
-        let millis = remaining.as_millis().saturating_add(1).min(i32::MAX as u128) as i32;
+        let millis = remaining
+            .as_millis()
+            .saturating_add(1)
+            .min(i32::MAX as u128) as i32;
         let mut descriptor = libc::pollfd {
             fd: stream.as_raw_fd(),
             events,
@@ -282,11 +285,7 @@ fn read_exact_until(
     Ok(())
 }
 
-fn write_all_until(
-    stream: &mut UnixStream,
-    mut input: &[u8],
-    deadline: Instant,
-) -> io::Result<()> {
+fn write_all_until(stream: &mut UnixStream, mut input: &[u8], deadline: Instant) -> io::Result<()> {
     while !input.is_empty() {
         wait_ready(stream, libc::POLLOUT, deadline)?;
         match stream.write(input) {
