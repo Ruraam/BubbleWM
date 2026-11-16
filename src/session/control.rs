@@ -9,11 +9,7 @@ use std::{
     io,
     os::{
         fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
-        unix::{
-            ffi::OsStrExt,
-            net::UnixStream,
-            process::ExitStatusExt,
-        },
+        unix::{ffi::OsStrExt, net::UnixStream, process::ExitStatusExt},
     },
     path::Path,
     process::ExitStatus,
@@ -71,8 +67,11 @@ fn take_worker_channel_from_fd(fd: RawFd) -> io::Result<UnixStream> {
             &mut domain as *mut _ as *mut libc::c_void,
             &mut domain_len,
         )
-    } < 0 {
-        return Err(invalid_input("worker descriptor is not a connected Unix stream"));
+    } < 0
+    {
+        return Err(invalid_input(
+            "worker descriptor is not a connected Unix stream",
+        ));
     }
 
     let mut socket_type: libc::c_int = 0;
@@ -86,8 +85,13 @@ fn take_worker_channel_from_fd(fd: RawFd) -> io::Result<UnixStream> {
             &mut socket_type as *mut _ as *mut libc::c_void,
             &mut type_len,
         )
-    } < 0 || domain != libc::AF_UNIX || socket_type != libc::SOCK_STREAM {
-        return Err(invalid_input("worker descriptor is not a connected Unix stream"));
+    } < 0
+        || domain != libc::AF_UNIX
+        || socket_type != libc::SOCK_STREAM
+    {
+        return Err(invalid_input(
+            "worker descriptor is not a connected Unix stream",
+        ));
     }
 
     let mut peer: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
@@ -99,7 +103,8 @@ fn take_worker_channel_from_fd(fd: RawFd) -> io::Result<UnixStream> {
             &mut peer as *mut _ as *mut libc::sockaddr,
             &mut peer_len,
         )
-    } < 0 {
+    } < 0
+    {
         return Err(invalid_input("worker control socket has no connected peer"));
     }
 
@@ -143,13 +148,7 @@ pub(crate) fn spawn_worker_with_channel(
 
     // Keep the duplicate above fd 3 so the child can safely dup it to fd 3.
     // SAFETY: worker_channel owns a valid socket descriptor.
-    let duplicate = unsafe {
-        libc::fcntl(
-            worker_channel.as_raw_fd(),
-            libc::F_DUPFD_CLOEXEC,
-            4,
-        )
-    };
+    let duplicate = unsafe { libc::fcntl(worker_channel.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 4) };
     if duplicate < 0 {
         return Err(io::Error::last_os_error());
     }
@@ -165,16 +164,12 @@ pub(crate) fn spawn_worker_with_channel(
     let mut actions = SpawnFileActions(unsafe { actions_storage.assume_init() });
 
     // SAFETY: actions is initialized and duplicate is an open descriptor.
-    let status = unsafe {
-        libc::posix_spawn_file_actions_adddup2(&mut actions.0, duplicate.0, 3)
-    };
+    let status = unsafe { libc::posix_spawn_file_actions_adddup2(&mut actions.0, duplicate.0, 3) };
     if status != 0 {
         return Err(io::Error::from_raw_os_error(status));
     }
     // SAFETY: duplicate is closed in the child after fd 3 has been established.
-    let status = unsafe {
-        libc::posix_spawn_file_actions_addclose(&mut actions.0, duplicate.0)
-    };
+    let status = unsafe { libc::posix_spawn_file_actions_addclose(&mut actions.0, duplicate.0) };
     if status != 0 {
         return Err(io::Error::from_raw_os_error(status));
     }
@@ -322,8 +317,7 @@ impl Drop for WorkerProcess {
             // SAFETY: pid is owned by this handle and status is writable.
             let result = unsafe { libc::waitpid(self.pid, &mut status, 0) };
             if result == self.pid
-                || (result < 0
-                    && io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD))
+                || (result < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD))
             {
                 self.reaped = true;
                 break;
@@ -360,7 +354,10 @@ impl Drop for SpawnFileActions {
 }
 
 fn already_reaped() -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidInput, "worker has already been reaped")
+    io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "worker has already been reaped",
+    )
 }
 
 fn invalid_input(message: &'static str) -> io::Error {
@@ -409,7 +406,10 @@ mod tests {
     fn worker_channel_take_rejects_non_socket_and_closes_descriptor() {
         let mut pipe_fds = [-1; 2];
         // SAFETY: pipe_fds points to two writable descriptor slots.
-        assert_eq!(unsafe { libc::pipe2(pipe_fds.as_mut_ptr(), libc::O_CLOEXEC) }, 0);
+        assert_eq!(
+            unsafe { libc::pipe2(pipe_fds.as_mut_ptr(), libc::O_CLOEXEC) },
+            0
+        );
         let error = take_worker_channel_from_fd(pipe_fds[0]).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         // SAFETY: pipe_fds[0] was transferred and closed by the function.
@@ -447,8 +447,15 @@ mod tests {
         )
         .unwrap();
 
-        assert!(worker.wait_timeout(Duration::from_millis(20)).unwrap().is_none());
-        let status = worker.terminate_and_reap(Duration::from_millis(100)).unwrap();
+        assert!(
+            worker
+                .wait_timeout(Duration::from_millis(20))
+                .unwrap()
+                .is_none()
+        );
+        let status = worker
+            .terminate_and_reap(Duration::from_millis(100))
+            .unwrap();
         assert_eq!(status.signal(), Some(libc::SIGTERM));
         assert!(worker.try_wait().is_err());
     }
@@ -468,19 +475,20 @@ mod tests {
 
         let mut status = 0;
         // SAFETY: checking that the child was already reaped.
-        assert_eq!(unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) }, -1);
-        assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::ECHILD));
+        assert_eq!(
+            unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) },
+            -1
+        );
+        assert_eq!(
+            io::Error::last_os_error().raw_os_error(),
+            Some(libc::ECHILD)
+        );
     }
 
     #[test]
     fn spawn_rejects_relative_executable_paths() {
         let (_supervisor, worker_channel) = private_channel_pair().unwrap();
-        let error = spawn_worker_with_channel(
-            OsStr::new("sh"),
-            &[],
-            worker_channel,
-        )
-        .unwrap_err();
+        let error = spawn_worker_with_channel(OsStr::new("sh"), &[], worker_channel).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     }
 }
