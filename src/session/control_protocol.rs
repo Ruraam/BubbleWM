@@ -404,6 +404,7 @@ mod tests {
         let count = temporary_reader.read(&mut buffer).unwrap();
         frame.extend_from_slice(&buffer[..count - 1]);
         sender.write_all(&frame).unwrap();
+        drop(sender);
         assert_eq!(
             read_session_ready(&mut receiver, Duration::from_secs(1))
                 .unwrap_err()
