@@ -6,6 +6,7 @@
 //! host session, so power and logout actions are always rejected.
 
 pub mod control;
+pub mod control_protocol;
 pub mod lifecycle;
 pub mod logind;
 pub mod worker;
