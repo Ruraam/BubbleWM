@@ -9,6 +9,7 @@ repository = "https://github.com/Ruraam/BubbleWM"
 
 [dependencies]
 bubble-ipc = { path = "../bubble-ipc" }
+bubbleui = { path = "../bubbleui" }
 bubblewm = { path = ".." }
 gtk = { package = "gtk4", version = "0.10" }
 glib = "0.21"
