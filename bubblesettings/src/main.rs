@@ -16,6 +16,7 @@ use std::{
 };
 
 use bubble_ipc::{Request, Response, ResponseData, ThemePalette, unix::UnixIpcClient};
+use bubbleui::theme::{BubblePalette, Color};
 use bubblewm::config::{self, Config};
 use gtk::prelude::*;
 
@@ -29,17 +30,10 @@ fn main() -> glib::ExitCode {
 }
 
 fn install_styles() {
-    bubbleui::theme::install();
-    let provider = gtk::CssProvider::new();
-    provider.load_from_data(include_str!("style.css"));
-
-    if let Some(display) = gtk::gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(
-            &display,
-            &provider,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-    }
+    bubbleui::theme::install_with_palette_and_css(
+        &BubblePalette::default(),
+        include_str!("style.css"),
+    );
 }
 
 fn build_ui(application: &gtk::Application) {
@@ -412,6 +406,7 @@ fn start_palette_monitor(grid: gtk::Grid, status: gtk::Label) {
 
     let grid = RefCell::new(grid);
     let status = RefCell::new(status);
+    let mut applied_generation = None;
     glib::timeout_add_seconds_local(1, move || {
         match receiver.try_recv() {
             Ok(Ok(Response::Success {
@@ -420,7 +415,15 @@ fn start_palette_monitor(grid: gtk::Grid, status: gtk::Label) {
                         palette: Some(palette),
                     },
             })) if palette.schema_version == 1 => {
-                render_palette(&grid.borrow(), &palette);
+                if applied_generation != Some(palette.generation) {
+                    let bubble_palette = bubble_palette_from_ipc(&palette);
+                    bubbleui::theme::install_with_palette_and_css(
+                        &bubble_palette,
+                        include_str!("style.css"),
+                    );
+                    render_palette(&grid.borrow(), &palette);
+                    applied_generation = Some(palette.generation);
+                }
                 status.borrow().set_text(&format!(
                     "Connecté à BubbleWM · génération {}",
                     palette.generation
@@ -470,6 +473,27 @@ fn clear_palette(grid: &gtk::Grid) {
     }
 }
 
+fn bubble_palette_from_ipc(palette: &ThemePalette) -> BubblePalette {
+    let fallback = BubblePalette::default();
+    BubblePalette {
+        primary: ipc_color(palette.primary),
+        primary_container: ipc_color(palette.primary_container),
+        on_primary_container: ipc_color(palette.on_primary_container),
+        surface: ipc_color(palette.surface),
+        on_surface: ipc_color(palette.on_surface),
+        surface_variant: ipc_color(palette.surface_variant),
+        outline: ipc_color(palette.outline),
+        warning: ipc_color(palette.warning),
+        success: ipc_color(palette.success),
+        error: ipc_color(palette.error),
+        ..fallback
+    }
+}
+
+fn ipc_color(rgb: [u8; 3]) -> Color {
+    Color::new(rgb[0], rgb[1], rgb[2])
+}
+
 fn render_palette(grid: &gtk::Grid, palette: &ThemePalette) {
     clear_palette(grid);
 
@@ -515,6 +539,45 @@ fn render_palette(grid: &gtk::Grid, palette: &ThemePalette) {
         card.append(&hex_label);
 
         grid.attach(&card, (index % 2) as i32, (index / 2) as i32, 1, 1);
+    }
+}
+
+#[cfg(test)]
+mod ipc_palette_tests {
+    use super::*;
+
+    #[test]
+    fn ipc_palette_updates_supported_roles_and_preserves_fallbacks() {
+        let ipc = ThemePalette {
+            schema_version: 1,
+            generation: 7,
+            primary: [1, 2, 3],
+            primary_container: [4, 5, 6],
+            on_primary_container: [7, 8, 9],
+            surface: [10, 11, 12],
+            on_surface: [13, 14, 15],
+            surface_variant: [16, 17, 18],
+            outline: [19, 20, 21],
+            warning: [22, 23, 24],
+            success: [25, 26, 27],
+            error: [28, 29, 30],
+        };
+
+        let actual = bubble_palette_from_ipc(&ipc);
+        let fallback = BubblePalette::default();
+
+        assert_eq!(actual.primary, Color::new(1, 2, 3));
+        assert_eq!(actual.primary_container, Color::new(4, 5, 6));
+        assert_eq!(actual.on_primary_container, Color::new(7, 8, 9));
+        assert_eq!(actual.surface, Color::new(10, 11, 12));
+        assert_eq!(actual.on_surface, Color::new(13, 14, 15));
+        assert_eq!(actual.surface_variant, Color::new(16, 17, 18));
+        assert_eq!(actual.outline, Color::new(19, 20, 21));
+        assert_eq!(actual.warning, Color::new(22, 23, 24));
+        assert_eq!(actual.success, Color::new(25, 26, 27));
+        assert_eq!(actual.error, Color::new(28, 29, 30));
+        assert_eq!(actual.secondary, fallback.secondary);
+        assert_eq!(actual.neon_cyan, fallback.neon_cyan);
     }
 }
 
