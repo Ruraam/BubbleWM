@@ -928,7 +928,6 @@ impl CompositorStateData {
             if has_buffer {
                 let content_location = self.content_location(&window, location);
                 self.space.map_element(window, content_location, false);
-
             }
         }
     }
@@ -1935,7 +1934,9 @@ impl CompositorStateData {
                                 && !entry.minimized
                                 && entry.workspace == self.active_workspace
                                 && self.space.element_location(&entry.window).is_some()
-                                && let Some(child) = entry.window.toplevel()
+                                && let Some(child) = entry
+                                    .window
+                                    .toplevel()
                                     .map(|toplevel| toplevel.wl_surface().clone())
                                 && !family.contains(&child)
                             {
@@ -3205,15 +3206,18 @@ pub fn run_winit_with_theme(
             WinitEvent::Input(InputEvent::Keyboard { event }) => {
                 let key_code = event.key_code();
                 if let Some(keyboard) = state.keyboard.clone() {
-                    let focused_title = keyboard.current_focus().and_then(|focused| {
-                        state.windows.iter().find_map(|entry| {
-                            entry.window.toplevel().and_then(|toplevel| {
-                                (toplevel.wl_surface() == &focused)
-                                    .then(|| toplevel_title(&toplevel))
-                                    .flatten()
+                    let focused_title = keyboard
+                        .current_focus()
+                        .and_then(|focused| {
+                            state.windows.iter().find_map(|entry| {
+                                entry.window.toplevel().and_then(|toplevel| {
+                                    (toplevel.wl_surface() == &focused)
+                                        .then(|| toplevel_title(&toplevel))
+                                        .flatten()
+                                })
                             })
                         })
-                    }).unwrap_or_else(|| "<none-or-non-toplevel>".into());
+                        .unwrap_or_else(|| "<none-or-non-toplevel>".into());
                     info!(
                         key_code = ?key_code,
                         state = ?event.state(),
