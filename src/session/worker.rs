@@ -11,13 +11,23 @@ use std::{
 
 use anyhow::{Context, Result};
 
-use super::logind::{LogindAvailability, LogindProbe, LogindSession};
+use super::{
+    SessionSnapshot,
+    logind::{LogindAvailability, LogindProbe, LogindSession},
+};
 
 /// A read-only snapshot collected from systemd-logind.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogindSnapshot {
     pub session: LogindSession,
     pub availability: LogindAvailability,
+}
+
+impl LogindSnapshot {
+    /// Returns the normalized session metadata validated by the logind probe.
+    pub fn session_snapshot(&self) -> SessionSnapshot {
+        SessionSnapshot::from_validated_logind(self.session.clone())
+    }
 }
 
 /// Owns the receiving side of a one-shot logind probe.
@@ -115,6 +125,9 @@ mod tests {
                 session_type: "wayland".to_owned(),
                 class: "user".to_owned(),
                 active: true,
+                runtime_dir: "/run/user/1000".to_owned(),
+                seat: Some("seat0".to_owned()),
+                vt_number: Some(2),
             },
             availability: LogindAvailability {
                 suspend: ActionAvailability::Yes,
@@ -129,7 +142,20 @@ mod tests {
         let expected = snapshot();
         let mut worker = worker_with_result(Ok(expected.clone()));
 
-        assert_eq!(worker.try_result().unwrap(), Some(expected));
+        assert_eq!(worker.try_result().unwrap(), Some(expected.clone()));
+        assert_eq!(
+            expected.session_snapshot(),
+            SessionSnapshot {
+                uid: 1000,
+                session_id: "c2".to_owned(),
+                session_type: "wayland".to_owned(),
+                class: "user".to_owned(),
+                active: true,
+                runtime_dir: "/run/user/1000".to_owned(),
+                seat: Some("seat0".to_owned()),
+                vt_number: Some(2),
+            }
+        );
         assert_eq!(worker.try_result().unwrap(), None);
     }
 
