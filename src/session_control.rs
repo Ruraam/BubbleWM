@@ -722,6 +722,32 @@ mod tests {
     }
 
     #[test]
+    fn dropping_unreaped_worker_kills_and_reaps_child() {
+        let (_supervisor, worker_channel) = private_channel_pair().unwrap();
+        let worker = spawn_worker_with_channel(
+            std::ffi::OsStr::new("/bin/sleep"),
+            &[std::ffi::OsString::from("30")],
+            worker_channel,
+        )
+        .unwrap();
+        let pid = worker.id();
+
+        let mut status = 0;
+        assert_eq!(unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) }, 0);
+
+        drop(worker);
+
+        assert_eq!(
+            unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) },
+            -1
+        );
+        assert_eq!(
+            io::Error::last_os_error().raw_os_error(),
+            Some(libc::ECHILD)
+        );
+    }
+
+    #[test]
     fn session_ready_round_trips_over_a_stream() {
         let expected = sample();
         let mut frame = Vec::new();
