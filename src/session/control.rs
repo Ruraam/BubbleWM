@@ -423,10 +423,7 @@ mod tests {
         let (mut supervisor, worker_channel) = private_channel_pair().unwrap();
         let mut worker = spawn_worker_with_channel(
             OsStr::new("/bin/sh"),
-            &[
-                OsString::from("-c"),
-                OsString::from("printf ok >&3"),
-            ],
+            &[OsString::from("-c"), OsString::from("printf ok >&3")],
             worker_channel,
         )
         .unwrap();
