@@ -13,6 +13,33 @@ use bubble_ipc::{
     SessionState,
 };
 
+/// Transport-neutral description of the current user session.
+///
+/// This is a data contract shared by session discovery and session policy; it
+/// does not itself establish trust. Values received from a session worker must
+/// be treated as untrusted until the identity fields have been independently
+/// checked against logind. In particular, a worker-provided UID or session ID
+/// must never be accepted as proof of the caller's identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionSnapshot {
+    /// Effective UID that owns the session.
+    pub uid: u32,
+    /// Logind session identifier.
+    pub session_id: String,
+    /// Session type reported by logind (for example, `wayland`).
+    pub session_type: String,
+    /// Logind session class (for example, `user`).
+    pub class: String,
+    /// Whether logind currently considers the session active.
+    pub active: bool,
+    /// Runtime directory associated with the session.
+    pub runtime_dir: String,
+    /// Logind seat associated with the session, when available.
+    pub seat: Option<String>,
+    /// Virtual terminal number associated with the session, when available.
+    pub vt_number: Option<u32>,
+}
+
 /// Session policy exposed to the compositor and shell clients.
 #[derive(Debug, Clone, Copy)]
 pub struct SessionManager {
