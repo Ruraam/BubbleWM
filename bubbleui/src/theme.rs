@@ -234,6 +234,10 @@ mod tests {
             primary: Color::new(1, 2, 3),
             ..BubblePalette::default()
         };
-        assert!(palette.css_definitions().contains("@define-color bubble-primary #010203;"));
+        assert!(
+            palette
+                .css_definitions()
+                .contains("@define-color bubble-primary #010203;")
+        );
     }
 }
