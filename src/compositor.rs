@@ -3501,7 +3501,10 @@ pub fn run_winit_with_theme(
             WinitEvent::Focus(focused) => {
                 info!(
                     host_focused = focused,
-                    keyboard_focused = state.keyboard.as_ref().is_some_and(|keyboard| keyboard.is_focused()),
+                    keyboard_focused = state
+                        .keyboard
+                        .as_ref()
+                        .is_some_and(|keyboard| keyboard.is_focused()),
                     "Winit host window focus event"
                 );
             }
