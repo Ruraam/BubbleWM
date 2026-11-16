@@ -86,10 +86,7 @@ impl SessionLifecycle {
     }
 
     /// Advances to the next phase if the transition is legal.
-    pub fn transition(
-        &mut self,
-        next: SessionPhase,
-    ) -> Result<(), InvalidSessionTransition> {
+    pub fn transition(&mut self, next: SessionPhase) -> Result<(), InvalidSessionTransition> {
         if !self.phase.allows(next) {
             return Err(InvalidSessionTransition {
                 from: self.phase,
