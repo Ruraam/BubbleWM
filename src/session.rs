@@ -5,6 +5,7 @@
 //! The nested Winit backend is intentionally read-only with respect to the
 //! host session, so power and logout actions are always rejected.
 
+pub mod lifecycle;
 pub mod logind;
 pub mod worker;
 
