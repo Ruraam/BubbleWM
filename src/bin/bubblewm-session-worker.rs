@@ -79,6 +79,7 @@ fn run() -> Result<i32, String> {
         || {
             let result = process
                 .terminate(TERMINATION_GRACE)
+                .map(|_| ())
                 .map_err(|error| format!("impossible de nettoyer le groupe utilisateur: {error}"));
             drop(process);
             result
