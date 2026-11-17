@@ -87,9 +87,11 @@ The production design must keep the supervisor outside the user session scope:
    variables. At process startup, before creating threads, it must call
    `take_worker_channel`; that validates a connected Unix stream socket and
    sets `FD_CLOEXEC` again to prevent the channel leaking into later execs.
-   The spawn primitive uses an empty environment and does not yet enforce a
-   general close-all-unrelated-descriptors policy, so the production
-   supervisor must retain a strict descriptor hygiene policy. Before trusting
+   The spawn primitive uses an empty environment. Immediately after taking
+   ownership of fd 3, the single-threaded worker closes every descriptor from
+   fd 4 upward with Linux `close_range`, falling back to enumeration through
+   `/proc/self/fd` when the syscall is unavailable. This prevents inherited
+   descriptors from reaching PAM handling or the compositor. Before trusting
    any later worker output, the supervisor must read and validate the exact
    fixed `BUBWORK1` bootstrap marker; EOF, truncation or a different marker is
    a worker-start failure.
