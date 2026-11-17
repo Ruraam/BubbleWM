@@ -2839,11 +2839,33 @@ impl CompositorStateData {
             return;
         };
         let workspace = self.windows[index].workspace;
-        self.windows[index].minimized = false;
-        self.windows[index].minimized_order = None;
         let window = self.windows[index].window.clone();
+        let root = window
+            .toplevel()
+            .map(|toplevel| self.root_surface_for_toplevel(toplevel.wl_surface()));
+        let family = root
+            .as_ref()
+            .map(|root| self.window_family_surfaces(root))
+            .unwrap_or_default();
+
+        let mut restored_ids = Vec::new();
+        for entry in &mut self.windows {
+            let belongs_to_family = entry
+                .window
+                .toplevel()
+                .is_some_and(|toplevel| family.contains(toplevel.wl_surface()));
+            if belongs_to_family && entry.minimized {
+                entry.minimized = false;
+                entry.minimized_order = None;
+                restored_ids.push(entry.id);
+            }
+        }
+
         self.active_workspace = workspace;
         self.remap_active_workspace();
+        for restored_id in restored_ids {
+            self.animations.begin_restore(restored_id);
+        }
         self.raise_window_family(&window);
         if let (Some(keyboard), Some(toplevel)) = (self.keyboard.clone(), window.toplevel()) {
             keyboard.set_focus(
@@ -2853,6 +2875,7 @@ impl CompositorStateData {
             );
         }
         self.overlays.dirty = true;
+        self.overlays.window_masks_dirty = true;
     }
 
     fn minimize_window_by_id(&mut self, id: u64) {
