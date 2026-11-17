@@ -699,9 +699,10 @@ mod tests {
         .err()
         .expect("missing worker handshake must time out");
 
-        assert!(
-            matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut)
-        );
+        assert!(matches!(
+            error.kind(),
+            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+        ));
     }
 
     #[test]
