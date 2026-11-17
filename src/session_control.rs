@@ -548,25 +548,24 @@ impl SessionWorker {
     /// The returned values are untrusted claims: the privileged supervisor
     /// must independently validate them against logind before using them.
     /// Any framing, validation, timeout, or socket error fails closed by
-    /// closing the channel and terminating/reaping the worker.
+    /// closing the channel, allowing PAM cleanup, then force-stopping only
+    /// if the worker does not exit within the grace period.
     pub fn receive_session_ready(&mut self, timeout: Duration) -> io::Result<SessionReady> {
         if self.metadata_received {
-            self.channel.take();
-            let _ = self.process.terminate_and_reap(Duration::from_secs(1));
+            let _ = self.abort_and_reap(Duration::from_secs(1));
             return Err(invalid_data(
                 "worker has already supplied its session metadata frame",
             ));
         }
         let Some(channel) = self.channel.as_ref() else {
-            let _ = self.process.terminate_and_reap(Duration::from_secs(1));
+            let _ = self.abort_and_reap(Duration::from_secs(1));
             return Err(io::Error::new(
                 io::ErrorKind::NotConnected,
                 "worker channel is closed",
             ));
         };
         if let Err(error) = channel.set_read_timeout(Some(timeout)) {
-            self.channel.take();
-            let _ = self.process.terminate_and_reap(Duration::from_secs(1));
+            let _ = self.abort_and_reap(Duration::from_secs(1));
             return Err(error);
         }
         let channel = self.channel.as_mut().expect("channel checked above");
@@ -579,8 +578,7 @@ impl SessionWorker {
                 Ok(ready)
             }
             (Err(error), _) | (_, Err(error)) => {
-                self.channel.take();
-                let _ = self.process.terminate_and_reap(Duration::from_secs(1));
+                let _ = self.abort_and_reap(Duration::from_secs(1));
                 Err(error)
             }
         }
@@ -588,8 +586,9 @@ impl SessionWorker {
 
     /// Receives metadata and validates it against supervisor-trusted identity.
     ///
-    /// A mismatch is fatal: the channel is closed and the worker is terminated
-    /// and reaped before the error is returned. Callers that need to consume
+    /// A mismatch is fatal: the channel is closed, giving the worker time to
+    /// close PAM cleanly, and the worker is reaped before the error is returned.
+    /// Callers that need to consume
     /// worker metadata should prefer this method over the untrusted raw receive.
     pub fn receive_session_ready_against(
         &mut self,
@@ -598,8 +597,7 @@ impl SessionWorker {
     ) -> io::Result<SessionReady> {
         let ready = self.receive_session_ready(timeout)?;
         if let Err(error) = validate_session_ready_against(&ready, trusted) {
-            self.channel.take();
-            let _ = self.process.terminate_and_reap(Duration::from_secs(1));
+            let _ = self.abort_and_reap(Duration::from_secs(1));
             return Err(error);
         }
         Ok(ready)
@@ -624,7 +622,8 @@ impl SessionWorker {
             .write_all(SUPERVISOR_APPROVAL)
             .and_then(|()| channel.flush())
         {
-            let _ = self.process.terminate_and_reap(Duration::from_secs(1));
+            drop(channel);
+            let _ = self.abort_and_reap(Duration::from_secs(1));
             return Err(error);
         }
         Ok(())
@@ -633,6 +632,12 @@ impl SessionWorker {
     /// Closes the control channel and waits for graceful worker shutdown.
     /// If the worker does not exit before the grace period, it is terminated.
     pub fn shutdown(&mut self, grace: Duration) -> io::Result<std::process::ExitStatus> {
+        self.abort_and_reap(grace)
+    }
+
+    /// Closes the protocol channel before waiting, so a worker blocked on
+    /// supervisor approval can observe EOF and run its PAM Drop cleanup.
+    fn abort_and_reap(&mut self, grace: Duration) -> io::Result<std::process::ExitStatus> {
         self.channel.take();
         match self.process.wait_timeout(grace)? {
             Some(status) => Ok(status),
@@ -643,11 +648,7 @@ impl SessionWorker {
 
 impl Drop for SessionWorker {
     fn drop(&mut self) {
-        self.channel.take();
-        if self.process.try_wait().is_ok_and(|status| status.is_some()) {
-            return;
-        }
-        let _ = self.process.terminate_and_reap(Duration::from_millis(100));
+        let _ = self.abort_and_reap(Duration::from_secs(1));
     }
 }
 struct OwnedFdGuard(libc::c_int);
