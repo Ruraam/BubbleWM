@@ -55,8 +55,13 @@ fn run() -> Result<i32, String> {
 
     let mut password = read_password(io::stdin().lock())?;
     // PAM is now the only consumer of the secret; don't let the compositor
-    // inherit the password pipe descriptor.
-    unsafe { libc::close(libc::STDIN_FILENO) };
+    // inherit the password pipe descriptor. Fail closed if closing it fails.
+    if let Err(error) = close_password_pipe(libc::STDIN_FILENO) {
+        wipe_string(&mut password);
+        return Err(format!(
+            "impossible de fermer le pipe du mot de passe: {error}"
+        ));
+    }
     let session = PamLoginSession::open(user, &password, tty);
     wipe_string(&mut password);
     let session = session?;
@@ -78,6 +83,14 @@ fn run() -> Result<i32, String> {
     process_cleanup?;
     pam_cleanup?;
     Ok(status.code().unwrap_or(1))
+}
+
+/// Closes the password pipe before any user process can be spawned.
+fn close_password_pipe(fd: libc::c_int) -> io::Result<()> {
+    if unsafe { libc::close(fd) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 /// Closes every inherited descriptor except stdio and the private control socket.
@@ -202,6 +215,14 @@ mod tests {
     use super::*;
     use std::io::Cursor;
     use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn password_pipe_close_reports_invalid_descriptors() {
+        assert_eq!(
+            close_password_pipe(-1).unwrap_err().raw_os_error(),
+            Some(libc::EBADF)
+        );
+    }
 
     #[test]
     fn worker_announces_versioned_bootstrap_identity() {
