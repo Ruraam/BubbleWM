@@ -895,7 +895,7 @@ mod tests {
 
     #[test]
     fn start_worker_accepts_only_a_valid_handshake() {
-        let (mut channel, mut worker) = start_worker_with_handshake(
+        let (channel, mut worker) = start_worker_with_handshake(
             std::ffi::OsStr::new("/bin/sh"),
             &[
                 std::ffi::OsString::from("-c"),
