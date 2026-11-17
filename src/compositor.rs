@@ -567,7 +567,7 @@ impl CompositorStateData {
         self.keyboard.as_ref().map(|keyboard| keyboard.led_state())
     }
 
-    /// Sends frame callbacks to every mapped toplevel and layer surface.
+    /// Sends frame callbacks to mapped surfaces that participate in rendering.
     pub(crate) fn send_frame_callbacks(&self, time: u32) {
         for surface in self.xdg_shell_state.toplevel_surfaces() {
             send_frames_surface_tree(surface.wl_surface(), time);
@@ -575,6 +575,9 @@ impl CompositorStateData {
         let map = layer_map_for_output(&self.output);
         for layer in map.layers() {
             send_frames_surface_tree(layer.wl_surface(), time);
+        }
+        if let Some(surface) = self.cursor_surface.as_ref().filter(|surface| surface.alive()) {
+            send_frames_surface_tree(surface, time);
         }
     }
 
