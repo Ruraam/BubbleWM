@@ -21,11 +21,12 @@ system supervisor must launch it with the required privileges and provide the
 password through its anonymous stdin pipe.
 
 The PAM profile is deliberately not installed or enabled automatically. Review
-`pam/README.md` and the target distribution's PAM policy before installing an
+`packaging/pam/README.md` and the target distribution's PAM policy before installing an
 equivalent service as `/etc/pam.d/bubblewm`. In particular, verify that
 `pam_systemd.so` runs exactly once. Do not overwrite a host PAM policy
 automatically.
 
-This is a staging primitive, not yet a complete Debian package or display
-manager. Greeter integration, VT/seat handoff, package maintainer scripts and
-real-systemd VM tests remain separate work.
+This is a distribution-neutral staging primitive, not yet a complete package
+or display manager. Distribution-specific packages and integration profiles
+can be built on top of it. Greeter integration, VT/seat handoff, package
+maintainer scripts and real-systemd VM tests remain separate work.
