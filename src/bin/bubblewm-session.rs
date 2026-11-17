@@ -1,20 +1,19 @@
-//! Root-only entry point for one BubbleWM Wayland login session.
+//! Root-only supervisor for one BubbleWM Wayland login session.
 //!
-//! The greeter/supervisor must start this helper as a dedicated, single-threaded
-//! root process and write exactly one password to its stdin. The password is
-//! never accepted in argv or environment variables.
+//! The supervisor never reads the password. It inherits the greeter's private
+//! stdin pipe into the dedicated worker and independently verifies the
+//! worker's post-PAM session metadata against logind.
 
-use std::{
-    ffi::{OsStr, OsString},
-    io::{self, Read},
-    process,
-    time::Duration,
+use std::{ffi::{OsStr, OsString}, process, time::Duration};
+
+use bubblewm::{
+    logind::resolve_session_for_pid,
+    session_control::SessionWorker,
 };
 
-const COMPOSITOR: &str = "/usr/bin/bubblewm";
-const SESSION_CONFIG: &str = "/etc/bubblewm/session.toml";
-const MAX_PASSWORD_BYTES: usize = 1024;
-const TERMINATION_GRACE: Duration = Duration::from_secs(5);
+const WORKER: &str = "/usr/libexec/bubblewm-session-worker";
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
+const METADATA_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn main() {
     match run() {
@@ -37,7 +36,6 @@ fn run() -> Result<i32, String> {
             "usage: bubblewm-session run UTILISATEUR /dev/ttyN (mot de passe sur stdin)".into(),
         );
     }
-
     let user = arguments[2]
         .to_str()
         .ok_or_else(|| "identifiant utilisateur invalide".to_owned())?;
@@ -53,20 +51,30 @@ fn run() -> Result<i32, String> {
         );
     }
 
-    let mut password = read_password(io::stdin().lock())?;
-    let result = bubblewm::auth::run_login_session(
-        user,
-        &password,
-        tty,
-        OsStr::new(COMPOSITOR),
-        &[OsString::from(SESSION_CONFIG)],
-        TERMINATION_GRACE,
-    );
-    wipe_string(&mut password);
+    // posix_spawn preserves fd 0 while mapping only the private control
+    // socket to fd 3. The worker consumes the secret directly from stdin.
+    let mut worker = SessionWorker::start(
+        OsStr::new(WORKER),
+        &[OsString::from(user), OsString::from(tty)],
+        STARTUP_TIMEOUT,
+    )
+    .map_err(|error| format!("impossible de démarrer le worker PAM: {error}"))?;
 
-    result
-        .map(|status| status.code().unwrap_or(1))
-        .map_err(|error| format!("échec de la session: {error}"))
+    let ready = worker
+        .receive_session_ready(METADATA_TIMEOUT)
+        .map_err(|error| format!("le worker n'a pas fourni de métadonnées valides: {error}"))?;
+
+    // Resolve identity from the worker PID, not from this supervisor. PAM's
+    // pam_systemd integration must already have placed the worker in scope.
+    let trusted = resolve_session_for_pid(worker.id() as u32)
+        .map_err(|error| format!("impossible de vérifier la session logind du worker: {error}"))?;
+    bubblewm::session_control::validate_session_ready_against(&ready, &trusted.identity)
+        .map_err(|error| format!("identité de session refusée: {error}"))?;
+
+    let status = worker
+        .wait()
+        .map_err(|error| format!("impossible d'attendre le nettoyage PAM du worker: {error}"))?;
+    Ok(status.code().unwrap_or(1))
 }
 
 fn validate_vt(tty: &str) -> Result<(), String> {
@@ -84,85 +92,9 @@ fn validate_vt(tty: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn read_password<R: Read>(reader: R) -> Result<String, String> {
-    let mut bytes = Vec::new();
-    if reader
-        .take((MAX_PASSWORD_BYTES + 3) as u64)
-        .read_to_end(&mut bytes)
-        .is_err()
-    {
-        wipe_bytes(&mut bytes);
-        return Err("impossible de lire le secret depuis stdin".into());
-    }
-
-    if bytes.len() > MAX_PASSWORD_BYTES + 2 {
-        wipe_bytes(&mut bytes);
-        return Err("mot de passe trop long".into());
-    }
-    if bytes.last() == Some(&b'\n') {
-        bytes.pop();
-        if bytes.last() == Some(&b'\r') {
-            bytes.pop();
-        }
-    }
-    if bytes.is_empty()
-        || bytes.len() > MAX_PASSWORD_BYTES
-        || bytes.iter().any(|byte| matches!(byte, b'\n' | b'\r' | 0))
-    {
-        wipe_bytes(&mut bytes);
-        return Err("format de mot de passe invalide".into());
-    }
-
-    match String::from_utf8(bytes) {
-        Ok(password) => Ok(password),
-        Err(error) => {
-            let mut bytes = error.into_bytes();
-            wipe_bytes(&mut bytes);
-            Err("le mot de passe doit être encodé en UTF-8".into())
-        }
-    }
-}
-
-fn wipe_bytes(bytes: &mut [u8]) {
-    for byte in bytes {
-        unsafe { std::ptr::write_volatile(byte, 0) };
-    }
-    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
-}
-
-fn wipe_string(value: &mut String) {
-    wipe_bytes(unsafe { value.as_mut_vec() });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
-
-    #[test]
-    fn password_reader_accepts_lf_and_crlf_framing() {
-        assert_eq!(read_password(Cursor::new(b"secret\n")).unwrap(), "secret");
-        assert_eq!(read_password(Cursor::new(b"secret\r\n")).unwrap(), "secret");
-        assert_eq!(read_password(Cursor::new(b"secret")).unwrap(), "secret");
-    }
-
-    #[test]
-    fn password_reader_rejects_empty_and_multiline_input() {
-        assert!(read_password(Cursor::new(b"\n")).is_err());
-        assert!(read_password(Cursor::new(b"first\nsecond\n")).is_err());
-        assert!(read_password(Cursor::new(b"secret\0")).is_err());
-    }
-
-    #[test]
-    fn password_reader_enforces_the_pam_input_limit() {
-        assert!(read_password(Cursor::new(vec![b'x'; MAX_PASSWORD_BYTES])).is_ok());
-        assert!(read_password(Cursor::new(vec![b'x'; MAX_PASSWORD_BYTES + 1])).is_err());
-    }
-
-    #[test]
-    fn password_reader_rejects_invalid_utf8() {
-        assert!(read_password(Cursor::new([0xff, b'\n'])).is_err());
-    }
 
     #[test]
     fn only_virtual_terminal_paths_are_accepted() {
