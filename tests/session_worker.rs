@@ -7,7 +7,7 @@ use bubblewm::session_control::{
 };
 
 #[test]
-fn worker_handshakes_and_exits_after_supervisor_closes_channel() {
+fn worker_handshakes_before_rejecting_an_invalid_invocation() {
     let (mut supervisor, worker_channel) = private_channel_pair().unwrap();
     let worker_path = OsStr::new(env!("CARGO_BIN_EXE_bubblewm-session-worker"));
 
@@ -16,12 +16,15 @@ fn worker_handshakes_and_exits_after_supervisor_closes_channel() {
 
     read_worker_hello(&mut supervisor).expect("worker bootstrap handshake");
 
-    // EOF is the deliberately minimal bootstrap shutdown signal.
+    // The worker now requires an account and VT before entering the PAM
+    // lifecycle. This bootstrap-only invocation intentionally omits them;
+    // the test verifies the handshake happens before argument validation.
     drop(supervisor);
 
     let exit_status = worker.wait().expect("reap session worker");
-    assert!(
-        exit_status.success(),
-        "worker did not exit successfully: {exit_status:?}"
+    assert_eq!(
+        exit_status.code(),
+        Some(1),
+        "worker should reject the incomplete invocation: {exit_status:?}"
     );
 }
