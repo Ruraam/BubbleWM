@@ -2,16 +2,20 @@
 
 ## Status
 
-Design note for the production login/session supervisor. The current
-`bubblewm-session` binary is still a root-only prototype helper. A dedicated
-`bubblewm-session-worker` bootstrap executable now takes ownership of fd 3
-immediately, validates the private Unix stream, sends the fixed `BUBWORK1`
-bootstrap marker, and remains alive until the supervisor closes the channel.
-This is only a transport/bootstrap milestone: it does not authenticate, open
-PAM, launch the compositor, or implement a production shutdown protocol. The
-bounded metadata protocol and low-level `posix_spawn` handoff primitives are
-implemented and unit-tested; supervisor ownership and systemd unit cleanup
-are not yet wired together.
+The root-only `bubblewm-session` supervisor now starts a dedicated
+`bubblewm-session-worker`. The worker takes ownership of fd 3 first, sends
+the fixed `BUBWORK1` marker, reads the password directly from inherited stdin,
+opens PAM, sends one bounded `SessionReady` frame, starts the fixed compositor
+as the user, and closes PAM after the desktop process group exits. The
+supervisor never reads or buffers the password; it resolves the worker PID
+through logind and compares the result with the worker's metadata before
+waiting for worker completion.
+
+The separation of PAM ownership and the independent logind identity check are
+implemented. The worker binary is expected at
+`/usr/libexec/bubblewm-session-worker`. Final systemd scope-stop cleanup,
+package installation of that executable, greeter/VT handoff, and real-systemd
+integration tests are still outstanding.
 
 ## Ownership boundaries
 
@@ -95,11 +99,12 @@ The production design must keep the supervisor outside the user session scope:
    `XDG_RUNTIME_DIR`, optional seat name and optional VT number. The protocol
    has no password, command, object-path or systemd-unit field. Passwords
    never cross this channel.
-3. The supervisor resolves the logind session object and systemd scope from
-   the received session ID using the system bus. It retains the unit name while
-   the logind session object is present and validates that the unit is a
-   session scope associated with the expected UID and session. The worker must
-   never supply a unit name or object path for the supervisor to trust.
+3. The supervisor independently resolves the session and scope from the
+   worker PID using the libsystemd `sd-login` APIs. It validates the UID,
+   session ID, scope name and runtime directory against the worker's
+   `SessionReady` frame. The worker must never supply a unit name or object
+   path for the supervisor to trust. The current resolver does not yet retain
+   or stop the scope through the systemd unit manager.
 4. The worker starts the fixed compositor as the authenticated user, waits for
    it, performs process-group cleanup, closes PAM, and exits. Startup failure
    follows the same cleanup path.
