@@ -4,12 +4,13 @@
 //! stdin pipe into the dedicated worker and independently verifies the
 //! worker's post-PAM session metadata against logind.
 
-use std::{ffi::{OsStr, OsString}, process, time::Duration};
-
-use bubblewm::{
-    logind::resolve_session_for_pid,
-    session_control::SessionWorker,
+use std::{
+    ffi::{OsStr, OsString},
+    process,
+    time::Duration,
 };
+
+use bubblewm::{logind::resolve_session_for_pid, session_control::SessionWorker};
 
 const WORKER: &str = "/usr/libexec/bubblewm-session-worker";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
