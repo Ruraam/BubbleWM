@@ -683,7 +683,8 @@ mod tests {
             ],
             Duration::from_secs(1),
         )
-        .unwrap_err();
+        .err()
+        .expect("invalid worker handshake must be rejected");
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
@@ -695,7 +696,8 @@ mod tests {
             &[std::ffi::OsString::from("30")],
             Duration::from_millis(30),
         )
-        .unwrap_err();
+        .err()
+        .expect("missing worker handshake must time out");
 
         assert!(
             matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut)
