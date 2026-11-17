@@ -24,6 +24,7 @@ jobs:
             libdrm-dev \
             libseat-dev \
             libpam0g-dev \
+            libsystemd-dev \
             pkg-config
       - uses: dtolnay/rust-toolchain@stable
         with:
