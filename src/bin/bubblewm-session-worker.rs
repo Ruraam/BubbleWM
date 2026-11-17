@@ -175,10 +175,17 @@ mod tests {
     }
 
     #[test]
-    fn password_reader_rejects_empty_multiline_and_oversized_input() {
+    fn password_reader_rejects_empty_and_oversized_input() {
         assert!(read_password(Cursor::new(b"\n")).is_err());
-        assert!(read_password(Cursor::new(b"first\nsecond\n")).is_err());
         assert!(read_password(Cursor::new(vec![b'x'; MAX_PASSWORD_BYTES + 1])).is_err());
+    }
+
+    #[test]
+    fn password_reader_uses_only_the_first_line() {
+        assert_eq!(
+            read_password(Cursor::new(b"first\nsecond\n")).unwrap(),
+            "first"
+        );
     }
 
     #[test]
