@@ -229,6 +229,34 @@ pub fn spawn_worker_with_channel(
     Ok(WorkerProcess::new(pid))
 }
 
+/// Starts a worker and accepts it only after its exact bootstrap handshake.
+///
+/// The read timeout bounds startup if the executable exits, hangs, or speaks
+/// an unexpected protocol. On every handshake failure the child is terminated
+/// and reaped before the error is returned.
+pub fn start_worker_with_handshake(
+    program: &std::ffi::OsStr,
+    arguments: &[std::ffi::OsString],
+    timeout: Duration,
+) -> io::Result<(UnixStream, WorkerProcess)> {
+    let (mut supervisor_channel, worker_channel) = private_channel_pair()?;
+    let mut worker = spawn_worker_with_channel(program, arguments, worker_channel)?;
+
+    let handshake_result = (|| {
+        supervisor_channel.set_read_timeout(Some(timeout))?;
+        read_worker_hello(&mut supervisor_channel)?;
+        supervisor_channel.set_read_timeout(None)?;
+        Ok(())
+    })();
+
+    if let Err(error) = handshake_result {
+        let _ = worker.terminate_and_reap(Duration::from_secs(1));
+        return Err(error);
+    }
+
+    Ok((supervisor_channel, worker))
+}
+
 /// Owns a spawned worker until its exit status has been collected.
 ///
 /// The supervisor must explicitly wait for or terminate the worker. As a final
@@ -624,6 +652,54 @@ mod tests {
         assert!(socket >= 0);
         assert!(take_worker_channel_from_fd(socket).is_err());
         assert_eq!(unsafe { libc::fcntl(socket, libc::F_GETFD) }, -1);
+    }
+
+    #[test]
+    fn start_worker_accepts_only_a_valid_handshake() {
+        let (mut channel, mut worker) = start_worker_with_handshake(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from("printf BUBWORK1 >&3; exec /bin/sleep 30"),
+            ],
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        assert!(channel.set_read_timeout(None).is_ok());
+        let status = worker
+            .terminate_and_reap(Duration::from_millis(50))
+            .unwrap();
+        assert_eq!(status.signal(), Some(libc::SIGTERM));
+    }
+
+    #[test]
+    fn start_worker_rejects_an_invalid_handshake_and_reaps_child() {
+        let error = start_worker_with_handshake(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from("printf BADHELLO >&3; exec /bin/sleep 30"),
+            ],
+            Duration::from_secs(1),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn start_worker_times_out_when_handshake_is_missing() {
+        let error = start_worker_with_handshake(
+            std::ffi::OsStr::new("/bin/sleep"),
+            &[std::ffi::OsString::from("30")],
+            Duration::from_millis(30),
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut)
+        );
     }
 
     #[test]
