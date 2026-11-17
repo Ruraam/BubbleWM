@@ -45,6 +45,40 @@ pub struct SessionReady {
     pub vt_number: Option<u32>,
 }
 
+/// Trusted session identity resolved independently by the privileged supervisor.
+///
+/// Construct this only from an authoritative source such as logind. It is
+/// deliberately separate from worker-reported `SessionReady` metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionIdentity {
+    pub uid: u32,
+    pub session_id: String,
+    pub runtime_dir: String,
+    pub seat: Option<String>,
+    pub vt_number: Option<u32>,
+}
+
+/// Validates worker metadata and requires an exact match with trusted identity.
+///
+/// A worker claim is never accepted as proof of its own session membership.
+pub fn validate_session_ready_against(
+    ready: &SessionReady,
+    trusted: &SessionIdentity,
+) -> io::Result<()> {
+    validate(ready)?;
+    if ready.uid != trusted.uid
+        || ready.session_id != trusted.session_id
+        || ready.runtime_dir != trusted.runtime_dir
+        || ready.seat != trusted.seat
+        || ready.vt_number != trusted.vt_number
+    {
+        return Err(invalid_data(
+            "worker session metadata does not match the trusted session identity",
+        ));
+    }
+    Ok(())
+}
+
 /// Creates a private, connected supervisor/worker channel.
 ///
 /// Both ends are local Unix stream sockets with `FD_CLOEXEC` enforced. The
@@ -1088,6 +1122,76 @@ mod tests {
                 .unwrap_err()
                 .kind(),
             io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn trusted_session_identity_accepts_an_exact_metadata_match() {
+        let ready = sample();
+        let trusted = SessionIdentity {
+            uid: ready.uid,
+            session_id: ready.session_id.clone(),
+            runtime_dir: ready.runtime_dir.clone(),
+            seat: ready.seat.clone(),
+            vt_number: ready.vt_number,
+        };
+
+        validate_session_ready_against(&ready, &trusted).unwrap();
+    }
+
+    #[test]
+    fn trusted_session_identity_rejects_each_worker_claim_mismatch() {
+        let trusted = SessionIdentity {
+            uid: 1000,
+            session_id: "c7".into(),
+            runtime_dir: "/run/user/1000".into(),
+            seat: Some("seat0".into()),
+            vt_number: Some(2),
+        };
+
+        let mut mismatched = sample();
+        mismatched.uid = 1001;
+        assert_eq!(
+            validate_session_ready_against(&mismatched, &trusted)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+
+        let mut mismatched = sample();
+        mismatched.session_id = "c8".into();
+        assert!(validate_session_ready_against(&mismatched, &trusted).is_err());
+
+        let mut mismatched = sample();
+        mismatched.runtime_dir = "/run/user/1001".into();
+        assert!(validate_session_ready_against(&mismatched, &trusted).is_err());
+
+        let mut mismatched = sample();
+        mismatched.seat = Some("seat1".into());
+        assert!(validate_session_ready_against(&mismatched, &trusted).is_err());
+
+        let mut mismatched = sample();
+        mismatched.vt_number = Some(3);
+        assert!(validate_session_ready_against(&mismatched, &trusted).is_err());
+    }
+
+    #[test]
+    fn trusted_session_identity_does_not_bypass_metadata_validation() {
+        let mut invalid = sample();
+        invalid.uid = 0;
+        let trusted = SessionIdentity {
+            uid: 0,
+            session_id: invalid.session_id.clone(),
+            runtime_dir: invalid.runtime_dir.clone(),
+            seat: invalid.seat.clone(),
+            vt_number: invalid.vt_number,
+        };
+
+        assert_eq!(
+            validate_session_ready_against(&invalid, &trusted)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
         );
     }
 
