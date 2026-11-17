@@ -225,14 +225,8 @@ mod tests {
         );
 
         close_password_pipe(pipe_fds[0]).unwrap();
-        assert_eq!(
-            unsafe { libc::fcntl(pipe_fds[0], libc::F_GETFD) },
-            -1
-        );
-        assert_eq!(
-            io::Error::last_os_error().raw_os_error(),
-            Some(libc::EBADF)
-        );
+        assert_eq!(unsafe { libc::fcntl(pipe_fds[0], libc::F_GETFD) }, -1);
+        assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::EBADF));
 
         unsafe { libc::close(pipe_fds[1]) };
     }
