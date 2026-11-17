@@ -93,9 +93,16 @@ pub fn validate_password_pipe_fd(fd: RawFd) -> io::Result<()> {
     if metadata.st_mode & libc::S_IFMT != libc::S_IFIFO {
         return Err(invalid_input("password descriptor must be a pipe"));
     }
-    // Anonymous Linux pipes have no filesystem links. Reject named FIFOs so
-    // the password channel cannot be substituted with a filesystem endpoint.
-    if metadata.st_nlink != 0 {
+    // Anonymous Linux pipes live on pipefs; named FIFOs live on the
+    // filesystem where they were created. Check the filesystem type rather
+    // than st_nlink, which is not a reliable discriminator for pipe ends.
+    let mut filesystem = std::mem::MaybeUninit::<libc::statfs>::zeroed();
+    if unsafe { libc::fstatfs(fd, filesystem.as_mut_ptr()) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let filesystem = unsafe { filesystem.assume_init() };
+    const PIPEFS_MAGIC: libc::c_long = 0x5049_5045;
+    if filesystem.f_type != PIPEFS_MAGIC {
         return Err(invalid_input(
             "password descriptor must be an anonymous pipe",
         ));
