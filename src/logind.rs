@@ -101,13 +101,9 @@ pub fn stop_session_scope(scope: &str, timeout: Duration) -> io::Result<()> {
         return Err(invalid_input("scope stop timeout must be non-zero"));
     }
 
-    // Bound every D-Bus method call, including StopUnit, at the transport
-    // layer. The cleanup logic below additionally tracks the shared budget.
-    let connection = zbus::blocking::connection::Builder::system()
-        .map_err(system_bus_error)?
-        .method_timeout(timeout)
-        .build()
-        .map_err(system_bus_error)?;
+    // zbus 4.4 does not expose a method-call timeout on its blocking
+    // connection builder. Keep the shared elapsed-time budget in stop_scope_with.
+    let connection = zbus::blocking::Connection::system().map_err(system_bus_error)?;
     let manager = zbus::blocking::Proxy::new(
         &connection,
         "org.freedesktop.systemd1",
