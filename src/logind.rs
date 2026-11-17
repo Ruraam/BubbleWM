@@ -101,7 +101,13 @@ pub fn stop_session_scope(scope: &str, timeout: Duration) -> io::Result<()> {
         return Err(invalid_input("scope stop timeout must be non-zero"));
     }
 
-    let connection = zbus::blocking::Connection::system().map_err(system_bus_error)?;
+    // Bound every D-Bus method call, including StopUnit, at the transport
+    // layer. The cleanup logic below additionally tracks the shared budget.
+    let connection = zbus::blocking::connection::Builder::system()
+        .map_err(system_bus_error)?
+        .method_timeout(timeout)
+        .build()
+        .map_err(system_bus_error)?;
     let manager = zbus::blocking::Proxy::new(
         &connection,
         "org.freedesktop.systemd1",
@@ -138,6 +144,7 @@ fn stop_scope_with(
     mut read_active_state: impl FnMut() -> io::Result<String>,
     stop_unit: impl FnOnce() -> io::Result<()>,
 ) -> io::Result<()> {
+    let started = Instant::now();
     let active_state = read_active_state()?;
     match active_state.as_str() {
         "inactive" => return Ok(()),
@@ -145,8 +152,21 @@ fn stop_scope_with(
         _ => {}
     }
 
+    remaining_timeout(started, timeout)?;
     stop_unit()?;
-    wait_for_scope_inactive(timeout, read_active_state)
+    let remaining = remaining_timeout(started, timeout)?;
+    wait_for_scope_inactive(remaining, read_active_state)
+}
+
+fn remaining_timeout(started: Instant, timeout: Duration) -> io::Result<Duration> {
+    let elapsed = started.elapsed();
+    if elapsed >= timeout {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "timed out while stopping the session scope",
+        ));
+    }
+    Ok(timeout - elapsed)
 }
 
 fn wait_for_scope_inactive(
@@ -453,6 +473,20 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(reads, 3);
         assert_eq!(stops, 1);
+    }
+
+    #[test]
+    fn scope_cleanup_includes_stop_unit_time_in_shared_timeout_budget() {
+        let error = stop_scope_with(
+            Duration::from_millis(5),
+            || Ok("active".to_owned()),
+            || {
+                thread::sleep(Duration::from_millis(10));
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
     }
 
     #[test]
