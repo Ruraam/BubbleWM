@@ -13,8 +13,10 @@ waiting for worker completion.
 
 The separation of PAM ownership and the independent logind identity check are
 implemented. The worker binary is expected at
-`/usr/libexec/bubblewm-session-worker`. Final systemd scope-stop cleanup,
-package installation of that executable, greeter/VT handoff, and real-systemd
+`/usr/libexec/bubblewm-session-worker`. Supervisor-owned systemd scope-stop cleanup is now implemented: after the
+worker exits and PAM has closed, the supervisor requests `StopUnit` for the
+independently resolved scope and waits until `ActiveState` becomes `inactive`.
+Package installation of the worker, greeter/VT handoff, and real-systemd
 integration tests are still outstanding.
 
 ## Ownership boundaries
@@ -105,17 +107,19 @@ The production design must keep the supervisor outside the user session scope:
    worker PID using the libsystemd `sd-login` APIs. It validates the UID,
    session ID, scope name and runtime directory against the worker's
    `SessionReady` frame. The worker must never supply a unit name or object
-   path for the supervisor to trust. The current resolver does not yet retain
-   or stop the scope through the systemd unit manager.
+   path for the supervisor to trust. The supervisor retains the validated scope name and uses the systemd unit
+   manager for final cleanup only after the worker has exited.
 4. The worker starts the fixed compositor as the authenticated user, waits for
    it, performs process-group cleanup, closes PAM, and exits. Startup failure
    follows the same cleanup path.
-5. The supervisor reaps the worker and explicitly stops the retained session
-   scope through the systemd unit manager, waiting for the stop job to finish.
-   This final step removes descendants that escaped the original process
+5. The supervisor reaps the worker, then calls `StopUnit` for the retained
+   scope through the system bus. It waits for the unit `ActiveState` to become
+   `inactive`, with a bounded timeout. An already-inactive scope is treated as
+   an idempotent success; missing units, D-Bus errors, failed state and timeout
+   are reported as cleanup failures.
+6. The supervisor reports logout complete only after the scope is confirmed
+   inactive. This removes descendants that escaped the original process
    group, independently of the machine-wide `KillUserProcesses=` policy.
-6. The supervisor verifies that the scope is inactive before reporting logout
-   complete or starting another login on the same seat.
 
 The supervisor must never ask logind to terminate the session while the PAM
 worker is still expected to close its PAM handle: terminating the scope would
