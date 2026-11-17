@@ -153,7 +153,7 @@ fn wait_for_scope_inactive(
     timeout: Duration,
     mut read_active_state: impl FnMut() -> io::Result<String>,
 ) -> io::Result<()> {
-    let deadline = Instant::now() + timeout;
+    let started = Instant::now();
     loop {
         let active_state = read_active_state()?;
         match active_state.as_str() {
@@ -161,13 +161,13 @@ fn wait_for_scope_inactive(
             "failed" => {
                 return Err(invalid_data("systemd failed to stop the session scope"));
             }
-            _ if Instant::now() >= deadline => {
+            _ if started.elapsed() >= timeout => {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
                     "timed out waiting for the session scope to become inactive",
                 ));
             }
-            _ => thread::sleep(Duration::from_millis(50)),
+            _ => thread::sleep(Duration::from_millis(50).min(timeout - started.elapsed())),
         }
     }
 }
@@ -354,6 +354,12 @@ mod tests {
         });
         assert!(result.is_ok());
         assert_eq!(reads, 1);
+    }
+
+    #[test]
+    fn scope_cleanup_accepts_extremely_large_timeout() {
+        let result = wait_for_scope_inactive(Duration::MAX, || Ok("inactive".to_owned()));
+        assert!(result.is_ok());
     }
 
     #[test]
