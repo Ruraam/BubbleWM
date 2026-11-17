@@ -442,6 +442,7 @@ impl Drop for WorkerProcess {
 pub struct SessionWorker {
     channel: Option<UnixStream>,
     process: WorkerProcess,
+    metadata_received: bool,
 }
 
 impl SessionWorker {
@@ -455,6 +456,7 @@ impl SessionWorker {
         Ok(Self {
             channel: Some(channel),
             process,
+            metadata_received: false,
         })
     }
 
@@ -475,6 +477,13 @@ impl SessionWorker {
     /// Any framing, validation, timeout, or socket error fails closed by
     /// closing the channel and terminating/reaping the worker.
     pub fn receive_session_ready(&mut self, timeout: Duration) -> io::Result<SessionReady> {
+        if self.metadata_received {
+            self.channel.take();
+            let _ = self.process.terminate_and_reap(Duration::from_secs(1));
+            return Err(invalid_data(
+                "worker has already supplied its session metadata frame",
+            ));
+        }
         let channel = self.channel.as_mut().ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotConnected, "worker channel is closed")
         })?;
@@ -483,7 +492,10 @@ impl SessionWorker {
         let result = read_session_ready(channel);
         let reset_result = channel.set_read_timeout(None);
         match (result, reset_result) {
-            (Ok(ready), Ok(())) => Ok(ready),
+            (Ok(ready), Ok(())) => {
+                self.metadata_received = true;
+                Ok(ready)
+            }
             (Err(error), _) | (_, Err(error)) => {
                 self.channel.take();
                 let _ = self.process.terminate_and_reap(Duration::from_secs(1));
@@ -848,6 +860,45 @@ mod tests {
             .receive_session_ready(Duration::from_secs(1))
             .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(worker.channel.is_none());
+        assert!(worker.process.reaped);
+    }
+
+    #[test]
+    fn session_worker_rejects_a_second_metadata_frame_and_reaps_worker() {
+        let expected = sample();
+        let mut frame = Vec::new();
+        write_session_ready(&mut frame, &expected).unwrap();
+        let escaped = frame
+            .iter()
+            .map(|byte| format!("\\{:03o}", byte))
+            .collect::<String>();
+        let command = format!(
+            "printf BUBWORK1 >&3; printf '{escaped}{escaped}' >&3; exec /bin/sleep 30"
+        );
+        let mut worker = SessionWorker::start(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from(command),
+            ],
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        assert_eq!(
+            worker
+                .receive_session_ready(Duration::from_secs(1))
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            worker
+                .receive_session_ready(Duration::from_secs(1))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
         assert!(worker.channel.is_none());
         assert!(worker.process.reaped);
     }
