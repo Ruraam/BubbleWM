@@ -94,10 +94,7 @@ fn validate_runtime_directory_metadata(
     metadata: &std::fs::Metadata,
     uid: libc::uid_t,
 ) -> io::Result<()> {
-    if !metadata.file_type().is_dir()
-        || metadata.uid() != uid
-        || metadata.mode() & 0o077 != 0
-    {
+    if !metadata.file_type().is_dir() || metadata.uid() != uid || metadata.mode() & 0o077 != 0 {
         return Err(invalid_data(
             "logind runtime directory must be a private real directory owned by the session UID",
         ));
@@ -231,15 +228,13 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let directory = tempfile::tempdir().unwrap();
-        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
-            .unwrap();
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
         let metadata = std::fs::symlink_metadata(directory.path()).unwrap();
         let uid = unsafe { libc::getuid() };
         assert!(validate_runtime_directory_metadata(&metadata, uid).is_ok());
         assert!(validate_runtime_directory_metadata(&metadata, uid.saturating_add(1)).is_err());
 
-        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o755))
-            .unwrap();
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
         let metadata = std::fs::symlink_metadata(directory.path()).unwrap();
         assert!(validate_runtime_directory_metadata(&metadata, uid).is_err());
     }
