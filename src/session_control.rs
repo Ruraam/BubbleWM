@@ -412,16 +412,16 @@ impl WorkerProcess {
         &mut self,
         timeout: Duration,
     ) -> io::Result<Option<std::process::ExitStatus>> {
-        let deadline = Instant::now() + timeout;
+        let started = Instant::now();
         loop {
             if let Some(status) = self.try_wait()? {
                 return Ok(Some(status));
             }
-            let now = Instant::now();
-            if now >= deadline {
+            let elapsed = started.elapsed();
+            if elapsed >= timeout {
                 return Ok(None);
             }
-            std::thread::sleep((deadline - now).min(Duration::from_millis(10)));
+            std::thread::sleep((timeout - elapsed).min(Duration::from_millis(10)));
         }
     }
 
@@ -1268,6 +1268,26 @@ mod tests {
             .terminate_and_reap(Duration::from_millis(20))
             .unwrap();
         assert_eq!(status.signal(), Some(libc::SIGTERM));
+    }
+
+    #[test]
+    fn worker_wait_timeout_accepts_extremely_large_duration() {
+        let (_supervisor, worker_channel) = private_channel_pair().unwrap();
+        let mut worker = spawn_worker_with_channel(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from("exit 23"),
+            ],
+            worker_channel,
+        )
+        .unwrap();
+
+        let status = worker
+            .wait_timeout(Duration::MAX)
+            .unwrap()
+            .expect("worker should already have exited");
+        assert_eq!(status.code(), Some(23));
     }
 
     #[test]
