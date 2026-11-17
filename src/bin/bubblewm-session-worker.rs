@@ -292,6 +292,22 @@ mod tests {
     }
 
     #[test]
+    fn password_byte_buffer_is_zeroed() {
+        let mut bytes = b"sensitive-password".to_vec();
+        wipe_bytes(&mut bytes);
+        assert!(bytes.iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn password_string_is_zeroed_without_changing_its_length() {
+        let mut password = String::from("sensitive-password");
+        let original_len = password.len();
+        wipe_string(&mut password);
+        assert_eq!(password.len(), original_len);
+        assert!(password.as_bytes().iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
     fn only_virtual_terminal_paths_are_accepted() {
         assert!(validate_vt("/dev/tty1").is_ok());
         assert!(validate_vt("/dev/tty63").is_ok());
