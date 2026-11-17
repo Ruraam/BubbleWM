@@ -354,26 +354,25 @@ mod tests {
 
     #[test]
     fn scope_cleanup_rejects_failed_state() {
-        let error = wait_for_scope_inactive(Duration::from_secs(1), || {
-            Ok("failed".to_owned())
-        })
-        .unwrap_err();
+        let error = wait_for_scope_inactive(Duration::from_secs(1), || Ok("failed".to_owned()))
+            .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
     #[test]
     fn scope_cleanup_times_out_while_scope_remains_active() {
-        let error = wait_for_scope_inactive(Duration::from_millis(1), || {
-            Ok("active".to_owned())
-        })
-        .unwrap_err();
+        let error = wait_for_scope_inactive(Duration::from_millis(1), || Ok("active".to_owned()))
+            .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
     }
 
     #[test]
     fn scope_cleanup_propagates_dbus_read_errors() {
         let error = wait_for_scope_inactive(Duration::from_secs(1), || {
-            Err(io::Error::new(io::ErrorKind::ConnectionReset, "bus disconnected"))
+            Err(io::Error::new(
+                io::ErrorKind::ConnectionReset,
+                "bus disconnected",
+            ))
         })
         .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::ConnectionReset);
