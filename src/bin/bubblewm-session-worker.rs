@@ -31,7 +31,8 @@ fn main() {
 fn run() -> Result<i32, String> {
     // Own fd 3 before parsing arguments, reading the secret, or logging.
     let mut channel = take_worker_channel().map_err(|error| error.to_string())?;
-    close_unrelated_fds().map_err(|error| format!("impossible de fermer les descripteurs hérités: {error}"))?;
+    close_unrelated_fds()
+        .map_err(|error| format!("impossible de fermer les descripteurs hérités: {error}"))?;
     announce_worker(&mut channel).map_err(|error| error.to_string())?;
 
     let arguments: Vec<OsString> = std::env::args_os().collect();
@@ -84,20 +85,16 @@ fn run() -> Result<i32, String> {
 /// The worker is single-threaded at this point. Linux close_range is preferred;
 /// the /proc fallback is used on kernels that do not provide the syscall.
 fn close_unrelated_fds() -> io::Result<()> {
-    let result = unsafe {
-        libc::syscall(
-            libc::SYS_close_range,
-            4_u32,
-            u32::MAX,
-            0_u32,
-        )
-    };
+    let result = unsafe { libc::syscall(libc::SYS_close_range, 4_u32, u32::MAX, 0_u32) };
     if result == 0 {
         return Ok(());
     }
 
     let error = io::Error::last_os_error();
-    if !matches!(error.raw_os_error(), Some(libc::ENOSYS) | Some(libc::EINVAL)) {
+    if !matches!(
+        error.raw_os_error(),
+        Some(libc::ENOSYS) | Some(libc::EINVAL)
+    ) {
         return Err(error);
     }
 
