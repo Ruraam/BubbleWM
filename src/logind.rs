@@ -63,18 +63,16 @@ pub fn resolve_session_for_pid(pid: u32) -> io::Result<ResolvedLogindSession> {
 
     let runtime_dir = PathBuf::from(format!("/run/user/{uid}"));
     let metadata = std::fs::symlink_metadata(&runtime_dir)?;
-    if !metadata.file_type().is_dir() || metadata.uid() != uid {
-        return Err(invalid_data(
-            "logind runtime directory is not a real directory owned by the session UID",
-        ));
-    }
+    validate_runtime_directory_metadata(&metadata, uid)?;
 
-    // Re-read the PID-to-session association after collecting the properties.
-    // This detects a process exit/reuse or session reassignment during lookup.
+    // Re-read both PID associations after collecting all session properties.
+    // This detects a process exit/reuse or session/scope reassignment during
+    // lookup. The supervisor still owns and has not reaped this child PID.
     let confirmed_session = sd_string_from_pid(pid, sd_pid_get_session)?;
-    if confirmed_session != session_id {
+    let confirmed_scope = sd_string_from_pid(pid, sd_pid_get_unit)?;
+    if confirmed_session != session_id || confirmed_scope != scope {
         return Err(invalid_data(
-            "process session changed during logind identity lookup",
+            "process session or scope changed during logind identity lookup",
         ));
     }
 
@@ -91,6 +89,21 @@ pub fn resolve_session_for_pid(pid: u32) -> io::Result<ResolvedLogindSession> {
 }
 
 type PidStringLookup = unsafe extern "C" fn(libc::pid_t, *mut *mut c_char) -> libc::c_int;
+
+fn validate_runtime_directory_metadata(
+    metadata: &std::fs::Metadata,
+    uid: libc::uid_t,
+) -> io::Result<()> {
+    if !metadata.file_type().is_dir()
+        || metadata.uid() != uid
+        || metadata.mode() & 0o077 != 0
+    {
+        return Err(invalid_data(
+            "logind runtime directory must be a private real directory owned by the session UID",
+        ));
+    }
+    Ok(())
+}
 
 fn sd_string_from_pid(pid: libc::pid_t, lookup: PidStringLookup) -> io::Result<String> {
     let mut value = std::ptr::null_mut();
@@ -211,6 +224,37 @@ mod tests {
                 io::ErrorKind::InvalidData
             );
         }
+    }
+
+    #[test]
+    fn runtime_directory_must_be_private_and_owned_by_session_uid() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
+            .unwrap();
+        let metadata = std::fs::symlink_metadata(directory.path()).unwrap();
+        let uid = unsafe { libc::getuid() };
+        assert!(validate_runtime_directory_metadata(&metadata, uid).is_ok());
+        assert!(validate_runtime_directory_metadata(&metadata, uid.saturating_add(1)).is_err());
+
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+        let metadata = std::fs::symlink_metadata(directory.path()).unwrap();
+        assert!(validate_runtime_directory_metadata(&metadata, uid).is_err());
+    }
+
+    #[test]
+    fn runtime_directory_rejects_symlink_metadata() {
+        use std::os::unix::fs::symlink;
+
+        let parent = tempfile::tempdir().unwrap();
+        let target = parent.path().join("target");
+        std::fs::create_dir(&target).unwrap();
+        let link = parent.path().join("runtime-link");
+        symlink(&target, &link).unwrap();
+        let metadata = std::fs::symlink_metadata(&link).unwrap();
+        assert!(validate_runtime_directory_metadata(&metadata, unsafe { libc::getuid() }).is_err());
     }
 
     #[test]
