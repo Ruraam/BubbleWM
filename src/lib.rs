@@ -12,6 +12,7 @@ pub mod idle;
 pub mod ipc;
 pub mod launcher;
 pub mod lock;
+pub mod logind;
 pub mod menu;
 pub mod notifications;
 pub mod render;
