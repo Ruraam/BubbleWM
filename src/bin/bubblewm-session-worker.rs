@@ -217,6 +217,27 @@ mod tests {
     use std::os::unix::net::UnixStream;
 
     #[test]
+    fn password_pipe_close_closes_a_valid_descriptor() {
+        let mut pipe_fds = [-1; 2];
+        assert_eq!(
+            unsafe { libc::pipe2(pipe_fds.as_mut_ptr(), libc::O_CLOEXEC) },
+            0
+        );
+
+        close_password_pipe(pipe_fds[0]).unwrap();
+        assert_eq!(
+            unsafe { libc::fcntl(pipe_fds[0], libc::F_GETFD) },
+            -1
+        );
+        assert_eq!(
+            io::Error::last_os_error().raw_os_error(),
+            Some(libc::EBADF)
+        );
+
+        unsafe { libc::close(pipe_fds[1]) };
+    }
+
+    #[test]
     fn password_pipe_close_reports_invalid_descriptors() {
         assert_eq!(
             close_password_pipe(-1).unwrap_err().raw_os_error(),
