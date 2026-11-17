@@ -366,12 +366,8 @@ mod tests {
     #[test]
     fn command_runner_kills_a_process_after_its_deadline() {
         let started = Instant::now();
-        let error = run_command_with_timeout(
-            "/bin/sleep",
-            &["5"],
-            Duration::from_millis(20),
-        )
-        .unwrap_err();
+        let error =
+            run_command_with_timeout("/bin/sleep", &["5"], Duration::from_millis(20)).unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
         assert!(started.elapsed() < Duration::from_secs(1));
