@@ -773,7 +773,7 @@ mod tests {
         write_session_ready(&mut frame, &expected).unwrap();
         let escaped = frame
             .iter()
-            .map(|byte| format!("\\\\{:03o}", byte))
+            .map(|byte| format!("\\{:03o}", byte))
             .collect::<String>();
         let command = format!("printf BUBWORK1 >&3; printf '{escaped}' >&3; cat <&3");
 
@@ -803,7 +803,7 @@ mod tests {
             &[
                 std::ffi::OsString::from("-c"),
                 std::ffi::OsString::from(
-                    "printf BUBWORK1 >&3; printf BADFRAME >&3; exec /bin/sleep 30",
+                    "printf BUBWORK1 >&3; printf BADFRAME0000 >&3; exec /bin/sleep 30",
                 ),
             ],
             Duration::from_secs(1),
