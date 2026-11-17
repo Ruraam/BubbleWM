@@ -805,7 +805,9 @@ mod tests {
 
         let file = tempfile::tempfile().unwrap();
         assert_eq!(
-            validate_password_pipe_fd(file.as_raw_fd()).unwrap_err().kind(),
+            validate_password_pipe_fd(file.as_raw_fd())
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::InvalidInput
         );
     }
