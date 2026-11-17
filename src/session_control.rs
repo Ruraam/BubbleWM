@@ -862,11 +862,8 @@ mod tests {
     #[test]
     fn supervisor_approval_times_out_when_supervisor_stalls() {
         let (mut worker, _supervisor) = UnixStream::pair().unwrap();
-        let error = read_supervisor_approval_with_timeout(
-            &mut worker,
-            Duration::from_millis(25),
-        )
-        .unwrap_err();
+        let error = read_supervisor_approval_with_timeout(&mut worker, Duration::from_millis(25))
+            .unwrap_err();
         assert!(matches!(
             error.kind(),
             io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
