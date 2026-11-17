@@ -3272,8 +3272,13 @@ impl CompositorStateData {
 
     fn focus_window_under_pointer(&mut self, serial: Serial) {
         if let Some((surface, _)) = self.layer_pointer_focus(self.pointer_location) {
-            if let Some(keyboard) = self.keyboard.clone() {
-                keyboard.set_focus(self, Some(surface), serial);
+            let can_receive_keyboard_focus = layer_map_for_output(&self.output)
+                .layer_for_surface(&surface, WindowSurfaceType::ALL)
+                .is_some_and(|layer| layer.can_receive_keyboard_focus());
+            if can_receive_keyboard_focus {
+                if let Some(keyboard) = self.keyboard.clone() {
+                    keyboard.set_focus(self, Some(surface), serial);
+                }
             }
             return;
         }
