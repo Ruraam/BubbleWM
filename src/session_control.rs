@@ -484,10 +484,19 @@ impl SessionWorker {
                 "worker has already supplied its session metadata frame",
             ));
         }
-        let channel = self.channel.as_mut().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotConnected, "worker channel is closed")
-        })?;
-        channel.set_read_timeout(Some(timeout))?;
+        let Some(channel) = self.channel.as_ref() else {
+            let _ = self.process.terminate_and_reap(Duration::from_secs(1));
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "worker channel is closed",
+            ));
+        };
+        if let Err(error) = channel.set_read_timeout(Some(timeout)) {
+            self.channel.take();
+            let _ = self.process.terminate_and_reap(Duration::from_secs(1));
+            return Err(error);
+        }
+        let channel = self.channel.as_mut().expect("channel checked above");
 
         let result = read_session_ready(channel);
         let reset_result = channel.set_read_timeout(None);
@@ -952,6 +961,26 @@ mod tests {
                 .kind(),
             io::ErrorKind::InvalidData
         );
+        assert!(worker.channel.is_none());
+        assert!(worker.process.reaped);
+    }
+
+    #[test]
+    fn session_worker_invalid_read_timeout_fails_closed_and_reaps_worker() {
+        let mut worker = SessionWorker::start(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from("printf BUBWORK1 >&3; exec /bin/sleep 30"),
+            ],
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        let error = worker
+            .receive_session_ready(Duration::ZERO)
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         assert!(worker.channel.is_none());
         assert!(worker.process.reaped);
     }
