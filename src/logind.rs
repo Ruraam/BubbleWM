@@ -6,8 +6,9 @@
 
 use std::{
     ffi::{CStr, CString, c_char},
-    io,
+    io::{self, Read},
     os::unix::fs::MetadataExt,
+    process::{Command, Stdio},
     path::PathBuf,
     thread,
     time::{Duration, Instant},
@@ -95,61 +96,108 @@ pub fn resolve_session_for_pid(pid: u32) -> io::Result<ResolvedLogindSession> {
 /// The scope name must come from `resolve_session_for_pid`, never from the
 /// worker protocol or user input. The worker must already have exited so PAM
 /// can close its session before systemd terminates remaining descendants.
+///
+/// systemctl is used as a short-lived D-Bus client because zbus 4.4 has no
+/// method-call timeout API. Each client process is polled and killed on
+/// timeout, so a stalled system bus cannot pin the privileged supervisor.
 pub fn stop_session_scope(scope: &str, timeout: Duration) -> io::Result<()> {
     validate_scope_name(scope)?;
     if timeout.is_zero() {
         return Err(invalid_input("scope stop timeout must be non-zero"));
     }
 
-    // zbus 4.4 does not expose a method-call timeout on its blocking
-    // connection builder. Keep the shared elapsed-time budget in stop_scope_with.
-    let connection = zbus::blocking::Connection::system().map_err(system_bus_error)?;
-    let manager = zbus::blocking::Proxy::new(
-        &connection,
-        "org.freedesktop.systemd1",
-        "/org/freedesktop/systemd1",
-        "org.freedesktop.systemd1.Manager",
-    )
-    .map_err(system_bus_error)?;
-
-    let unit_path: zbus::zvariant::OwnedObjectPath = manager
-        .call("GetUnit", &(scope,))
-        .map_err(system_bus_error)?;
-    let properties = zbus::blocking::Proxy::new(
-        &connection,
-        "org.freedesktop.systemd1",
-        unit_path.as_str(),
-        "org.freedesktop.DBus.Properties",
-    )
-    .map_err(system_bus_error)?;
-
     stop_scope_with(
         timeout,
-        || read_unit_active_state(&properties),
-        || {
-            let _: zbus::zvariant::OwnedObjectPath = manager
-                .call("StopUnit", &(scope, "replace"))
-                .map_err(system_bus_error)?;
+        |remaining| read_unit_active_state(scope, remaining),
+        |remaining| {
+            run_systemctl(&["--no-block", "stop", scope], remaining)?;
             Ok(())
         },
     )
 }
 
+fn run_systemctl(arguments: &[&str], timeout: Duration) -> io::Result<String> {
+    run_command_with_timeout("systemctl", arguments, timeout)
+}
+
+/// Runs one systemctl client with a hard process deadline.
+///
+/// Output is collected only after the child exits. The only caller requesting
+/// stdout asks systemd for one short ActiveState value; stop requests ignore
+/// their empty output. No shell is involved, and the validated scope remains
+/// a single argv element.
+fn run_command_with_timeout(
+    program: &str,
+    arguments: &[&str],
+    timeout: Duration,
+) -> io::Result<String> {
+    if timeout.is_zero() {
+        return Err(timed_out("systemctl operation exceeded its time budget"));
+    }
+
+    let mut child = Command::new(program)
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let started = Instant::now();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!(
+                            "{program} {} exited with {status}",
+                            arguments.join(" ")
+                        ),
+                    ));
+                }
+
+                let mut output = String::new();
+                if let Some(mut stdout) = child.stdout.take() {
+                    stdout.read_to_string(&mut output)?;
+                }
+                return Ok(output.trim().to_owned());
+            }
+            Ok(None) => {
+                let elapsed = started.elapsed();
+                if elapsed >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(timed_out("systemctl operation exceeded its time budget"));
+                }
+                thread::sleep(Duration::from_millis(10).min(timeout - elapsed));
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
+    }
+}
+
+fn timed_out(message: &'static str) -> io::Error {
+    io::Error::new(io::ErrorKind::TimedOut, message)
+}
+
 fn stop_scope_with(
     timeout: Duration,
-    mut read_active_state: impl FnMut() -> io::Result<String>,
-    stop_unit: impl FnOnce() -> io::Result<()>,
+    mut read_active_state: impl FnMut(Duration) -> io::Result<String>,
+    stop_unit: impl FnOnce(Duration) -> io::Result<()>,
 ) -> io::Result<()> {
     let started = Instant::now();
-    let active_state = read_active_state()?;
+    let active_state = read_active_state(remaining_timeout(started, timeout)?)?;
     match active_state.as_str() {
         "inactive" => return Ok(()),
         "failed" => return Err(invalid_data("session scope is already in failed state")),
         _ => {}
     }
 
-    remaining_timeout(started, timeout)?;
-    stop_unit()?;
+    stop_unit(remaining_timeout(started, timeout)?)?;
     let remaining = remaining_timeout(started, timeout)?;
     wait_for_scope_inactive(remaining, read_active_state)
 }
@@ -157,44 +205,38 @@ fn stop_scope_with(
 fn remaining_timeout(started: Instant, timeout: Duration) -> io::Result<Duration> {
     let elapsed = started.elapsed();
     if elapsed >= timeout {
-        return Err(io::Error::new(
-            io::ErrorKind::TimedOut,
-            "timed out while stopping the session scope",
-        ));
+        return Err(timed_out("timed out while stopping the session scope"));
     }
     Ok(timeout - elapsed)
 }
 
 fn wait_for_scope_inactive(
     timeout: Duration,
-    mut read_active_state: impl FnMut() -> io::Result<String>,
+    mut read_active_state: impl FnMut(Duration) -> io::Result<String>,
 ) -> io::Result<()> {
     let started = Instant::now();
     loop {
-        let active_state = read_active_state()?;
-        let elapsed = started.elapsed();
+        let remaining = remaining_timeout(started, timeout)?;
+        let active_state = read_active_state(remaining)?;
         match active_state.as_str() {
             "inactive" => return Ok(()),
             "failed" => {
                 return Err(invalid_data("systemd failed to stop the session scope"));
             }
-            _ if elapsed >= timeout => {
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "timed out waiting for the session scope to become inactive",
-                ));
-            }
-            _ => thread::sleep(Duration::from_millis(50).min(timeout - elapsed)),
+            _ => thread::sleep(Duration::from_millis(50).min(remaining)),
         }
     }
 }
 
-fn read_unit_active_state(properties: &zbus::blocking::Proxy<'_>) -> io::Result<String> {
-    let value: zbus::zvariant::OwnedValue = properties
-        .call("Get", &("org.freedesktop.systemd1.Unit", "ActiveState"))
-        .map_err(system_bus_error)?;
-    String::try_from(value)
-        .map_err(|_| invalid_data("systemd returned an invalid unit ActiveState"))
+fn read_unit_active_state(scope: &str, timeout: Duration) -> io::Result<String> {
+    let state = run_systemctl(
+        &["show", "--no-pager", "--property=ActiveState", "--value", scope],
+        timeout,
+    )?;
+    if state.is_empty() || state.lines().count() != 1 {
+        return Err(invalid_data("systemd returned an invalid unit ActiveState"));
+    }
+    Ok(state)
 }
 
 fn validate_scope_name(scope: &str) -> io::Result<()> {
@@ -205,13 +247,6 @@ fn validate_scope_name(scope: &str) -> io::Result<()> {
         return Err(invalid_input("invalid logind session scope name"));
     };
     validate_session_id(session_id).map_err(|_| invalid_input("invalid logind session scope name"))
-}
-
-fn system_bus_error(error: zbus::Error) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::Other,
-        format!("systemd D-Bus error: {error}"),
-    )
 }
 
 type PidStringLookup = unsafe extern "C" fn(libc::pid_t, *mut *mut c_char) -> libc::c_int;
@@ -365,7 +400,7 @@ mod tests {
     #[test]
     fn scope_cleanup_wait_accepts_inactive_state_immediately() {
         let mut reads = 0;
-        let result = wait_for_scope_inactive(Duration::from_secs(1), || {
+        let result = wait_for_scope_inactive(Duration::from_secs(1), |_| {
             reads += 1;
             Ok("inactive".to_owned())
         });
@@ -375,14 +410,14 @@ mod tests {
 
     #[test]
     fn scope_cleanup_accepts_extremely_large_timeout() {
-        let result = wait_for_scope_inactive(Duration::MAX, || Ok("inactive".to_owned()));
+        let result = wait_for_scope_inactive(Duration::MAX, |_| Ok("inactive".to_owned()));
         assert!(result.is_ok());
     }
 
     #[test]
     fn scope_cleanup_waits_until_systemd_reports_inactive() {
         let mut states = ["activating", "deactivating", "inactive"].into_iter();
-        let result = wait_for_scope_inactive(Duration::from_secs(1), || {
+        let result = wait_for_scope_inactive(Duration::from_secs(1), |_| {
             Ok(states.next().unwrap_or("inactive").to_owned())
         });
         assert!(result.is_ok());
@@ -390,21 +425,21 @@ mod tests {
 
     #[test]
     fn scope_cleanup_rejects_failed_state() {
-        let error = wait_for_scope_inactive(Duration::from_secs(1), || Ok("failed".to_owned()))
+        let error = wait_for_scope_inactive(Duration::from_secs(1), |_| Ok("failed".to_owned()))
             .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
     #[test]
     fn scope_cleanup_times_out_while_scope_remains_active() {
-        let error = wait_for_scope_inactive(Duration::from_millis(1), || Ok("active".to_owned()))
+        let error = wait_for_scope_inactive(Duration::from_millis(1), |_| Ok("active".to_owned()))
             .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
     }
 
     #[test]
     fn scope_cleanup_propagates_dbus_read_errors() {
-        let error = wait_for_scope_inactive(Duration::from_secs(1), || {
+        let error = wait_for_scope_inactive(Duration::from_secs(1), |_| {
             Err(io::Error::new(
                 io::ErrorKind::ConnectionReset,
                 "bus disconnected",
@@ -420,11 +455,11 @@ mod tests {
         let mut stops = 0;
         let result = stop_scope_with(
             Duration::from_secs(1),
-            || {
+            |_| {
                 reads += 1;
                 Ok("inactive".to_owned())
             },
-            || {
+            |_| {
                 stops += 1;
                 Ok(())
             },
@@ -439,8 +474,8 @@ mod tests {
         let mut stops = 0;
         let error = stop_scope_with(
             Duration::from_secs(1),
-            || Ok("failed".to_owned()),
-            || {
+            |_| Ok("failed".to_owned()),
+            |_| {
                 stops += 1;
                 Ok(())
             },
@@ -457,11 +492,11 @@ mod tests {
         let mut stops = 0;
         let result = stop_scope_with(
             Duration::from_secs(1),
-            || {
+            |_| {
                 reads += 1;
                 Ok(states.next().unwrap().to_owned())
             },
-            || {
+            |_| {
                 stops += 1;
                 Ok(())
             },
@@ -475,8 +510,8 @@ mod tests {
     fn scope_cleanup_includes_stop_unit_time_in_shared_timeout_budget() {
         let error = stop_scope_with(
             Duration::from_millis(5),
-            || Ok("active".to_owned()),
-            || {
+            |_| Ok("active".to_owned()),
+            |_| {
                 thread::sleep(Duration::from_millis(10));
                 Ok(())
             },
@@ -490,11 +525,11 @@ mod tests {
         let mut reads = 0;
         let error = stop_scope_with(
             Duration::from_secs(1),
-            || {
+            |_| {
                 reads += 1;
                 Ok("active".to_owned())
             },
-            || {
+            |_| {
                 Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
                     "StopUnit denied",
@@ -511,13 +546,13 @@ mod tests {
         let mut stops = 0;
         let error = stop_scope_with(
             Duration::from_secs(1),
-            || {
+            |_| {
                 Err(io::Error::new(
                     io::ErrorKind::ConnectionReset,
                     "bus disconnected",
                 ))
             },
-            || {
+            |_| {
                 stops += 1;
                 Ok(())
             },
