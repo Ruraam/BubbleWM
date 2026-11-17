@@ -9,8 +9,7 @@ use std::time::Duration;
 
 use bubblewm::auth::PamLoginSession;
 use bubblewm::session_control::{
-    read_supervisor_approval, take_worker_channel, validate_password_pipe_fd,
-    write_session_ready,
+    read_supervisor_approval, take_worker_channel, validate_password_pipe_fd, write_session_ready,
 };
 
 const WORKER_HELLO: &[u8; 8] = b"BUBWORK1";
