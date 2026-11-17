@@ -470,6 +470,11 @@ impl SessionWorker {
         self.process.try_wait()
     }
 
+    /// Waits for the worker to finish its PAM and desktop-session cleanup.
+    pub fn wait(&mut self) -> io::Result<std::process::ExitStatus> {
+        self.process.wait()
+    }
+
     /// Receives the worker's single bounded session-metadata frame.
     ///
     /// The returned values are untrusted claims: the privileged supervisor
