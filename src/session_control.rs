@@ -977,9 +977,7 @@ mod tests {
         )
         .unwrap();
 
-        let error = worker
-            .receive_session_ready(Duration::ZERO)
-            .unwrap_err();
+        let error = worker.receive_session_ready(Duration::ZERO).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         assert!(worker.channel.is_none());
         assert!(worker.process.reaped);
