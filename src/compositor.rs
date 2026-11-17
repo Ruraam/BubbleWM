@@ -49,7 +49,7 @@ use smithay::{
         Seat, SeatHandler, SeatState,
         keyboard::{FilterResult, KeyboardHandle, Keysym, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent, CursorImageAttributes, CursorImageStatus,
+            AxisFrame, ButtonEvent, CursorImageStatus,
             CursorImageSurfaceData, Focus, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData,
@@ -1265,7 +1265,12 @@ impl CompositorStateData {
                 let location =
                     (self.pointer_location - hotspot.to_f64()).to_physical_precise_round(scale);
                 elements.extend(
-                    render_elements_from_surface_tree(
+                    render_elements_from_surface_tree::<
+                        _,
+                        smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<
+                            smithay::backend::renderer::gles::GlesRenderer,
+                        >,
+                    >(
                         renderer,
                         surface,
                         location,
@@ -1274,7 +1279,7 @@ impl CompositorStateData {
                         Kind::Unspecified,
                     )
                     .into_iter()
-                    .map(Into::into),
+                    .map(BubbleRenderElement::Surface),
                 );
             } else if self.cursor_surface.is_none() {
                 if let Some((_, pixmap, xhot, yhot)) = self.cursor_cache.as_ref() {
