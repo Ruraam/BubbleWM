@@ -367,7 +367,10 @@ fn invalid_input(message: &'static str) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{io::{Read, Write}, os::fd::IntoRawFd};
+    use std::{
+        io::{Read, Write},
+        os::fd::IntoRawFd,
+    };
 
     #[test]
     fn private_channel_is_connected_and_close_on_exec() {
