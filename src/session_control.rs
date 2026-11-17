@@ -43,6 +43,22 @@ pub fn read_supervisor_approval<R: Read>(reader: &mut R) -> io::Result<()> {
     Ok(())
 }
 
+/// Reads the supervisor approval with a finite deadline. A stalled supervisor
+/// must not leave an authenticated PAM session open indefinitely.
+pub fn read_supervisor_approval_with_timeout(
+    channel: &mut UnixStream,
+    timeout: Duration,
+) -> io::Result<()> {
+    channel.set_read_timeout(Some(timeout))?;
+    let approval_result = read_supervisor_approval(channel);
+    let reset_result = channel.set_read_timeout(None);
+    match (approval_result, reset_result) {
+        (Err(error), _) => Err(error),
+        (Ok(()), Err(error)) => Err(error),
+        (Ok(()), Ok(())) => Ok(()),
+    }
+}
+
 /// Non-secret metadata reported by a worker after PAM has opened the session.
 ///
 /// The supervisor must independently resolve `session_id` through logind and
@@ -841,6 +857,20 @@ mod tests {
     fn supervisor_approval_accepts_only_the_exact_marker() {
         let mut bytes = Cursor::new(SUPERVISOR_APPROVAL);
         read_supervisor_approval(&mut bytes).unwrap();
+    }
+
+    #[test]
+    fn supervisor_approval_times_out_when_supervisor_stalls() {
+        let (mut worker, _supervisor) = UnixStream::pair().unwrap();
+        let error = read_supervisor_approval_with_timeout(
+            &mut worker,
+            Duration::from_millis(25),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error.kind(),
+            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+        ));
     }
 
     #[test]
