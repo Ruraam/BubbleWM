@@ -32,6 +32,7 @@ use smithay::{
             element::{
                 Element, Kind,
                 solid::{SolidColorBuffer, SolidColorRenderElement},
+                surface::render_elements_from_surface_tree,
             },
             utils::{draw_render_elements, on_commit_buffer_handler, with_renderer_surface_state},
         },
@@ -48,7 +49,8 @@ use smithay::{
         Seat, SeatHandler, SeatState,
         keyboard::{FilterResult, KeyboardHandle, Keysym, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent, CursorImageStatus, Focus, GestureHoldBeginEvent,
+            AxisFrame, ButtonEvent, CursorImageAttributes, CursorImageStatus,
+            CursorImageSurfaceData, Focus, GestureHoldBeginEvent,
             GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent,
             GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
             GestureSwipeUpdateEvent, GrabStartData, MotionEvent, PointerGrab, PointerHandle,
@@ -301,6 +303,7 @@ pub(crate) struct CompositorStateData {
     idle: IdleManager,
     cursor_theme: CursorThemeImages,
     cursor_hidden: bool,
+    cursor_surface: Option<WlSurface>,
     cursor_cache: Option<(f64, Pixmap, i32, i32)>,
     overlays: OverlayCache,
     real_blur: bool,
@@ -479,6 +482,7 @@ impl CompositorStateData {
             idle: IdleManager::new(),
             cursor_theme,
             cursor_hidden: false,
+            cursor_surface: None,
             cursor_cache: None,
             overlays: OverlayCache::new(),
             real_blur: false,
@@ -1246,10 +1250,39 @@ impl CompositorStateData {
         }
 
         if !self.lock.active && !self.cursor_hidden {
-            if let Some((_, pixmap, xhot, yhot)) = self.cursor_cache.as_ref() {
-                let location = self.pointer_location - Point::from((*xhot as f64, *yhot as f64));
-                if let Some(element) = pixmap.element_at(renderer, location, scale) {
-                    elements.push(element.into());
+            if let Some(surface) = self.cursor_surface.as_ref().filter(|surface| surface.alive()) {
+                let hotspot = with_states(surface, |states| {
+                    states
+                        .data_map
+                        .get::<CursorImageSurfaceData>()
+                        .map(|data| {
+                            data.lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .hotspot
+                        })
+                })
+                .unwrap_or_default();
+                let location = (self.pointer_location - hotspot.to_f64())
+                    .to_physical_precise_round(scale);
+                elements.extend(
+                    render_elements_from_surface_tree(
+                        renderer,
+                        surface,
+                        location,
+                        scale,
+                        1.0,
+                        Kind::Unspecified,
+                    )
+                    .into_iter()
+                    .map(Into::into),
+                );
+            } else if self.cursor_surface.is_none() {
+                if let Some((_, pixmap, xhot, yhot)) = self.cursor_cache.as_ref() {
+                    let location =
+                        self.pointer_location - Point::from((*xhot as f64, *yhot as f64));
+                    if let Some(element) = pixmap.element_at(renderer, location, scale) {
+                        elements.push(element.into());
+                    }
                 }
             }
         }
@@ -3617,18 +3650,17 @@ impl SeatHandler for CompositorStateData {
         match image {
             CursorImageStatus::Hidden => {
                 self.cursor_hidden = true;
+                self.cursor_surface = None;
             }
             CursorImageStatus::Named(icon) => {
                 self.cursor_hidden = false;
+                self.cursor_surface = None;
                 self.cursor_theme.set_icon(icon);
                 self.cursor_cache = None;
             }
-            CursorImageStatus::Surface(_) => {
-                // Client-provided cursor surfaces are not imported yet; keep a
-                // legible themed arrow instead of leaving a stale cursor.
+            CursorImageStatus::Surface(surface) => {
                 self.cursor_hidden = false;
-                self.cursor_theme
-                    .set_icon(smithay::input::pointer::CursorIcon::Default);
+                self.cursor_surface = Some(surface);
                 self.cursor_cache = None;
             }
         }
