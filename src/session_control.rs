@@ -893,40 +893,73 @@ mod tests {
     }
 
     #[test]
-    fn session_worker_rejects_metadata_that_does_not_match_trusted_identity() {
+    fn session_worker_rejects_each_trusted_identity_mismatch_and_reaps_worker() {
         let expected = sample();
-        let mut frame = Vec::new();
-        write_session_ready(&mut frame, &expected).unwrap();
-        let escaped = frame
-            .iter()
-            .map(|byte| format!("\\{:03o}", byte))
-            .collect::<String>();
-        let command = format!("printf BUBWORK1 >&3; printf '{escaped}' >&3; exec /bin/sleep 30");
-        let mut worker = SessionWorker::start(
-            std::ffi::OsStr::new("/bin/sh"),
-            &[
-                std::ffi::OsString::from("-c"),
-                std::ffi::OsString::from(command),
-            ],
-            Duration::from_secs(1),
-        )
-        .unwrap();
-        let trusted = SessionIdentity {
-            uid: expected.uid + 1,
-            session_id: expected.session_id.clone(),
-            runtime_dir: expected.runtime_dir.clone(),
-            seat: expected.seat.clone(),
-            vt_number: expected.vt_number,
-        };
+        let identities = [
+            SessionIdentity {
+                uid: expected.uid + 1,
+                session_id: expected.session_id.clone(),
+                runtime_dir: expected.runtime_dir.clone(),
+                seat: expected.seat.clone(),
+                vt_number: expected.vt_number,
+            },
+            SessionIdentity {
+                uid: expected.uid,
+                session_id: "different-session".into(),
+                runtime_dir: expected.runtime_dir.clone(),
+                seat: expected.seat.clone(),
+                vt_number: expected.vt_number,
+            },
+            SessionIdentity {
+                uid: expected.uid,
+                session_id: expected.session_id.clone(),
+                runtime_dir: "/run/user/1001".into(),
+                seat: expected.seat.clone(),
+                vt_number: expected.vt_number,
+            },
+            SessionIdentity {
+                uid: expected.uid,
+                session_id: expected.session_id.clone(),
+                runtime_dir: expected.runtime_dir.clone(),
+                seat: Some("seat1".into()),
+                vt_number: expected.vt_number,
+            },
+            SessionIdentity {
+                uid: expected.uid,
+                session_id: expected.session_id.clone(),
+                runtime_dir: expected.runtime_dir.clone(),
+                seat: expected.seat.clone(),
+                vt_number: Some(expected.vt_number.unwrap_or(1) + 1),
+            },
+        ];
 
-        let error = worker
-            .receive_session_ready_against(Duration::from_secs(1), &trusted)
-            .unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-        assert!(worker.channel.is_none());
-        assert!(worker.process.reaped);
+        for trusted in identities {
+            let mut frame = Vec::new();
+            write_session_ready(&mut frame, &expected).unwrap();
+            let escaped = frame
+                .iter()
+                .map(|byte| format!("\\{:03o}", byte))
+                .collect::<String>();
+            let command =
+                format!("printf BUBWORK1 >&3; printf '{escaped}' >&3; exec /bin/sleep 30");
+            let mut worker = SessionWorker::start(
+                std::ffi::OsStr::new("/bin/sh"),
+                &[
+                    std::ffi::OsString::from("-c"),
+                    std::ffi::OsString::from(command),
+                ],
+                Duration::from_secs(1),
+            )
+            .unwrap();
+
+            let error = worker
+                .receive_session_ready_against(Duration::from_secs(1), &trusted)
+                .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert!(worker.channel.is_none());
+            assert!(worker.process.reaped);
+        }
     }
-
     #[test]
     fn session_worker_rejects_a_second_metadata_frame_and_reaps_worker() {
         let expected = sample();
