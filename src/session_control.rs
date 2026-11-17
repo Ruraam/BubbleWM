@@ -434,6 +434,30 @@ impl SessionWorker {
         self.process.try_wait()
     }
 
+    /// Receives the worker's single bounded session-metadata frame.
+    ///
+    /// The returned values are untrusted claims: the privileged supervisor
+    /// must independently validate them against logind before using them.
+    /// Any framing, validation, timeout, or socket error fails closed by
+    /// closing the channel and terminating/reaping the worker.
+    pub fn receive_session_ready(&mut self, timeout: Duration) -> io::Result<SessionReady> {
+        let channel = self.channel.as_mut().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotConnected, "worker channel is closed")
+        })?;
+        channel.set_read_timeout(Some(timeout))?;
+
+        let result = read_session_ready(channel);
+        let reset_result = channel.set_read_timeout(None);
+        match (result, reset_result) {
+            (Ok(ready), Ok(())) => Ok(ready),
+            (Err(error), _) | (_, Err(error)) => {
+                self.channel.take();
+                let _ = self.process.terminate_and_reap(Duration::from_secs(1));
+                Err(error)
+            }
+        }
+    }
+
     /// Closes the control channel and waits for graceful worker shutdown.
     /// If the worker does not exit before the grace period, it is terminated.
     pub fn shutdown(&mut self, grace: Duration) -> io::Result<std::process::ExitStatus> {
@@ -740,6 +764,29 @@ mod tests {
         .expect("invalid worker handshake must be rejected");
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn session_worker_metadata_timeout_fails_closed_and_reaps_worker() {
+        let mut worker = SessionWorker::start(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from("printf BUBWORK1 >&3; exec /bin/sleep 30"),
+            ],
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        let error = worker
+            .receive_session_ready(Duration::from_millis(30))
+            .unwrap_err();
+        assert!(matches!(
+            error.kind(),
+            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+        ));
+        assert!(worker.channel.is_none());
+        assert!(worker.process.reaped);
     }
 
     #[test]
