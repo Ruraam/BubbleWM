@@ -90,7 +90,6 @@ pub fn resolve_session_for_pid(pid: u32) -> io::Result<ResolvedLogindSession> {
     })
 }
 
-
 /// Stops the logind session scope from the privileged supervisor.
 ///
 /// The scope name must come from `resolve_session_for_pid`, never from the
@@ -168,12 +167,14 @@ fn validate_scope_name(scope: &str) -> io::Result<()> {
     else {
         return Err(invalid_input("invalid logind session scope name"));
     };
-    validate_session_id(session_id)
-        .map_err(|_| invalid_input("invalid logind session scope name"))
+    validate_session_id(session_id).map_err(|_| invalid_input("invalid logind session scope name"))
 }
 
 fn system_bus_error(error: zbus::Error) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, format!("systemd D-Bus error: {error}"))
+    io::Error::new(
+        io::ErrorKind::Other,
+        format!("systemd D-Bus error: {error}"),
+    )
 }
 
 type PidStringLookup = unsafe extern "C" fn(libc::pid_t, *mut *mut c_char) -> libc::c_int;
@@ -312,7 +313,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn accepts_only_logind_session_scope_names_for_cleanup() {
         assert!(validate_scope_name("session-c1.scope").is_ok());
         for value in [
@@ -325,6 +325,7 @@ mod tests {
         }
     }
 
+    #[test]
     fn runtime_directory_must_be_private_and_owned_by_session_uid() {
         use std::os::unix::fs::PermissionsExt;
 
