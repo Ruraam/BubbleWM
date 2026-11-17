@@ -3,8 +3,8 @@
 //! The worker receives the password only on inherited stdin. Descriptor 3 is
 //! reserved for the private, non-secret supervisor control protocol.
 
-use std::io::{self, Read, Write};
 use std::ffi::{OsStr, OsString};
+use std::io::{self, Read, Write};
 use std::time::Duration;
 
 use bubblewm::auth::PamLoginSession;
@@ -17,13 +17,16 @@ const SESSION_CONFIG: &str = "/etc/bubblewm/session.toml";
 const TERMINATION_GRACE: Duration = Duration::from_secs(5);
 
 fn main() {
-    if let Err(error) = run() {
-        eprintln!("bubblewm-session-worker: {error}");
-        std::process::exit(1);
+    match run() {
+        Ok(code) => std::process::exit(code),
+        Err(error) => {
+            eprintln!("bubblewm-session-worker: {error}");
+            std::process::exit(1);
+        }
     }
 }
 
-fn run() -> Result<(), String> {
+fn run() -> Result<i32, String> {
     // Own fd 3 before parsing arguments, reading the secret, or logging.
     let mut channel = take_worker_channel().map_err(|error| error.to_string())?;
     announce_worker(&mut channel).map_err(|error| error.to_string())?;
@@ -56,14 +59,11 @@ fn run() -> Result<(), String> {
     let session = session?;
 
     let ready = session.session_ready()?;
-    write_session_ready(&mut channel, &ready).map_err(|error| {
-        format!("impossible d'annoncer les métadonnées de session: {error}")
-    })?;
+    write_session_ready(&mut channel, &ready)
+        .map_err(|error| format!("impossible d'annoncer les métadonnées de session: {error}"))?;
 
-    let mut process = session.spawn_user_command(
-        OsStr::new(COMPOSITOR),
-        &[OsString::from(SESSION_CONFIG)],
-    )?;
+    let mut process =
+        session.spawn_user_command(OsStr::new(COMPOSITOR), &[OsString::from(SESSION_CONFIG)])?;
     let status = process
         .wait()
         .map_err(|error| format!("impossible d'attendre la session utilisateur: {error}"))?;
@@ -74,7 +74,7 @@ fn run() -> Result<(), String> {
     let pam_cleanup = session.close();
     process_cleanup?;
     pam_cleanup?;
-    Ok(())
+    Ok(status.code().unwrap_or(1))
 }
 
 fn announce_worker<W: Write>(channel: &mut W) -> io::Result<()> {
