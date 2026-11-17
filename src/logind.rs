@@ -58,9 +58,7 @@ pub fn resolve_session_for_pid(pid: u32) -> io::Result<ResolvedLogindSession> {
     let scope = sd_string_from_pid(pid, sd_pid_get_unit)?;
     validate_session_scope(&scope, &session_id)?;
 
-    let seat = optional_sd_string(|value| unsafe {
-        sd_session_get_seat(session.as_ptr(), value)
-    })?;
+    let seat = optional_sd_string(|value| unsafe { sd_session_get_seat(session.as_ptr(), value) })?;
     let vt_number = optional_sd_vt(session.as_ptr())?;
 
     let runtime_dir = PathBuf::from(format!("/run/user/{uid}"));
@@ -92,8 +90,7 @@ pub fn resolve_session_for_pid(pid: u32) -> io::Result<ResolvedLogindSession> {
     })
 }
 
-type PidStringLookup =
-    unsafe extern "C" fn(libc::pid_t, *mut *mut c_char) -> libc::c_int;
+type PidStringLookup = unsafe extern "C" fn(libc::pid_t, *mut *mut c_char) -> libc::c_int;
 
 fn sd_string_from_pid(pid: libc::pid_t, lookup: PidStringLookup) -> io::Result<String> {
     let mut value = std::ptr::null_mut();
@@ -153,7 +150,9 @@ fn validate_session_id(session_id: &str) -> io::Result<()> {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
     {
-        return Err(invalid_data("logind returned an invalid session identifier"));
+        return Err(invalid_data(
+            "logind returned an invalid session identifier",
+        ));
     }
     Ok(())
 }
