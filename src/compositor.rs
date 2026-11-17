@@ -2537,18 +2537,34 @@ impl CompositorStateData {
         let Some(target) = self.space.elements().last().cloned() else {
             return;
         };
-        let Some(entry) = self.windows.iter_mut().find(|entry| entry.window == target) else {
+        let Some(surface) = target.toplevel().map(|toplevel| toplevel.wl_surface().clone()) else {
             return;
         };
-        if entry.workspace == index {
+        let root = self.root_surface_for_toplevel(&surface);
+        let family = self.window_family_surfaces(&root);
+        let mut moved = false;
+
+        for entry in &mut self.windows {
+            let belongs_to_family = entry
+                .window
+                .toplevel()
+                .is_some_and(|toplevel| family.contains(toplevel.wl_surface()));
+            if belongs_to_family && entry.workspace != index {
+                entry.workspace = index;
+                moved = true;
+            }
+        }
+
+        if !moved {
             return;
         }
-        entry.workspace = index;
+
+        self.remap_active_workspace();
         if index != self.active_workspace {
-            self.space.unmap_elem(&target);
             self.focus_topmost_window();
         }
         self.overlays.dirty = true;
+        self.overlays.window_masks_dirty = true;
     }
 
     fn focus_next_window(&mut self) {
