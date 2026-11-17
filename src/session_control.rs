@@ -17,6 +17,7 @@ const MAX_SESSION_ID: usize = 64;
 const MAX_RUNTIME_DIR: usize = 4_096;
 const MAX_SEAT: usize = 64;
 const WORKER_HELLO: &[u8; 8] = b"BUBWORK1";
+const SUPERVISOR_APPROVAL: &[u8; 8] = b"BUBOKAY1";
 
 /// Waits for the fixed bootstrap marker sent by a freshly started worker.
 ///
@@ -27,6 +28,18 @@ pub fn read_worker_hello<R: Read>(reader: &mut R) -> io::Result<()> {
     reader.read_exact(&mut hello)?;
     if hello != *WORKER_HELLO {
         return Err(invalid_data("invalid BubbleWM session worker handshake"));
+    }
+    Ok(())
+}
+
+
+/// Waits for the supervisor's explicit approval before the worker starts the
+/// compositor. EOF or any other marker means the session must be aborted.
+pub fn read_supervisor_approval<R: Read>(reader: &mut R) -> io::Result<()> {
+    let mut approval = [0_u8; SUPERVISOR_APPROVAL.len()];
+    reader.read_exact(&mut approval)?;
+    if approval != *SUPERVISOR_APPROVAL {
+        return Err(invalid_data("invalid supervisor session approval"));
     }
     Ok(())
 }
@@ -577,6 +590,32 @@ impl SessionWorker {
         Ok(ready)
     }
 
+
+    /// Approves compositor startup after the supervisor has independently
+    /// validated the worker's metadata against logind. The channel is closed
+    /// immediately after the one-way approval is sent.
+    pub fn approve_session(&mut self) -> io::Result<()> {
+        if !self.metadata_received {
+            return Err(invalid_input(
+                "cannot approve a session before receiving worker metadata",
+            ));
+        }
+        let Some(mut channel) = self.channel.take() else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "worker channel is closed",
+            ));
+        };
+        if let Err(error) = channel
+            .write_all(SUPERVISOR_APPROVAL)
+            .and_then(|()| channel.flush())
+        {
+            let _ = self.process.terminate_and_reap(Duration::from_secs(1));
+            return Err(error);
+        }
+        Ok(())
+    }
+
     /// Closes the control channel and waits for graceful worker shutdown.
     /// If the worker does not exit before the grace period, it is terminated.
     pub fn shutdown(&mut self, grace: Duration) -> io::Result<std::process::ExitStatus> {
@@ -800,6 +839,28 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn supervisor_approval_accepts_only_the_exact_marker() {
+        let mut bytes = Cursor::new(SUPERVISOR_APPROVAL);
+        read_supervisor_approval(&mut bytes).unwrap();
+    }
+
+    #[test]
+    fn supervisor_approval_rejects_invalid_or_truncated_markers() {
+        let mut invalid = Cursor::new(*b"BUBOKAYX");
+        assert_eq!(
+            read_supervisor_approval(&mut invalid).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+
+        let mut truncated = Cursor::new(&SUPERVISOR_APPROVAL[..7]);
+        assert_eq!(
+            read_supervisor_approval(&mut truncated).unwrap_err().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+    }
+
     #[test]
     fn password_descriptor_must_be_a_read_only_pipe() {
         let mut pipe_fds = [-1; 2];
@@ -954,6 +1015,56 @@ mod tests {
                 .receive_session_ready(Duration::from_secs(1))
                 .unwrap(),
             expected
+        );
+        assert!(worker.shutdown(Duration::from_secs(1)).unwrap().success());
+    }
+
+
+    #[test]
+    fn session_worker_waits_for_supervisor_approval_before_exit() {
+        let expected = sample();
+        let mut frame = Vec::new();
+        write_session_ready(&mut frame, &expected).unwrap();
+        let escaped = frame
+            .iter()
+            .map(|byte| format!("\\{:03o}", byte))
+            .collect::<String>();
+        let command = format!(
+            "printf BUBWORK1 >&3; printf '{escaped}' >&3; dd bs=8 count=1 <&3 >/dev/null"
+        );
+        let mut worker = SessionWorker::start(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from(command),
+            ],
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        assert_eq!(
+            worker.receive_session_ready(Duration::from_secs(1)).unwrap(),
+            expected
+        );
+        worker.approve_session().unwrap();
+        assert!(worker.wait().unwrap().success());
+    }
+
+    #[test]
+    fn session_worker_cannot_be_approved_before_metadata() {
+        let mut worker = SessionWorker::start(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from("printf BUBWORK1 >&3; cat <&3"),
+            ],
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        assert_eq!(
+            worker.approve_session().unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
         );
         assert!(worker.shutdown(Duration::from_secs(1)).unwrap().success());
     }
