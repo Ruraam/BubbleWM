@@ -3996,6 +3996,17 @@ impl PointerGrab<CompositorStateData> for WindowPointerGrab {
         handle.motion(data, None, event);
 
         if !self.window.alive() || data.space.element_location(&self.window).is_none() {
+            if matches!(self.kind, WindowGrabKind::Resize { .. }) {
+                if let Some(surface) = self.window.wl_surface() {
+                    if data
+                        .resize_session
+                        .as_ref()
+                        .is_some_and(|session| session.surface == surface)
+                    {
+                        data.resize_session = None;
+                    }
+                }
+            }
             handle.unset_grab(self, data, event.serial, event.time, true);
             return;
         }
