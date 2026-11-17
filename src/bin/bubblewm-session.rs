@@ -74,6 +74,9 @@ fn run() -> Result<i32, String> {
         .map_err(|error| format!("impossible de vérifier la session logind du worker: {error}"))?;
     bubblewm::session_control::validate_session_ready_against(&ready, &trusted.identity)
         .map_err(|error| format!("identité de session refusée: {error}"))?;
+    worker
+        .approve_session()
+        .map_err(|error| format!("impossible d'autoriser le démarrage de la session: {error}"))?;
 
     let status = worker
         .wait()
