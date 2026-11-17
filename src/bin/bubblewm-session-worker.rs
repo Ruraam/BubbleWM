@@ -75,14 +75,26 @@ fn run() -> Result<i32, String> {
     let status = process
         .wait()
         .map_err(|error| format!("impossible d'attendre la session utilisateur: {error}"))?;
-    let process_cleanup = process
-        .terminate(TERMINATION_GRACE)
-        .map_err(|error| format!("impossible de nettoyer le groupe utilisateur: {error}"));
-    drop(process);
-    let pam_cleanup = session.close();
-    process_cleanup?;
-    pam_cleanup?;
+    cleanup_session(
+        || {
+            process
+                .terminate(TERMINATION_GRACE)
+                .map_err(|error| format!("impossible de nettoyer le groupe utilisateur: {error}"))
+        },
+        || session.close(),
+    )?;
     Ok(status.code().unwrap_or(1))
+}
+
+/// Runs both cleanup stages, even when terminating user processes fails.
+fn cleanup_session(
+    process_cleanup: impl FnOnce() -> Result<(), String>,
+    pam_cleanup: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    let process_result = process_cleanup();
+    let pam_result = pam_cleanup();
+    process_result?;
+    pam_result
 }
 
 /// Closes the password pipe before any user process can be spawned.
@@ -305,6 +317,57 @@ mod tests {
         wipe_string(&mut password);
         assert_eq!(password.len(), original_len);
         assert!(password.as_bytes().iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn pam_cleanup_runs_when_process_cleanup_fails() {
+        use std::cell::Cell;
+
+        let pam_cleanup_called = Cell::new(false);
+        let result = cleanup_session(
+            || Err("process cleanup failed".to_owned()),
+            || {
+                pam_cleanup_called.set(true);
+                Ok(())
+            },
+        );
+
+        assert_eq!(result.unwrap_err(), "process cleanup failed");
+        assert!(pam_cleanup_called.get());
+    }
+
+    #[test]
+    fn process_cleanup_error_takes_precedence_but_both_stages_run() {
+        use std::cell::Cell;
+
+        let pam_cleanup_called = Cell::new(false);
+        let result = cleanup_session(
+            || Err("process cleanup failed".to_owned()),
+            || {
+                pam_cleanup_called.set(true);
+                Err("PAM cleanup failed".to_owned())
+            },
+        );
+
+        assert_eq!(result.unwrap_err(), "process cleanup failed");
+        assert!(pam_cleanup_called.get());
+    }
+
+    #[test]
+    fn pam_cleanup_error_is_returned_after_successful_process_cleanup() {
+        use std::cell::Cell;
+
+        let process_cleanup_called = Cell::new(false);
+        let result = cleanup_session(
+            || {
+                process_cleanup_called.set(true);
+                Ok(())
+            },
+            || Err("PAM cleanup failed".to_owned()),
+        );
+
+        assert_eq!(result.unwrap_err(), "PAM cleanup failed");
+        assert!(process_cleanup_called.get());
     }
 
     #[test]
