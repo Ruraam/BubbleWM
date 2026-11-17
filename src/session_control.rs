@@ -401,6 +401,60 @@ impl Drop for WorkerProcess {
     }
 }
 
+/// Owns the private channel and process handle for one bootstrapped worker.
+///
+/// Normal shutdown closes the channel first, allowing the worker to observe
+/// EOF and exit cleanly. A timeout falls back to the bounded TERM/KILL path.
+pub struct SessionWorker {
+    channel: Option<UnixStream>,
+    process: WorkerProcess,
+}
+
+impl SessionWorker {
+    /// Starts a worker and requires its exact bootstrap marker before returning.
+    pub fn start(
+        program: &std::ffi::OsStr,
+        arguments: &[std::ffi::OsString],
+        startup_timeout: Duration,
+    ) -> io::Result<Self> {
+        let (channel, process) =
+            start_worker_with_handshake(program, arguments, startup_timeout)?;
+        Ok(Self {
+            channel: Some(channel),
+            process,
+        })
+    }
+
+    /// Returns the worker PID.
+    pub fn id(&self) -> libc::pid_t {
+        self.process.id()
+    }
+
+    /// Checks whether the worker has exited without blocking.
+    pub fn try_wait(&mut self) -> io::Result<Option<std::process::ExitStatus>> {
+        self.process.try_wait()
+    }
+
+    /// Closes the control channel and waits for graceful worker shutdown.
+    /// If the worker does not exit before the grace period, it is terminated.
+    pub fn shutdown(&mut self, grace: Duration) -> io::Result<std::process::ExitStatus> {
+        self.channel.take();
+        match self.process.wait_timeout(grace)? {
+            Some(status) => Ok(status),
+            None => self.process.terminate_and_reap(grace),
+        }
+    }
+}
+
+impl Drop for SessionWorker {
+    fn drop(&mut self) {
+        self.channel.take();
+        if self.process.try_wait().is_ok_and(|status| status.is_some()) {
+            return;
+        }
+        let _ = self.process.terminate_and_reap(Duration::from_millis(100));
+    }
+}
 struct OwnedFdGuard(libc::c_int);
 
 impl Drop for OwnedFdGuard {
@@ -705,6 +759,38 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn session_worker_shutdown_closes_channel_and_allows_clean_exit() {
+        let mut worker = SessionWorker::start(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from("printf BUBWORK1 >&3; cat <&3"),
+            ],
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        let status = worker.shutdown(Duration::from_secs(1)).unwrap();
+        assert!(status.success());
+        assert!(worker.try_wait().is_err());
+    }
+
+    #[test]
+    fn session_worker_shutdown_terminates_worker_that_ignores_channel_eof() {
+        let mut worker = SessionWorker::start(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from("printf BUBWORK1 >&3; exec /bin/sleep 30"),
+            ],
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        let status = worker.shutdown(Duration::from_millis(20)).unwrap();
+        assert_eq!(status.signal(), Some(libc::SIGTERM));
+    }
     #[test]
     fn worker_spawn_receives_channel_on_fd_three() {
         let (mut supervisor, worker) = private_channel_pair().unwrap();
