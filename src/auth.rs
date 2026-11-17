@@ -296,6 +296,42 @@ impl PamLoginSession {
         Ok(ManagedUserProcess::new(child))
     }
 
+    /// Builds the non-secret session metadata announced after PAM opens the session.
+    ///
+    /// The supervisor must compare this claim with an independent logind lookup.
+    pub fn session_ready(&self) -> Result<crate::session_control::SessionReady, String> {
+        let session_id = self
+            .environment_value("XDG_SESSION_ID")
+            .and_then(std::ffi::OsStr::to_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "PAM n'a fourni aucun identifiant de session logind".to_owned())?
+            .to_owned();
+        let runtime_dir = self
+            .environment_value("XDG_RUNTIME_DIR")
+            .and_then(std::ffi::OsStr::to_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("/run/user/{}", self.identity.uid));
+        let seat = self
+            .environment_value("XDG_SEAT")
+            .and_then(std::ffi::OsStr::to_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        let vt_number = self
+            .environment_value("XDG_VTNR")
+            .and_then(std::ffi::OsStr::to_str)
+            .map(|value| value.parse::<u32>())
+            .transpose()
+            .map_err(|_| "Numéro de terminal logind invalide".to_owned())?;
+
+        Ok(crate::session_control::SessionReady {
+            uid: self.identity.uid,
+            session_id,
+            runtime_dir,
+            seat,
+            vt_number,
+        })
+    }
+
     fn environment_value(&self, name: &str) -> Option<&std::ffi::OsStr> {
         self.environment
             .iter()
