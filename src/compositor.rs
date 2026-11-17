@@ -1894,6 +1894,7 @@ impl CompositorStateData {
 
     fn root_surface_for_toplevel(&self, surface: &WlSurface) -> WlSurface {
         let mut root = surface.clone();
+        let mut visited = vec![root.clone()];
         loop {
             let parent = self
                 .windows
@@ -1908,7 +1909,11 @@ impl CompositorStateData {
             let Some(parent) = parent else {
                 break;
             };
+            if visited.contains(&parent) {
+                break;
+            }
             root = parent;
+            visited.push(root.clone());
         }
         root
     }
