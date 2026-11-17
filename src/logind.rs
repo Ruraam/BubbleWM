@@ -9,6 +9,8 @@ use std::{
     io,
     os::unix::fs::MetadataExt,
     path::PathBuf,
+    thread,
+    time::{Duration, Instant},
 };
 
 use crate::session_control::SessionIdentity;
@@ -86,6 +88,92 @@ pub fn resolve_session_for_pid(pid: u32) -> io::Result<ResolvedLogindSession> {
         },
         scope,
     })
+}
+
+
+/// Stops the logind session scope from the privileged supervisor.
+///
+/// The scope name must come from `resolve_session_for_pid`, never from the
+/// worker protocol or user input. The worker must already have exited so PAM
+/// can close its session before systemd terminates remaining descendants.
+pub fn stop_session_scope(scope: &str, timeout: Duration) -> io::Result<()> {
+    validate_scope_name(scope)?;
+    if timeout.is_zero() {
+        return Err(invalid_input("scope stop timeout must be non-zero"));
+    }
+
+    let connection = zbus::blocking::Connection::system().map_err(system_bus_error)?;
+    let manager = zbus::blocking::Proxy::new(
+        &connection,
+        "org.freedesktop.systemd1",
+        "/org/freedesktop/systemd1",
+        "org.freedesktop.systemd1.Manager",
+    )
+    .map_err(system_bus_error)?;
+
+    let unit_path: zbus::zvariant::OwnedObjectPath = manager
+        .call("GetUnit", &(scope,))
+        .map_err(system_bus_error)?;
+    let properties = zbus::blocking::Proxy::new(
+        &connection,
+        "org.freedesktop.systemd1",
+        unit_path.as_str(),
+        "org.freedesktop.DBus.Properties",
+    )
+    .map_err(system_bus_error)?;
+
+    let active_state = read_unit_active_state(&properties)?;
+    if active_state == "inactive" {
+        return Ok(());
+    }
+    if active_state == "failed" {
+        return Err(invalid_data("session scope is already in failed state"));
+    }
+
+    let _: zbus::zvariant::OwnedObjectPath = manager
+        .call("StopUnit", &(scope, "replace"))
+        .map_err(system_bus_error)?;
+
+    let deadline = Instant::now() + timeout;
+    loop {
+        let active_state = read_unit_active_state(&properties)?;
+        match active_state.as_str() {
+            "inactive" => return Ok(()),
+            "failed" => {
+                return Err(invalid_data("systemd failed to stop the session scope"));
+            }
+            _ if Instant::now() >= deadline => {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "timed out waiting for the session scope to become inactive",
+                ));
+            }
+            _ => thread::sleep(Duration::from_millis(50)),
+        }
+    }
+}
+
+fn read_unit_active_state(properties: &zbus::blocking::Proxy<'_>) -> io::Result<String> {
+    let value: zbus::zvariant::OwnedValue = properties
+        .call("Get", &("org.freedesktop.systemd1.Unit", "ActiveState"))
+        .map_err(system_bus_error)?;
+    String::try_from(value)
+        .map_err(|_| invalid_data("systemd returned an invalid unit ActiveState"))
+}
+
+fn validate_scope_name(scope: &str) -> io::Result<()> {
+    let Some(session_id) = scope
+        .strip_prefix("session-")
+        .and_then(|value| value.strip_suffix(".scope"))
+    else {
+        return Err(invalid_input("invalid logind session scope name"));
+    };
+    validate_session_id(session_id)
+        .map_err(|_| invalid_input("invalid logind session scope name"))
+}
+
+fn system_bus_error(error: zbus::Error) -> io::Error {
+    io::Error::new(io::ErrorKind::Other, format!("systemd D-Bus error: {error}"))
 }
 
 type PidStringLookup = unsafe extern "C" fn(libc::pid_t, *mut *mut c_char) -> libc::c_int;
@@ -224,6 +312,19 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn accepts_only_logind_session_scope_names_for_cleanup() {
+        assert!(validate_scope_name("session-c1.scope").is_ok());
+        for value in [
+            "user@1000.service",
+            "session-c1.service",
+            "session-../evil.scope",
+            "session-c1.scope/evil",
+        ] {
+            assert!(validate_scope_name(value).is_err(), "{value}");
+        }
+    }
+
     fn runtime_directory_must_be_private_and_owned_by_session_uid() {
         use std::os::unix::fs::PermissionsExt;
 
