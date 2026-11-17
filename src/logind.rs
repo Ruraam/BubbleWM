@@ -121,19 +121,32 @@ pub fn stop_session_scope(scope: &str, timeout: Duration) -> io::Result<()> {
     )
     .map_err(system_bus_error)?;
 
-    let active_state = read_unit_active_state(&properties)?;
-    if active_state == "inactive" {
-        return Ok(());
-    }
-    if active_state == "failed" {
-        return Err(invalid_data("session scope is already in failed state"));
+    stop_scope_with(
+        timeout,
+        || read_unit_active_state(&properties),
+        || {
+            let _: zbus::zvariant::OwnedObjectPath = manager
+                .call("StopUnit", &(scope, "replace"))
+                .map_err(system_bus_error)?;
+            Ok(())
+        },
+    )
+}
+
+fn stop_scope_with(
+    timeout: Duration,
+    mut read_active_state: impl FnMut() -> io::Result<String>,
+    stop_unit: impl FnOnce() -> io::Result<()>,
+) -> io::Result<()> {
+    let active_state = read_active_state()?;
+    match active_state.as_str() {
+        "inactive" => return Ok(()),
+        "failed" => return Err(invalid_data("session scope is already in failed state")),
+        _ => {}
     }
 
-    let _: zbus::zvariant::OwnedObjectPath = manager
-        .call("StopUnit", &(scope, "replace"))
-        .map_err(system_bus_error)?;
-
-    wait_for_scope_inactive(timeout, || read_unit_active_state(&properties))
+    stop_unit()?;
+    wait_for_scope_inactive(timeout, read_active_state)
 }
 
 fn wait_for_scope_inactive(
@@ -376,6 +389,105 @@ mod tests {
         })
         .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::ConnectionReset);
+    }
+
+    #[test]
+    fn scope_cleanup_does_not_stop_an_already_inactive_unit() {
+        let mut reads = 0;
+        let mut stops = 0;
+        let result = stop_scope_with(
+            Duration::from_secs(1),
+            || {
+                reads += 1;
+                Ok("inactive".to_owned())
+            },
+            || {
+                stops += 1;
+                Ok(())
+            },
+        );
+        assert!(result.is_ok());
+        assert_eq!(reads, 1);
+        assert_eq!(stops, 0);
+    }
+
+    #[test]
+    fn scope_cleanup_does_not_stop_a_failed_unit() {
+        let mut stops = 0;
+        let error = stop_scope_with(
+            Duration::from_secs(1),
+            || Ok("failed".to_owned()),
+            || {
+                stops += 1;
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(stops, 0);
+    }
+
+    #[test]
+    fn scope_cleanup_requests_stop_once_then_waits_for_inactive() {
+        let mut states = ["active", "deactivating", "inactive"].into_iter();
+        let mut reads = 0;
+        let mut stops = 0;
+        let result = stop_scope_with(
+            Duration::from_secs(1),
+            || {
+                reads += 1;
+                Ok(states.next().unwrap().to_owned())
+            },
+            || {
+                stops += 1;
+                Ok(())
+            },
+        );
+        assert!(result.is_ok());
+        assert_eq!(reads, 3);
+        assert_eq!(stops, 1);
+    }
+
+    #[test]
+    fn scope_cleanup_propagates_stop_unit_errors_without_polling() {
+        let mut reads = 0;
+        let error = stop_scope_with(
+            Duration::from_secs(1),
+            || {
+                reads += 1;
+                Ok("active".to_owned())
+            },
+            || {
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "StopUnit denied",
+                ))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(reads, 1);
+    }
+
+    #[test]
+    fn scope_cleanup_propagates_initial_state_read_errors() {
+        let mut stops = 0;
+        let error = stop_scope_with(
+            Duration::from_secs(1),
+            || {
+                Err(io::Error::new(
+                    io::ErrorKind::ConnectionReset,
+                    "bus disconnected",
+                ))
+            },
+            || {
+                stops += 1;
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::ConnectionReset);
+        assert_eq!(stops, 0);
     }
 
     #[test]
