@@ -82,8 +82,12 @@ fn run() -> Result<i32, String> {
     // PAM has been closed by the worker. The supervisor, which remains
     // outside the session scope, now removes any descendants that escaped
     // the worker's original process group.
-    bubblewm::logind::stop_session_scope(&trusted.scope, SCOPE_STOP_TIMEOUT)
-        .map_err(|error| format!("impossible de terminer le scope logind {}: {error}", trusted.scope))?;
+    bubblewm::logind::stop_session_scope(&trusted.scope, SCOPE_STOP_TIMEOUT).map_err(|error| {
+        format!(
+            "impossible de terminer le scope logind {}: {error}",
+            trusted.scope
+        )
+    })?;
 
     Ok(status.code().unwrap_or(1))
 }
