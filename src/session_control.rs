@@ -504,6 +504,25 @@ impl SessionWorker {
         }
     }
 
+    /// Receives metadata and validates it against supervisor-trusted identity.
+    ///
+    /// A mismatch is fatal: the channel is closed and the worker is terminated
+    /// and reaped before the error is returned. Callers that need to consume
+    /// worker metadata should prefer this method over the untrusted raw receive.
+    pub fn receive_session_ready_against(
+        &mut self,
+        timeout: Duration,
+        trusted: &SessionIdentity,
+    ) -> io::Result<SessionReady> {
+        let ready = self.receive_session_ready(timeout)?;
+        if let Err(error) = validate_session_ready_against(&ready, trusted) {
+            self.channel.take();
+            let _ = self.process.terminate_and_reap(Duration::from_secs(1));
+            return Err(error);
+        }
+        Ok(ready)
+    }
+
     /// Closes the control channel and waits for graceful worker shutdown.
     /// If the worker does not exit before the grace period, it is terminated.
     pub fn shutdown(&mut self, grace: Duration) -> io::Result<std::process::ExitStatus> {
@@ -858,6 +877,41 @@ mod tests {
 
         let error = worker
             .receive_session_ready(Duration::from_secs(1))
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(worker.channel.is_none());
+        assert!(worker.process.reaped);
+    }
+
+    #[test]
+    fn session_worker_rejects_metadata_that_does_not_match_trusted_identity() {
+        let expected = sample();
+        let mut frame = Vec::new();
+        write_session_ready(&mut frame, &expected).unwrap();
+        let escaped = frame
+            .iter()
+            .map(|byte| format!("\\{:03o}", byte))
+            .collect::<String>();
+        let command = format!("printf BUBWORK1 >&3; printf '{escaped}' >&3; exec /bin/sleep 30");
+        let mut worker = SessionWorker::start(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from(command),
+            ],
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        let trusted = SessionIdentity {
+            uid: expected.uid + 1,
+            session_id: expected.session_id.clone(),
+            runtime_dir: expected.runtime_dir.clone(),
+            seat: expected.seat.clone(),
+            vt_number: expected.vt_number,
+        };
+
+        let error = worker
+            .receive_session_ready_against(Duration::from_secs(1), &trusted)
             .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert!(worker.channel.is_none());
