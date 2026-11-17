@@ -50,11 +50,10 @@ use smithay::{
         keyboard::{FilterResult, KeyboardHandle, Keysym, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, CursorImageAttributes, CursorImageStatus,
-            CursorImageSurfaceData, Focus, GestureHoldBeginEvent,
-            GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent,
-            GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
-            GestureSwipeUpdateEvent, GrabStartData, MotionEvent, PointerGrab, PointerHandle,
-            PointerInnerHandle, RelativeMotionEvent,
+            CursorImageSurfaceData, Focus, GestureHoldBeginEvent, GestureHoldEndEvent,
+            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData,
+            MotionEvent, PointerGrab, PointerHandle, PointerInnerHandle, RelativeMotionEvent,
         },
     },
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
@@ -1250,20 +1249,21 @@ impl CompositorStateData {
         }
 
         if !self.lock.active && !self.cursor_hidden {
-            if let Some(surface) = self.cursor_surface.as_ref().filter(|surface| surface.alive()) {
+            if let Some(surface) = self
+                .cursor_surface
+                .as_ref()
+                .filter(|surface| surface.alive())
+            {
                 let hotspot = with_states(surface, |states| {
-                    states
-                        .data_map
-                        .get::<CursorImageSurfaceData>()
-                        .map(|data| {
-                            data.lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                .hotspot
-                        })
+                    states.data_map.get::<CursorImageSurfaceData>().map(|data| {
+                        data.lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .hotspot
+                    })
                 })
                 .unwrap_or_default();
-                let location = (self.pointer_location - hotspot.to_f64())
-                    .to_physical_precise_round(scale);
+                let location =
+                    (self.pointer_location - hotspot.to_f64()).to_physical_precise_round(scale);
                 elements.extend(
                     render_elements_from_surface_tree(
                         renderer,
