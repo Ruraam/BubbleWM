@@ -8,7 +8,7 @@ use std::io::{self, Read, Write};
 use std::time::Duration;
 
 use bubblewm::auth::PamLoginSession;
-use bubblewm::session_control::{take_worker_channel, write_session_ready};
+use bubblewm::session_control::{take_worker_channel, validate_password_pipe_fd, write_session_ready};
 
 const WORKER_HELLO: &[u8; 8] = b"BUBWORK1";
 const MAX_PASSWORD_BYTES: usize = 1024;
@@ -46,9 +46,8 @@ fn run() -> Result<i32, String> {
     if unsafe { libc::geteuid() } != 0 {
         return Err("le worker PAM doit être lancé avec les privilèges système".into());
     }
-    if unsafe { libc::isatty(libc::STDIN_FILENO) } != 0 {
-        return Err("le secret doit être transmis par un pipe stdin".into());
-    }
+    validate_password_pipe_fd(libc::STDIN_FILENO)
+        .map_err(|error| format!("le secret doit être transmis par un pipe stdin: {error}"))?;
 
     let mut password = read_password(io::stdin().lock())?;
     // PAM is now the only consumer of the secret; don't let the compositor
