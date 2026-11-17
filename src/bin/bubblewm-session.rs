@@ -18,6 +18,7 @@ use bubblewm::{
 const WORKER: &str = "/usr/libexec/bubblewm-session-worker";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
 const METADATA_TIMEOUT: Duration = Duration::from_secs(10);
+const SCOPE_STOP_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn main() {
     match run() {
@@ -77,6 +78,13 @@ fn run() -> Result<i32, String> {
     let status = worker
         .wait()
         .map_err(|error| format!("impossible d'attendre le nettoyage PAM du worker: {error}"))?;
+
+    // PAM has been closed by the worker. The supervisor, which remains
+    // outside the session scope, now removes any descendants that escaped
+    // the worker's original process group.
+    bubblewm::logind::stop_session_scope(&trusted.scope, SCOPE_STOP_TIMEOUT)
+        .map_err(|error| format!("impossible de terminer le scope logind {}: {error}", trusted.scope))?;
+
     Ok(status.code().unwrap_or(1))
 }
 
