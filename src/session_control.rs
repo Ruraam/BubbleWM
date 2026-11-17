@@ -590,7 +590,6 @@ impl SessionWorker {
         Ok(ready)
     }
 
-
     /// Approves compositor startup after the supervisor has independently
     /// validated the worker's metadata against logind. The channel is closed
     /// immediately after the one-way approval is sent.
@@ -839,7 +838,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn supervisor_approval_accepts_only_the_exact_marker() {
         let mut bytes = Cursor::new(SUPERVISOR_APPROVAL);
@@ -1019,7 +1017,6 @@ mod tests {
         assert!(worker.shutdown(Duration::from_secs(1)).unwrap().success());
     }
 
-
     #[test]
     fn session_worker_waits_for_supervisor_approval_before_exit() {
         let expected = sample();
@@ -1029,9 +1026,8 @@ mod tests {
             .iter()
             .map(|byte| format!("\\{:03o}", byte))
             .collect::<String>();
-        let command = format!(
-            "printf BUBWORK1 >&3; printf '{escaped}' >&3; dd bs=8 count=1 <&3 >/dev/null"
-        );
+        let command =
+            format!("printf BUBWORK1 >&3; printf '{escaped}' >&3; dd bs=8 count=1 <&3 >/dev/null");
         let mut worker = SessionWorker::start(
             std::ffi::OsStr::new("/bin/sh"),
             &[
@@ -1043,7 +1039,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            worker.receive_session_ready(Duration::from_secs(1)).unwrap(),
+            worker
+                .receive_session_ready(Duration::from_secs(1))
+                .unwrap(),
             expected
         );
         worker.approve_session().unwrap();
