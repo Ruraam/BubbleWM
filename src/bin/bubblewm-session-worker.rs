@@ -111,15 +111,15 @@ fn read_password<R: Read>(reader: R) -> Result<String, String> {
         wipe_bytes(&mut bytes);
         return Err("mot de passe trop long".into());
     }
-    if bytes.last() == Some(&b'\\n') {
+    if bytes.last() == Some(&b'\n') {
         bytes.pop();
-        if bytes.last() == Some(&b'\\r') {
+        if bytes.last() == Some(&b'\r') {
             bytes.pop();
         }
     }
     if bytes.is_empty()
         || bytes.len() > MAX_PASSWORD_BYTES
-        || bytes.iter().any(|byte| matches!(byte, b'\\n' | b'\\r' | 0))
+        || bytes.iter().any(|byte| matches!(byte, b'\n' | b'\r' | 0))
     {
         wipe_bytes(&mut bytes);
         return Err("format de mot de passe invalide".into());
@@ -162,15 +162,15 @@ mod tests {
 
     #[test]
     fn password_reader_accepts_lf_and_crlf_framing() {
-        assert_eq!(read_password(Cursor::new(b"secret\\n")).unwrap(), "secret");
-        assert_eq!(read_password(Cursor::new(b"secret\\r\\n")).unwrap(), "secret");
+        assert_eq!(read_password(Cursor::new(b"secret\n")).unwrap(), "secret");
+        assert_eq!(read_password(Cursor::new(b"secret\r\n")).unwrap(), "secret");
         assert_eq!(read_password(Cursor::new(b"secret")).unwrap(), "secret");
     }
 
     #[test]
     fn password_reader_rejects_empty_multiline_and_oversized_input() {
-        assert!(read_password(Cursor::new(b"\\n")).is_err());
-        assert!(read_password(Cursor::new(b"first\\nsecond\\n")).is_err());
+        assert!(read_password(Cursor::new(b"\n")).is_err());
+        assert!(read_password(Cursor::new(b"first\nsecond\n")).is_err());
         assert!(read_password(Cursor::new(vec![b'x'; MAX_PASSWORD_BYTES + 1])).is_err());
     }
 
