@@ -16,6 +16,8 @@ use std::{
 
 use crate::session_control::SessionIdentity;
 
+const SYSTEMCTL: &str = "/usr/bin/systemctl";
+
 #[link(name = "systemd")]
 unsafe extern "C" {
     fn sd_pid_get_session(pid: libc::pid_t, session: *mut *mut c_char) -> libc::c_int;
@@ -117,7 +119,7 @@ pub fn stop_session_scope(scope: &str, timeout: Duration) -> io::Result<()> {
 }
 
 fn run_systemctl(arguments: &[&str], timeout: Duration) -> io::Result<String> {
-    run_command_with_timeout("systemctl", arguments, timeout)
+    run_command_with_timeout(SYSTEMCTL, arguments, timeout)
 }
 
 /// Runs one systemctl client with a hard process deadline.
@@ -132,7 +134,7 @@ fn run_command_with_timeout(
     timeout: Duration,
 ) -> io::Result<String> {
     if timeout.is_zero() {
-        return Err(timed_out("systemctl operation exceeded its time budget"));
+        return Err(timed_out("system command exceeded its time budget"));
     }
 
     let mut child = Command::new(program)
@@ -149,10 +151,7 @@ fn run_command_with_timeout(
                 if !status.success() {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
-                        format!(
-                            "{program} {} exited with {status}",
-                            arguments.join(" ")
-                        ),
+                        format!("{program} {} exited with {status}", arguments.join(" ")),
                     ));
                 }
 
@@ -167,7 +166,7 @@ fn run_command_with_timeout(
                 if elapsed >= timeout {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(timed_out("systemctl operation exceeded its time budget"));
+                    return Err(timed_out("system command exceeded its time budget"));
                 }
                 thread::sleep(Duration::from_millis(10).min(timeout - elapsed));
             }
@@ -230,7 +229,13 @@ fn wait_for_scope_inactive(
 
 fn read_unit_active_state(scope: &str, timeout: Duration) -> io::Result<String> {
     let state = run_systemctl(
-        &["show", "--no-pager", "--property=ActiveState", "--value", scope],
+        &[
+            "show",
+            "--no-pager",
+            "--property=ActiveState",
+            "--value",
+            scope,
+        ],
         timeout,
     )?;
     if state.is_empty() || state.lines().count() != 1 {
@@ -349,6 +354,27 @@ fn invalid_data(message: &'static str) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_runner_returns_stdout_on_success() {
+        let output =
+            run_command_with_timeout("/bin/echo", &["active"], Duration::from_secs(1)).unwrap();
+        assert_eq!(output.trim(), "active");
+    }
+
+    #[test]
+    fn command_runner_kills_a_process_after_its_deadline() {
+        let started = Instant::now();
+        let error = run_command_with_timeout(
+            "/bin/sleep",
+            &["5"],
+            Duration::from_millis(20),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
 
     #[test]
     fn accepts_logind_session_identifiers() {
