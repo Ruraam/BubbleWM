@@ -820,8 +820,7 @@ mod tests {
 
         let directory = tempfile::tempdir().unwrap();
         let fifo_path = directory.path().join("password.fifo");
-        let fifo_path_c = std::ffi::CString::new(fifo_path.as_os_str().as_encoded_bytes())
-            .unwrap();
+        let fifo_path_c = std::ffi::CString::new(fifo_path.as_os_str().as_encoded_bytes()).unwrap();
         assert_eq!(unsafe { libc::mkfifo(fifo_path_c.as_ptr(), 0o600) }, 0);
         let fifo_fd = unsafe {
             libc::open(
