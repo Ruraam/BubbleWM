@@ -722,6 +722,28 @@ mod tests {
     }
 
     #[test]
+    fn worker_wait_timeout_collects_normal_exit_status() {
+        let (_supervisor, worker_channel) = private_channel_pair().unwrap();
+        let mut worker = spawn_worker_with_channel(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from("exit 23"),
+            ],
+            worker_channel,
+        )
+        .unwrap();
+
+        let status = worker
+            .wait_timeout(Duration::from_secs(1))
+            .unwrap()
+            .expect("worker should exit before the timeout");
+        assert_eq!(status.code(), Some(23));
+        assert!(worker.try_wait().is_err());
+        assert!(worker.wait().is_err());
+    }
+
+    #[test]
     fn dropping_unreaped_worker_kills_and_reaps_child() {
         let (_supervisor, worker_channel) = private_channel_pair().unwrap();
         let worker = spawn_worker_with_channel(
