@@ -156,18 +156,19 @@ fn wait_for_scope_inactive(
     let started = Instant::now();
     loop {
         let active_state = read_active_state()?;
+        let elapsed = started.elapsed();
         match active_state.as_str() {
             "inactive" => return Ok(()),
             "failed" => {
                 return Err(invalid_data("systemd failed to stop the session scope"));
             }
-            _ if started.elapsed() >= timeout => {
+            _ if elapsed >= timeout => {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
                     "timed out waiting for the session scope to become inactive",
                 ));
             }
-            _ => thread::sleep(Duration::from_millis(50).min(timeout - started.elapsed())),
+            _ => thread::sleep(Duration::from_millis(50).min(timeout - elapsed)),
         }
     }
 }
