@@ -779,7 +779,10 @@ mod tests {
 
         let mut worker = SessionWorker::start(
             std::ffi::OsStr::new("/bin/sh"),
-            &[std::ffi::OsString::from("-c"), std::ffi::OsString::from(command)],
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from(command),
+            ],
             Duration::from_secs(1),
         )
         .unwrap();
@@ -799,7 +802,9 @@ mod tests {
             std::ffi::OsStr::new("/bin/sh"),
             &[
                 std::ffi::OsString::from("-c"),
-                std::ffi::OsString::from("printf BUBWORK1 >&3; printf BADFRAME >&3; exec /bin/sleep 30"),
+                std::ffi::OsString::from(
+                    "printf BUBWORK1 >&3; printf BADFRAME >&3; exec /bin/sleep 30",
+                ),
             ],
             Duration::from_secs(1),
         )
