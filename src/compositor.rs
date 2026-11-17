@@ -1780,34 +1780,55 @@ impl CompositorStateData {
             return;
         };
 
-        if let Some(parent_workspace) = parent.as_ref().and_then(|parent| {
-            self.windows
-                .iter()
-                .find(|entry| {
+        self.windows[index].parent_surface = parent.clone();
+        let target_workspace = parent
+            .as_ref()
+            .and_then(|parent| {
+                self.windows.iter().find_map(|entry| {
                     entry
                         .window
                         .toplevel()
                         .is_some_and(|toplevel| toplevel.wl_surface() == parent)
+                        .then_some(entry.workspace)
                 })
-                .map(|entry| entry.workspace)
-        }) {
-            self.windows[index].workspace = parent_workspace;
-        }
-        self.windows[index].parent_surface = parent;
-        let Some(parent_location) = parent_location else {
-            return;
-        };
+            })
+            .unwrap_or(self.windows[index].workspace);
 
-        let location = parent_location + Size::from((WINDOW_CASCADE_STEP, WINDOW_CASCADE_STEP));
-        self.windows[index].location = location;
-        let window = self.windows[index].window.clone();
-        if self.space.element_location(&window).is_some()
-            && !self.windows[index].minimized
-            && self.windows[index].workspace == self.active_workspace
-        {
-            let content_location = self.content_location(&window, location);
-            self.space.map_element(window, content_location, false);
+        let family_root = self.root_surface_for_toplevel(&root);
+        let family = self.window_family_surfaces(&family_root);
+        let mut workspace_changed = false;
+        for entry in &mut self.windows {
+            let belongs_to_family = entry
+                .window
+                .toplevel()
+                .is_some_and(|toplevel| family.contains(toplevel.wl_surface()));
+            if belongs_to_family && entry.workspace != target_workspace {
+                entry.workspace = target_workspace;
+                workspace_changed = true;
+            }
         }
+
+        if let Some(parent_location) = parent_location {
+            self.windows[index].location =
+                parent_location + Size::from((WINDOW_CASCADE_STEP, WINDOW_CASCADE_STEP));
+        }
+
+        if workspace_changed {
+            self.remap_active_workspace();
+        } else if let Some(parent_location) = parent_location {
+            let location =
+                parent_location + Size::from((WINDOW_CASCADE_STEP, WINDOW_CASCADE_STEP));
+            let window = self.windows[index].window.clone();
+            if self.space.element_location(&window).is_some()
+                && !self.windows[index].minimized
+                && self.windows[index].workspace == self.active_workspace
+            {
+                let content_location = self.content_location(&window, location);
+                self.space.map_element(window, content_location, false);
+            }
+        }
+
+        self.overlays.dirty = true;
     }
 
     fn raise_window_family(&mut self, window: &Window) {
