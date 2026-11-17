@@ -6,7 +6,7 @@
 //! exchange and independent logind validation are added as separate stages.
 
 use super::{
-    control::{WorkerProcess},
+    control::WorkerProcess,
     lifecycle::{SessionLifecycle, SessionPhase},
 };
 use std::{
@@ -146,7 +146,10 @@ fn invalid_input(message: &'static str) -> io::Error {
 mod tests {
     use super::*;
     use crate::session::control::{private_channel_pair, spawn_worker_with_channel};
-    use std::{ffi::{OsStr, OsString}, thread};
+    use std::{
+        ffi::{OsStr, OsString},
+        thread,
+    };
 
     fn spawn(command: &str) -> (WorkerProcess, UnixStream) {
         let (supervisor, worker_channel) = private_channel_pair().unwrap();
@@ -162,8 +165,7 @@ mod tests {
     #[test]
     fn supervisor_owns_worker_and_starts_handshaking() {
         let (worker, control) = spawn("sleep 30");
-        let supervisor =
-            SessionSupervisor::new(worker, control, Duration::from_secs(2)).unwrap();
+        let supervisor = SessionSupervisor::new(worker, control, Duration::from_secs(2)).unwrap();
         assert_eq!(supervisor.phase(), SessionPhase::Handshaking);
     }
 
@@ -201,8 +203,7 @@ mod tests {
     #[test]
     fn handshake_deadline_is_absolute_and_terminal_on_expiry() {
         let (worker, control) = spawn("sleep 30");
-        let mut supervisor =
-            SessionSupervisor::new(worker, control, Duration::ZERO).unwrap();
+        let mut supervisor = SessionSupervisor::new(worker, control, Duration::ZERO).unwrap();
 
         let error = supervisor.check_startup().unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
