@@ -417,8 +417,7 @@ impl SessionWorker {
         arguments: &[std::ffi::OsString],
         startup_timeout: Duration,
     ) -> io::Result<Self> {
-        let (channel, process) =
-            start_worker_with_handshake(program, arguments, startup_timeout)?;
+        let (channel, process) = start_worker_with_handshake(program, arguments, startup_timeout)?;
         Ok(Self {
             channel: Some(channel),
             process,
