@@ -98,25 +98,31 @@ fn validate_vt(tty: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn read_password<R: Read>(reader: R) -> Result<String, String> {
+fn read_password<R: Read>(mut reader: R) -> Result<String, String> {
     let mut bytes = Vec::new();
-    if reader
-        .take((MAX_PASSWORD_BYTES + 3) as u64)
-        .read_to_end(&mut bytes)
-        .is_err()
-    {
-        wipe_bytes(&mut bytes);
-        return Err("impossible de lire le secret depuis stdin".into());
-    }
-    if bytes.len() > MAX_PASSWORD_BYTES + 2 {
-        wipe_bytes(&mut bytes);
-        return Err("mot de passe trop long".into());
-    }
-    if bytes.last() == Some(&b'\n') {
-        bytes.pop();
-        if bytes.last() == Some(&b'\r') {
-            bytes.pop();
+    let mut byte = [0_u8; 1];
+
+    loop {
+        match reader.read(&mut byte) {
+            Ok(0) => break,
+            Ok(_) if byte[0] == b'\n' => break,
+            Ok(_) => {
+                if bytes.len() >= MAX_PASSWORD_BYTES + 1 {
+                    wipe_bytes(&mut bytes);
+                    return Err("mot de passe trop long".into());
+                }
+                bytes.push(byte[0]);
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(_) => {
+                wipe_bytes(&mut bytes);
+                return Err("impossible de lire le secret depuis stdin".into());
+            }
         }
+    }
+
+    if bytes.last() == Some(&b'\r') {
+        bytes.pop();
     }
     if bytes.is_empty()
         || bytes.len() > MAX_PASSWORD_BYTES
@@ -173,6 +179,24 @@ mod tests {
         assert!(read_password(Cursor::new(b"\n")).is_err());
         assert!(read_password(Cursor::new(b"first\nsecond\n")).is_err());
         assert!(read_password(Cursor::new(vec![b'x'; MAX_PASSWORD_BYTES + 1])).is_err());
+    }
+
+    #[test]
+    fn password_reader_stops_at_newline_without_waiting_for_eof() {
+        struct NewlineThenError(bool);
+
+        impl Read for NewlineThenError {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+                if self.0 {
+                    return Err(io::Error::other("reader must not be polled after newline"));
+                }
+                self.0 = true;
+                buffer[0] = b'\n';
+                Ok(1)
+            }
+        }
+
+        assert!(read_password(NewlineThenError(false)).is_err());
     }
 
     #[test]
