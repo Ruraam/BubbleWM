@@ -5,11 +5,13 @@
 The root-only `bubblewm-session` supervisor now starts a dedicated
 `bubblewm-session-worker`. The worker takes ownership of fd 3 first, sends
 the fixed `BUBWORK1` marker, reads the password directly from inherited stdin,
-opens PAM, sends one bounded `SessionReady` frame, starts the fixed compositor
-as the user, and closes PAM after the desktop process group exits. The
+opens PAM, sends one bounded `SessionReady` frame, and waits for an explicit
+`BUBOKAY1` approval from the supervisor before starting the fixed compositor
+as the user. The worker's approval wait is bounded to 30 seconds; timeout,
+EOF, or an invalid marker aborts the session and triggers PAM cleanup. The
 supervisor never reads or buffers the password; it resolves the worker PID
-through logind and compares the result with the worker's metadata before
-waiting for worker completion.
+through logind, compares the result with the worker's metadata, and only then
+sends approval. After the desktop process group exits, the worker closes PAM.
 
 The separation of PAM ownership and the independent logind identity check are
 implemented. The worker binary is expected at
