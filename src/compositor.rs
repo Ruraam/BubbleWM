@@ -4001,7 +4001,7 @@ impl PointerGrab<CompositorStateData> for WindowPointerGrab {
                     if data
                         .resize_session
                         .as_ref()
-                        .is_some_and(|session| session.surface == surface)
+                        .is_some_and(|session| session.surface == *surface)
                     {
                         data.resize_session = None;
                     }
