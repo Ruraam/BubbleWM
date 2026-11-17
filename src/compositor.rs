@@ -1270,7 +1270,9 @@ impl CompositorStateData {
                         smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<
                             smithay::backend::renderer::gles::GlesRenderer,
                         >,
-                    >(renderer, surface, location, scale, 1.0, Kind::Unspecified)
+                    >(
+                        renderer, surface, location, scale, 1.0, Kind::Unspecified
+                    )
                     .into_iter()
                     .map(BubbleRenderElement::Surface),
                 );
