@@ -101,8 +101,13 @@ fn cleanup_session(
 ) -> Result<(), String> {
     let process_result = process_cleanup();
     let pam_result = pam_cleanup();
-    process_result?;
-    pam_result
+    match (process_result, pam_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(process_error), Err(pam_error)) => Err(format!(
+            "{process_error}; échec du nettoyage PAM: {pam_error}"
+        )),
+    }
 }
 
 /// Closes the password pipe before any user process can be spawned.
@@ -357,7 +362,10 @@ mod tests {
             },
         );
 
-        assert_eq!(result.unwrap_err(), "process cleanup failed");
+        assert_eq!(
+            result.unwrap_err(),
+            "process cleanup failed; échec du nettoyage PAM: PAM cleanup failed"
+        );
         assert!(pam_cleanup_called.get());
     }
 
