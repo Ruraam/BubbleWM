@@ -8,8 +8,8 @@ use std::{
     ffi::{CStr, CString, c_char},
     io::{self, Read},
     os::unix::fs::MetadataExt,
-    process::{Command, Stdio},
     path::PathBuf,
+    process::{Command, Stdio},
     thread,
     time::{Duration, Instant},
 };
@@ -217,6 +217,7 @@ fn wait_for_scope_inactive(
     loop {
         let remaining = remaining_timeout(started, timeout)?;
         let active_state = read_active_state(remaining)?;
+        let remaining = remaining_timeout(started, timeout)?;
         match active_state.as_str() {
             "inactive" => return Ok(()),
             "failed" => {
