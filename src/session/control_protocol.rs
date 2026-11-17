@@ -4,6 +4,7 @@
 //! values remain untrusted until independently validated against logind.
 //! All socket operations use one absolute deadline per message.
 
+use super::logind::LogindSession;
 use std::{
     io::{self, Read, Write},
     os::unix::net::UnixStream,
@@ -130,6 +131,33 @@ fn decode_payload(payload: &[u8]) -> io::Result<SessionReady> {
     };
     validate(&ready).map_err(|_| invalid_data("invalid session metadata"))?;
     Ok(ready)
+}
+
+/// Compares untrusted worker metadata with the independently resolved logind session.
+///
+/// The worker message is only a claim. This check binds every identity and
+/// location field to the read-only logind result before the supervisor may
+/// advance the lifecycle to Ready.
+pub(crate) fn validate_worker_session(
+    ready: &SessionReady,
+    session: &LogindSession,
+) -> io::Result<()> {
+    if session.uid == 0
+        || session.session_type != "wayland"
+        || session.class != "user"
+        || !session.active
+        || ready.uid != session.uid
+        || ready.session_id != session.id
+        || ready.runtime_dir != session.runtime_dir
+        || ready.seat != session.seat
+        || ready.vt_number != session.vt_number
+    {
+        return Err(invalid_data(
+            "worker session metadata does not match the validated logind session",
+        ));
+    }
+
+    Ok(())
 }
 
 fn validate(ready: &SessionReady) -> io::Result<()> {
@@ -422,6 +450,71 @@ mod tests {
         });
         let error = read_session_ready(&mut receiver, Duration::from_millis(20)).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    }
+
+    fn sample_logind_session() -> LogindSession {
+        LogindSession {
+            id: "c7".into(),
+            uid: 1000,
+            session_type: "wayland".into(),
+            class: "user".into(),
+            active: true,
+            runtime_dir: "/run/user/1000".into(),
+            seat: Some("seat0".into()),
+            vt_number: Some(2),
+        }
+    }
+
+    #[test]
+    fn worker_metadata_must_match_independently_validated_logind_session() {
+        let ready = sample();
+        let session = sample_logind_session();
+        validate_worker_session(&ready, &session).unwrap();
+    }
+
+    #[test]
+    fn worker_metadata_rejects_each_identity_or_location_mismatch() {
+        let session = sample_logind_session();
+
+        let mut invalid = sample();
+        invalid.uid += 1;
+        assert_eq!(
+            validate_worker_session(&invalid, &session).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+
+        let mut invalid = sample();
+        invalid.session_id = "different".into();
+        assert!(validate_worker_session(&invalid, &session).is_err());
+
+        let mut invalid = sample();
+        invalid.runtime_dir = "/run/user/1001".into();
+        assert!(validate_worker_session(&invalid, &session).is_err());
+
+        let mut invalid = sample();
+        invalid.seat = None;
+        assert!(validate_worker_session(&invalid, &session).is_err());
+
+        let mut invalid = sample();
+        invalid.vt_number = Some(3);
+        assert!(validate_worker_session(&invalid, &session).is_err());
+    }
+
+    #[test]
+    fn worker_metadata_rejects_unusable_logind_sessions() {
+        let ready = sample();
+
+        let mut session = sample_logind_session();
+        session.active = false;
+        assert!(validate_worker_session(&ready, &session).is_err());
+
+        let mut session = sample_logind_session();
+        session.class = "greeter".into();
+        assert!(validate_worker_session(&ready, &session).is_err());
+
+        let mut session = sample_logind_session();
+        session.session_type = "x11".into();
+        assert!(validate_worker_session(&ready, &session).is_err());
     }
 
     #[test]
