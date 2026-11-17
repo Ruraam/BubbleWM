@@ -767,6 +767,53 @@ mod tests {
     }
 
     #[test]
+    fn session_worker_receives_valid_session_metadata_frame() {
+        let expected = sample();
+        let mut frame = Vec::new();
+        write_session_ready(&mut frame, &expected).unwrap();
+        let escaped = frame
+            .iter()
+            .map(|byte| format!("\\\\{:03o}", byte))
+            .collect::<String>();
+        let command = format!("printf BUBWORK1 >&3; printf '{escaped}' >&3; cat <&3");
+
+        let mut worker = SessionWorker::start(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[std::ffi::OsString::from("-c"), std::ffi::OsString::from(command)],
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        assert_eq!(
+            worker
+                .receive_session_ready(Duration::from_secs(1))
+                .unwrap(),
+            expected
+        );
+        assert!(worker.shutdown(Duration::from_secs(1)).unwrap().success());
+    }
+
+    #[test]
+    fn session_worker_rejects_invalid_metadata_and_reaps_worker() {
+        let mut worker = SessionWorker::start(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from("printf BUBWORK1 >&3; printf BADFRAME >&3; exec /bin/sleep 30"),
+            ],
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        let error = worker
+            .receive_session_ready(Duration::from_secs(1))
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(worker.channel.is_none());
+        assert!(worker.process.reaped);
+    }
+
+    #[test]
     fn session_worker_metadata_timeout_fails_closed_and_reaps_worker() {
         let mut worker = SessionWorker::start(
             std::ffi::OsStr::new("/bin/sh"),
