@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "aliases": {
+    "nautilus": "system-file-manager",
+    "org.gnome.Nautilus": "system-file-manager",
+    "thunar": "system-file-manager",
+    "firefox": "web-browser",
+    "chromium": "web-browser",
+    "gedit": "text-editor",
+    "org.gnome.TextEditor": "text-editor",
+    "gnome-calculator": "accessories-calculator",
+    "gnome-system-monitor": "utilities-system-monitor",
+    "gnome-control-center": "preferences-desktop-theme",
+    "nm-device-wireless": "network-wireless"
+  }
+}

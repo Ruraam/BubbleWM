@@ -17,9 +17,10 @@
 - [x] Initial click-to-focus policy: raise/activate the clicked window and give its toplevel keyboard focus.
 - [x] Initial activation and keyboard focus for newly mapped toplevels.
 - [x] Bounded frame pacing, versioned IPC startup, compositor-thread dispatch and orderly shutdown.
-- [ ] Pointer cursor rendering, touch routing and robust keyboard/pointer grabs.
+- [x] Composite client-provided cursor surfaces at the requested pointer hotspot; hide the nested host cursor for custom/hidden cursor states.
+- [ ] Named cursor-theme rendering, touch routing and robust keyboard/pointer grabs.
 - [ ] Output-management protocols, multi-output layout and hotplug handling.
-- [ ] wlr-layer-shell server support for BubblePanel.
+- [x] wlr-layer-shell server support for BubblePanel, including layer arrangement, exclusive zones, rendering, input and keyboard focus.
 
 ## 0.3.0 — Window management
 - [x] Stable toplevel registry and lifecycle handling for creation, map, unmap, remap and destruction.
@@ -39,10 +40,12 @@
 - [x] XDG decoration negotiation, default server-side mode and honoring explicit client-side mode requests.
 - [x] Prototype 32-pixel server-side titlebar with close, maximize/restore, minimize and move interactions.
 - [ ] Window title text, icons, themed controls, borders and accessibility refinements.
-- [ ] Tiling layout policy and virtual workspace foundations.
-- [ ] Floating layout policy and virtual workspace foundations.
-- [ ] Connect workspace IPC commands to authoritative workspace state.
-- [ ] Integrate BubblePanel's IPC client for workspace state and navigation.
+- [x] Four virtual workspaces with per-window membership and preserved stacking order.
+- [x] Keep inactive-workspace windows unmapped while preserving client state and floating geometry.
+- [x] Inherit workspace membership across transient toplevel families and preserve minimized state across switches.
+- [x] Connect workspace IPC commands to authoritative compositor state, including bounds validation and wraparound navigation.
+- [x] Integrate BubblePanel's IPC client for capability discovery, live workspace state, click activation and scroll navigation.
+- [ ] Tiling layout policy and configurable floating/tiling behavior.
 
 ## 0.4.0 — BubbleDecor
 - [ ] Server-side decoration negotiation.
@@ -62,8 +65,13 @@
 - [ ] The compositor remains functional without the settings app.
 
 ## 0.7.0 — BubbleColor
-- [ ] Wallpaper palette extraction.
-- [ ] Contrast-aware adaptive theme and manual tuning controls.
+- [x] Native wallpaper palette engine with bounded image decoding.
+- [x] Deterministic OKLab clustering and chroma-aware subject selection.
+- [x] Dark/light semantic palette, Material-style roles and Cyberpunk Glass accents.
+- [x] Balanced, vivid and muted palette styles.
+- [x] Contrast-aware accent tones and diagnostics.
+- [ ] Manual tuning, wallpaper watching and live theme publication.
+- [ ] BubbleWM decoration and BubblePanel theme adapters.
 
 ## 0.8.0 — BubbleFX
 - [ ] Animation scheduler and easing.
@@ -73,15 +81,58 @@
 ## 0.9.0 — BubblePanel
 - [x] Independent Rust Wayland panel process.
 - [x] Layer-shell integration and capability detection on the client side.
-- [x] Three-zone layout, placeholder workspaces, pointer hit testing and clock.
-- [ ] Real workspace state, task list and system modules.
+- [x] Three-zone layout, workspace indicators, pointer hit testing and clock.
+- [x] Live workspace state and workspace navigation through BubbleWM's authenticated IPC endpoint.
+- [ ] Task list and real system modules.
 - [ ] Multi-monitor support, profiles and validated configuration.
 - [ ] BubbleSettings integration and graceful degradation.
 
 ## 0.10.0 — Native backend
-- [ ] DRM/KMS session support.
+- [x] Add an opt-in Smithay feature set for DRM, GBM, libinput, udev and libseat.
+- [x] Add CI compile coverage for the optional native backend dependencies.
+- [x] Add a read-only libseat/udev probe for seat-assigned DRM card nodes.
+- [x] Open, validate and close one seat-assigned DRM card node through libseat without modesetting.
+- [x] Initialize and drop Smithay's DrmDevice while returning its descriptor through libseat; do not disable connectors or create DRM surfaces.
+- [x] Add a hardware-independent, idempotent policy state machine for libseat pause/activation events and test device-access gating.
+- [x] Register the real libseat notifier in a separate, explicit diagnostic calloop monitor and test lifecycle policy without DRM hardware.
+- [ ] Integrate session events into the native compositor and pause/drop/reopen live DRM resources on session events.
+- [ ] DRM/KMS surface creation, connector/mode management and output lifecycle.
 - [ ] Multi-output and per-monitor settings.
 - [ ] Robustness, accessibility and performance testing.
 
+## 0.11.0 — Session Manager foundation
+- [x] Add typed, versioned IPC requests for session state, capabilities and actions.
+- [x] Add a backend-independent Rust session policy layer.
+- [x] Disable host session and power actions in the nested Winit development backend.
+- [x] Test that every session action is rejected when no trusted provider is installed.
+- [x] Add a read-only systemd-logind probe over the system D-Bus.
+- [x] Parse logind's explicit yes/no/challenge/na capability responses conservatively.
+- [x] Validate the current logind session ID, owner UID, Wayland type, user class and active state.
+- [x] Add a one-shot logind worker with a bounded result channel and non-blocking polling.
+- [ ] Integrate native session detection into the native backend through the worker, outside the compositor event loop.
+- [ ] Add per-session lock/logout provider discovery.
+- [ ] Add authorization, confirmation and action execution flows.
+- [ ] Add an independent graphical Session Menu with keyboard accessibility and BubbleColor styling.
+
 ## 1.0.0 — BubbleOS integration
 - [ ] Packaging, session integration, documentation and release hardening.
+
+## Bubble Icons — coverage and diagnostics
+- [x] Add original scalable SVG icons and a freedesktop-compatible theme.
+- [x] Add a standard-library validator for theme metadata and SVG structure.
+- [x] Add common application-name aliases as relative SVG links and validate their targets.
+- [x] Add a read-only auditor for installed XDG desktop entries with JSON and strict modes.
+- [ ] Expand the icon inventory from real Debian/Flatpak/AppImage desktop-entry usage.
+- [ ] Design and validate Bubble Dark, Bubble Light, Bubble Neon and Bubble Glass variants.
+- [ ] Integrate icon-theme selection and previews into BubbleSettings.
+
+
+## BubbleColor — compositor runtime hookup
+
+- [x] Start the bounded BubbleColor worker from the Winit compositor when a wallpaper is configured.
+- [x] Poll results on the compositor thread and retain the accepted immutable `ThemeDocument` snapshot.
+- [x] Reject results whose generation does not match the current request.
+- [x] Publish the shared semantic snapshot to BubblePanel over the versioned IPC protocol.
+- [ ] Publish the shared snapshot to BubbleSettings.
+- [x] Apply semantic palette roles to server-side window decorations.
+- [x] Apply semantic palette roles to BubblePanel surfaces.
