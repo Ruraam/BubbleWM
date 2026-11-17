@@ -77,9 +77,11 @@ fn run() -> Result<i32, String> {
         .map_err(|error| format!("impossible d'attendre la session utilisateur: {error}"))?;
     cleanup_session(
         || {
-            process
+            let result = process
                 .terminate(TERMINATION_GRACE)
-                .map_err(|error| format!("impossible de nettoyer le groupe utilisateur: {error}"))
+                .map_err(|error| format!("impossible de nettoyer le groupe utilisateur: {error}"));
+            drop(process);
+            result
         },
         || session.close(),
     )?;
