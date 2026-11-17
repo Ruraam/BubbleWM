@@ -333,6 +333,26 @@ mod tests {
     }
 
     #[test]
+    fn process_group_cleanup_precedes_pam_session_cleanup() {
+        use std::cell::RefCell;
+
+        let order = RefCell::new(Vec::new());
+        let result = cleanup_session(
+            || {
+                order.borrow_mut().push("process");
+                Ok(())
+            },
+            || {
+                order.borrow_mut().push("pam");
+                Ok(())
+            },
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(*order.borrow(), ["process", "pam"]);
+    }
+
+    #[test]
     fn pam_cleanup_runs_when_process_cleanup_fails() {
         use std::cell::Cell;
 
