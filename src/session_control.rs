@@ -93,6 +93,13 @@ pub fn validate_password_pipe_fd(fd: RawFd) -> io::Result<()> {
     if metadata.st_mode & libc::S_IFMT != libc::S_IFIFO {
         return Err(invalid_input("password descriptor must be a pipe"));
     }
+    // Anonymous Linux pipes have no filesystem links. Reject named FIFOs so
+    // the password channel cannot be substituted with a filesystem endpoint.
+    if metadata.st_nlink != 0 {
+        return Err(invalid_input(
+            "password descriptor must be an anonymous pipe",
+        ));
+    }
 
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
     if flags < 0 {
@@ -810,6 +817,24 @@ mod tests {
                 .kind(),
             io::ErrorKind::InvalidInput
         );
+
+        let directory = tempfile::tempdir().unwrap();
+        let fifo_path = directory.path().join("password.fifo");
+        let fifo_path_c = std::ffi::CString::new(fifo_path.as_os_str().as_encoded_bytes())
+            .unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo_path_c.as_ptr(), 0o600) }, 0);
+        let fifo_fd = unsafe {
+            libc::open(
+                fifo_path_c.as_ptr(),
+                libc::O_RDONLY | libc::O_NONBLOCK | libc::O_CLOEXEC,
+            )
+        };
+        assert!(fifo_fd >= 0);
+        assert_eq!(
+            validate_password_pipe_fd(fifo_fd).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        unsafe { libc::close(fifo_fd) };
     }
 
     #[test]
