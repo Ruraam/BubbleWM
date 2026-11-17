@@ -576,7 +576,11 @@ impl CompositorStateData {
         for layer in map.layers() {
             send_frames_surface_tree(layer.wl_surface(), time);
         }
-        if let Some(surface) = self.cursor_surface.as_ref().filter(|surface| surface.alive()) {
+        if let Some(surface) = self
+            .cursor_surface
+            .as_ref()
+            .filter(|surface| surface.alive())
+        {
             send_frames_surface_tree(surface, time);
         }
     }
