@@ -9,6 +9,7 @@ pub mod control;
 pub mod control_protocol;
 pub mod lifecycle;
 pub mod logind;
+pub mod supervisor;
 pub mod worker;
 
 use bubble_ipc::{
