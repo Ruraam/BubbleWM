@@ -8,7 +8,9 @@ use std::io::{self, Read, Write};
 use std::time::Duration;
 
 use bubblewm::auth::PamLoginSession;
-use bubblewm::session_control::{take_worker_channel, validate_password_pipe_fd, write_session_ready};
+use bubblewm::session_control::{
+    take_worker_channel, validate_password_pipe_fd, write_session_ready,
+};
 
 const WORKER_HELLO: &[u8; 8] = b"BUBWORK1";
 const MAX_PASSWORD_BYTES: usize = 1024;
