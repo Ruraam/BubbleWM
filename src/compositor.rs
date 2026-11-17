@@ -3559,6 +3559,13 @@ impl XdgShellHandler for CompositorStateData {
                 .is_some_and(|toplevel| toplevel.wl_surface() == &root)
         }) {
             let entry = self.windows.remove(index);
+            // A transient child may outlive its parent. Drop the stale
+            // relationship so the child becomes an independent window.
+            for child in &mut self.windows {
+                if child.parent_surface.as_ref() == Some(&root) {
+                    child.parent_surface = None;
+                }
+            }
             self.space.unmap_elem(&entry.window);
             self.animations.remove(entry.id);
         }
