@@ -139,6 +139,7 @@ fn run_command_with_timeout(
 
     let mut child = Command::new(program)
         .args(arguments)
+        .env_clear()
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
