@@ -921,4 +921,45 @@ mod tests {
 
         assert!(validate_runtime_directory(&link, unsafe { libc::getuid() }).is_err());
     }
+
+    #[test]
+    fn managed_process_terminate_sends_sigterm_and_reaps_leader() {
+        use std::os::unix::process::CommandExt;
+        use std::os::unix::process::ExitStatusExt;
+
+        let child = Command::new("/bin/sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .expect("spawn sleep");
+        let mut process = ManagedUserProcess::new(child);
+
+        let status = process
+            .terminate(Duration::from_secs(1))
+            .expect("terminate managed process");
+
+        assert_eq!(status.signal(), Some(libc::SIGTERM));
+        assert_eq!(process.wait().expect("wait after terminate"), status);
+    }
+
+    #[test]
+    fn managed_process_drop_kills_group_and_reaps_leader() {
+        use std::os::unix::process::CommandExt;
+
+        let child = Command::new("/bin/sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .expect("spawn sleep");
+        let process_group = child.id() as libc::pid_t;
+        let process = ManagedUserProcess::new(child);
+
+        drop(process);
+
+        assert_eq!(unsafe { libc::kill(-process_group, 0) }, -1);
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
+        );
+    }
 }
