@@ -1816,8 +1816,7 @@ impl CompositorStateData {
         if workspace_changed {
             self.remap_active_workspace();
         } else if let Some(parent_location) = parent_location {
-            let location =
-                parent_location + Size::from((WINDOW_CASCADE_STEP, WINDOW_CASCADE_STEP));
+            let location = parent_location + Size::from((WINDOW_CASCADE_STEP, WINDOW_CASCADE_STEP));
             let window = self.windows[index].window.clone();
             if self.space.element_location(&window).is_some()
                 && !self.windows[index].minimized
