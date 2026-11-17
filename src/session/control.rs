@@ -266,7 +266,9 @@ impl WorkerProcess {
 
     /// Waits up to timeout for normal worker termination.
     pub(crate) fn wait_timeout(&mut self, timeout: Duration) -> io::Result<Option<ExitStatus>> {
-        let deadline = Instant::now() + timeout;
+        let deadline = Instant::now()
+            .checked_add(timeout)
+            .ok_or_else(|| invalid_input("worker wait timeout is too large"))?;
         loop {
             if let Some(status) = self.try_wait()? {
                 return Ok(Some(status));
@@ -458,6 +460,20 @@ mod tests {
             .unwrap();
         assert_eq!(status.signal(), Some(libc::SIGTERM));
         assert!(worker.try_wait().is_err());
+    }
+
+    #[test]
+    fn worker_wait_timeout_rejects_unrepresentable_deadlines() {
+        let (_supervisor, worker_channel) = private_channel_pair().unwrap();
+        let mut worker = spawn_worker_with_channel(
+            OsStr::new("/bin/sleep"),
+            &[OsString::from("30")],
+            worker_channel,
+        )
+        .unwrap();
+
+        let error = worker.wait_timeout(Duration::MAX).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     }
 
     #[test]
