@@ -79,6 +79,32 @@ pub fn validate_session_ready_against(
     Ok(())
 }
 
+/// Requires the inherited password descriptor to be a read-only anonymous/FIFO pipe.
+pub fn validate_password_pipe_fd(fd: RawFd) -> io::Result<()> {
+    if fd < 0 {
+        return Err(invalid_input("password descriptor is invalid"));
+    }
+
+    let mut metadata = std::mem::MaybeUninit::<libc::stat>::zeroed();
+    if unsafe { libc::fstat(fd, metadata.as_mut_ptr()) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let metadata = unsafe { metadata.assume_init() };
+    if metadata.st_mode & libc::S_IFMT != libc::S_IFIFO {
+        return Err(invalid_input("password descriptor must be a pipe"));
+    }
+
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if flags & libc::O_ACCMODE != libc::O_RDONLY {
+        return Err(invalid_input("password pipe must be open for reading"));
+    }
+
+    Ok(())
+}
+
 /// Creates a private, connected supervisor/worker channel.
 ///
 /// Both ends are local Unix stream sockets with `FD_CLOEXEC` enforced. The
@@ -757,6 +783,30 @@ mod tests {
         assert_eq!(
             read_worker_hello(&mut bytes).unwrap_err().kind(),
             io::ErrorKind::UnexpectedEof
+        );
+    }
+
+    #[test]
+    fn password_descriptor_must_be_a_read_only_pipe() {
+        let mut pipe_fds = [-1; 2];
+        assert_eq!(
+            unsafe { libc::pipe2(pipe_fds.as_mut_ptr(), libc::O_CLOEXEC) },
+            0
+        );
+        assert!(validate_password_pipe_fd(pipe_fds[0]).is_ok());
+        assert_eq!(
+            validate_password_pipe_fd(pipe_fds[1]).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        unsafe {
+            libc::close(pipe_fds[0]);
+            libc::close(pipe_fds[1]);
+        }
+
+        let file = tempfile::tempfile().unwrap();
+        assert_eq!(
+            validate_password_pipe_fd(file.as_raw_fd()).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
         );
     }
 
