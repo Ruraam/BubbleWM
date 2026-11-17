@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use bubblewm::auth::PamLoginSession;
 use bubblewm::session_control::{
-    take_worker_channel, validate_password_pipe_fd, write_session_ready,
+    read_supervisor_approval, take_worker_channel, validate_password_pipe_fd,
+    write_session_ready,
 };
 
 const WORKER_HELLO: &[u8; 8] = b"BUBWORK1";
@@ -69,6 +70,9 @@ fn run() -> Result<i32, String> {
     let ready = session.session_ready()?;
     write_session_ready(&mut channel, &ready)
         .map_err(|error| format!("impossible d'annoncer les métadonnées de session: {error}"))?;
+    read_supervisor_approval(&mut channel).map_err(|error| {
+        format!("le superviseur n'a pas autorisé le démarrage de la session: {error}")
+    })?;
 
     let mut process =
         session.spawn_user_command(OsStr::new(COMPOSITOR), &[OsString::from(SESSION_CONFIG)])?;
