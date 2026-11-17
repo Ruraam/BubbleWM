@@ -873,9 +873,8 @@ mod tests {
             .iter()
             .map(|byte| format!("\\{:03o}", byte))
             .collect::<String>();
-        let command = format!(
-            "printf BUBWORK1 >&3; printf '{escaped}{escaped}' >&3; exec /bin/sleep 30"
-        );
+        let command =
+            format!("printf BUBWORK1 >&3; printf '{escaped}{escaped}' >&3; exec /bin/sleep 30");
         let mut worker = SessionWorker::start(
             std::ffi::OsStr::new("/bin/sh"),
             &[
