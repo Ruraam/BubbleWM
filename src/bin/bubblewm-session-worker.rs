@@ -183,20 +183,24 @@ mod tests {
 
     #[test]
     fn password_reader_stops_at_newline_without_waiting_for_eof() {
-        struct NewlineThenError(bool);
+        struct NewlineThenError(usize);
 
         impl Read for NewlineThenError {
             fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-                if self.0 {
-                    return Err(io::Error::other("reader must not be polled after newline"));
+                const INPUT: &[u8] = b"secret\n";
+                if self.0 == INPUT.len() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "reader must not be polled after newline",
+                    ));
                 }
-                self.0 = true;
-                buffer[0] = b'\n';
+                buffer[0] = INPUT[self.0];
+                self.0 += 1;
                 Ok(1)
             }
         }
 
-        assert!(read_password(NewlineThenError(false)).is_err());
+        assert_eq!(read_password(NewlineThenError(0)).unwrap(), "secret");
     }
 
     #[test]
