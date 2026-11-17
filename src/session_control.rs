@@ -1449,6 +1449,35 @@ mod tests {
     }
 
     #[test]
+    fn session_worker_shutdown_closes_channel_before_waiting_for_cleanup() {
+        use std::io::Read;
+
+        let (mut supervisor, worker_channel) = private_channel_pair().unwrap();
+        let process = spawn_worker_with_channel(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from(
+                    "printf BUBWORK1 >&3; dd bs=1 count=1 <&3 >/dev/null 2>&1; exit 23",
+                ),
+            ],
+            worker_channel,
+        )
+        .unwrap();
+        let mut hello = [0_u8; 8];
+        supervisor.read_exact(&mut hello).unwrap();
+        assert_eq!(&hello, b"BUBWORK1");
+
+        let mut worker = SessionWorker {
+            channel: Some(supervisor),
+            process,
+            metadata_received: false,
+        };
+        let status = worker.shutdown(Duration::from_secs(1)).unwrap();
+        assert_eq!(status.code(), Some(23));
+    }
+
+    #[test]
     fn dropping_unreaped_worker_kills_and_reaps_child() {
         let (_supervisor, worker_channel) = private_channel_pair().unwrap();
         let worker = spawn_worker_with_channel(
