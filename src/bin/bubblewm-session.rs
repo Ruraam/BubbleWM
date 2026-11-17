@@ -10,7 +10,10 @@ use std::{
     time::Duration,
 };
 
-use bubblewm::{logind::resolve_session_for_pid, session_control::SessionWorker};
+use bubblewm::{
+    logind::resolve_session_for_pid,
+    session_control::{SessionWorker, validate_password_pipe_fd},
+};
 
 const WORKER: &str = "/usr/libexec/bubblewm-session-worker";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -45,12 +48,11 @@ fn run() -> Result<i32, String> {
         .ok_or_else(|| "terminal invalide".to_owned())?;
     validate_vt(tty)?;
 
-    if unsafe { libc::isatty(libc::STDIN_FILENO) } != 0 {
-        return Err(
-            "le mot de passe doit être transmis sur un pipe stdin, jamais saisi dans le helper"
-                .into(),
-        );
-    }
+    validate_password_pipe_fd(libc::STDIN_FILENO).map_err(|error| {
+        format!(
+            "le mot de passe doit être transmis sur un pipe stdin, jamais saisi dans le helper: {error}"
+        )
+    })?;
 
     // posix_spawn preserves fd 0 while mapping only the private control
     // socket to fd 3. The worker consumes the secret directly from stdin.
