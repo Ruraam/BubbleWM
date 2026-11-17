@@ -133,9 +133,16 @@ pub fn stop_session_scope(scope: &str, timeout: Duration) -> io::Result<()> {
         .call("StopUnit", &(scope, "replace"))
         .map_err(system_bus_error)?;
 
+    wait_for_scope_inactive(timeout, || read_unit_active_state(&properties))
+}
+
+fn wait_for_scope_inactive(
+    timeout: Duration,
+    mut read_active_state: impl FnMut() -> io::Result<String>,
+) -> io::Result<()> {
     let deadline = Instant::now() + timeout;
     loop {
-        let active_state = read_unit_active_state(&properties)?;
+        let active_state = read_active_state()?;
         match active_state.as_str() {
             "inactive" => return Ok(()),
             "failed" => {
@@ -323,6 +330,53 @@ mod tests {
         ] {
             assert!(validate_scope_name(value).is_err(), "{value}");
         }
+    }
+
+    #[test]
+    fn scope_cleanup_wait_accepts_inactive_state_immediately() {
+        let mut reads = 0;
+        let result = wait_for_scope_inactive(Duration::from_secs(1), || {
+            reads += 1;
+            Ok("inactive".to_owned())
+        });
+        assert!(result.is_ok());
+        assert_eq!(reads, 1);
+    }
+
+    #[test]
+    fn scope_cleanup_waits_until_systemd_reports_inactive() {
+        let mut states = ["activating", "deactivating", "inactive"].into_iter();
+        let result = wait_for_scope_inactive(Duration::from_secs(1), || {
+            Ok(states.next().unwrap_or("inactive").to_owned())
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn scope_cleanup_rejects_failed_state() {
+        let error = wait_for_scope_inactive(Duration::from_secs(1), || {
+            Ok("failed".to_owned())
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn scope_cleanup_times_out_while_scope_remains_active() {
+        let error = wait_for_scope_inactive(Duration::from_millis(1), || {
+            Ok("active".to_owned())
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    }
+
+    #[test]
+    fn scope_cleanup_propagates_dbus_read_errors() {
+        let error = wait_for_scope_inactive(Duration::from_secs(1), || {
+            Err(io::Error::new(io::ErrorKind::ConnectionReset, "bus disconnected"))
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::ConnectionReset);
     }
 
     #[test]
