@@ -479,7 +479,9 @@ mod tests {
         let mut invalid = sample();
         invalid.uid += 1;
         assert_eq!(
-            validate_worker_session(&invalid, &session).unwrap_err().kind(),
+            validate_worker_session(&invalid, &session)
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::InvalidData
         );
 
