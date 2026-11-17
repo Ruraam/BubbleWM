@@ -2537,7 +2537,10 @@ impl CompositorStateData {
         let Some(target) = self.space.elements().last().cloned() else {
             return;
         };
-        let Some(surface) = target.toplevel().map(|toplevel| toplevel.wl_surface().clone()) else {
+        let Some(surface) = target
+            .toplevel()
+            .map(|toplevel| toplevel.wl_surface().clone())
+        else {
             return;
         };
         let root = self.root_surface_for_toplevel(&surface);
