@@ -1497,6 +1497,50 @@ mod tests {
     }
 
     #[test]
+    fn session_worker_wait_with_timeout_reports_graceful_cleanup() {
+        let mut worker = SessionWorker::start(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from("printf BUBWORK1 >&3; cat <&3"),
+            ],
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        let (status, timed_out) = worker
+            .wait_with_timeout(Duration::from_secs(1), Duration::from_millis(50))
+            .unwrap();
+        assert_eq!(status.code(), Some(0));
+        assert!(!timed_out);
+        assert!(worker.channel.is_none());
+        assert!(worker.process.reaped);
+    }
+
+    #[test]
+    fn session_worker_wait_with_timeout_escalates_when_cleanup_stalls() {
+        let mut worker = SessionWorker::start(
+            std::ffi::OsStr::new("/bin/sh"),
+            &[
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from(
+                    "printf BUBWORK1 >&3; trap '' TERM; exec /bin/sleep 30",
+                ),
+            ],
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        let (status, timed_out) = worker
+            .wait_with_timeout(Duration::from_millis(30), Duration::from_millis(30))
+            .unwrap();
+        assert!(timed_out);
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
+        assert!(worker.channel.is_none());
+        assert!(worker.process.reaped);
+    }
+
+    #[test]
     fn dropping_unreaped_worker_kills_and_reaps_child() {
         let (_supervisor, worker_channel) = private_channel_pair().unwrap();
         let worker = spawn_worker_with_channel(
