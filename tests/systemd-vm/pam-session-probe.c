@@ -160,14 +160,15 @@ int main(int argc, char **argv) {
         fprintf(stderr, "PAM did not provide a valid logind session/runtime directory\n");
         goto close_session;
     }
-    if (sd_pid_get_session(getpid(), &scope) < 0 ||
+    if (sd_pid_get_session(getpid(), &pid_session) < 0 ||
+        strcmp(pid_session, session_id) != 0 ||
         sd_session_get_uid(session_id, &session_uid) < 0 ||
         session_uid != account->pw_uid) {
-        fprintf(stderr, "logind could not independently resolve this PAM session\n");
+        fprintf(stderr, "logind could not independently resolve this PAM session\\n");
         goto close_session;
     }
-    free(scope);
-    scope = NULL;
+    free(pid_session);
+    pid_session = NULL;
     if (sd_pid_get_unit(getpid(), &scope) < 0 || scope == NULL ||
         strncmp(scope, "session-", 8) != 0) {
         fprintf(stderr, "process is not in a logind session scope\n");
