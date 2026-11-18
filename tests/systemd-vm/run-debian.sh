@@ -43,9 +43,12 @@ test_user="bwm-pam-test"
 test_password=$(openssl rand -hex 24)
 test_log=$(mktemp)
 probe=$(mktemp)
+test_tmpdir=$(mktemp -d)
+mkfifo "$test_tmpdir/password"
 test_user_created=0
 pam_service_created=0
 probe_pid=
+writer_pid=
 escaped_pid=
 scope_to_stop=
 cleanup() {
@@ -57,6 +60,11 @@ cleanup() {
     fi
     if [ -n "$scope_to_stop" ]; then
         systemctl stop "$scope_to_stop" >/dev/null 2>&1 || true
+    fi
+    if [ -n "$writer_pid" ]; then
+        kill -TERM "$writer_pid" 2>/dev/null || true
+        wait "$writer_pid" 2>/dev/null || true
+        writer_pid=
     fi
     if [ -n "$probe_pid" ]; then
         if kill -0 "$probe_pid" 2>/dev/null; then
@@ -80,6 +88,7 @@ cleanup() {
         rm -f /etc/pam.d/bubblewm
     fi
     rm -f "$probe" "$test_log" "$test_log.state" "$test_log.failure"
+    rm -rf "$test_tmpdir"
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
@@ -118,9 +127,17 @@ fi
 
 # A real VT is required for a full seat/VT assertion. /dev/tty1 is supplied
 # as PAM_TTY here; launch from the VM's local console for meaningful VT data.
-printf '%s\n' "$test_password" | BUBBLEWM_TEST_HOLD_SECONDS=8 BUBBLEWM_TEST_ESCAPE_GROUP=1 \
-    "$probe" "$test_user" /dev/tty1 >"$test_log" 2>&1 &
+BUBBLEWM_TEST_HOLD_SECONDS=8 BUBBLEWM_TEST_ESCAPE_GROUP=1 \
+    "$probe" "$test_user" /dev/tty1 <"$test_tmpdir/password" >"$test_log" 2>&1 &
 probe_pid=$!
+printf '%s\n' "$test_password" >"$test_tmpdir/password" &
+writer_pid=$!
+if ! wait "$writer_pid"; then
+    writer_pid=
+    echo "Could not deliver the test password to the PAM probe." >&2
+    exit 1
+fi
+writer_pid=
 
 attempt=0
 while ! grep -q '^ESCAPED_PID=' "$test_log" && kill -0 "$probe_pid" 2>/dev/null; do
