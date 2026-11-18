@@ -66,7 +66,7 @@ impl PidFd {
 
 /// Transfers exactly one pidfd over a private Unix stream using SCM_RIGHTS.
 pub fn send_pidfd(channel: &UnixStream, pidfd: &PidFd) -> io::Result<()> {
-    let mut byte = [PIDFD_MARKER[0]];
+    let mut byte = *PIDFD_MARKER;
     let mut iov = libc::iovec { iov_base: byte.as_mut_ptr().cast(), iov_len: 1 };
     let mut control = [0_usize; 8];
     let space = unsafe { libc::CMSG_SPACE(std::mem::size_of::<RawFd>() as u32) as usize };
@@ -85,13 +85,13 @@ pub fn send_pidfd(channel: &UnixStream, pidfd: &PidFd) -> io::Result<()> {
     }
     let sent = unsafe { libc::sendmsg(channel.as_raw_fd(), &message, libc::MSG_NOSIGNAL) };
     if sent < 0 { return Err(io::Error::last_os_error()); }
-    if sent != 1 { return Err(io::Error::new(io::ErrorKind::WriteZero, "short pidfd transfer")); }
+    if sent != PIDFD_MARKER.len() as isize { return Err(io::Error::new(io::ErrorKind::WriteZero, "short pidfd transfer")); }
     Ok(())
 }
 
 /// Receives one pidfd and rejects missing, truncated, or unexpected ancillary data.
 pub fn receive_pidfd(channel: &UnixStream) -> io::Result<PidFd> {
-    let mut byte = [0_u8; 1];
+    let mut byte = [0_u8; 8];
     let mut iov = libc::iovec { iov_base: byte.as_mut_ptr().cast(), iov_len: 1 };
     let mut control = [0_usize; 8];
     let mut message: libc::msghdr = unsafe { std::mem::zeroed() };
@@ -101,7 +101,7 @@ pub fn receive_pidfd(channel: &UnixStream) -> io::Result<PidFd> {
     message.msg_controllen = std::mem::size_of_val(&control);
     let received = unsafe { libc::recvmsg(channel.as_raw_fd(), &mut message, libc::MSG_CMSG_CLOEXEC) };
     if received < 0 { return Err(io::Error::last_os_error()); }
-    if received != 1 || byte[0] != PIDFD_MARKER[0] || message.msg_flags & libc::MSG_CTRUNC != 0 {
+    if received != PIDFD_MARKER.len() as isize || &byte != PIDFD_MARKER || message.msg_flags & libc::MSG_CTRUNC != 0 {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid pidfd transfer frame"));
     }
     let header = unsafe { libc::CMSG_FIRSTHDR(&message) };
