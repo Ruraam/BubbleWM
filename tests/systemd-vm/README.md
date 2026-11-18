@@ -19,7 +19,7 @@ Take a VM snapshot first. Log in on the VM's local console as root, then run:
 git clone https://github.com/Ruraam/BubbleWM.git
 cd BubbleWM
 git checkout codex/bubblewm-visual-theme-engine
-BUBBLEWM_EXPECT_KILL_USER_PROCESSES=yes sudo -E sh tests/systemd-vm/run-debian.sh
+BUBBLEWM_EXPECT_KILL_USER_PROCESSES=yes sh tests/systemd-vm/run-debian.sh
 ```
 
 The harness verifies that Debian's `common-session` contains exactly one
@@ -67,7 +67,7 @@ BUBBLEWM_EXPECT_KILL_USER_PROCESSES=yes sudo -E sh tests/systemd-vm/run-debian.s
 For the second boot, configure `KillUserProcesses=no` and run:
 
 ```sh
-BUBBLEWM_EXPECT_KILL_USER_PROCESSES=no sudo -E sh tests/systemd-vm/run-debian.sh
+BUBBLEWM_EXPECT_KILL_USER_PROCESSES=no sh tests/systemd-vm/run-debian.sh
 ```
 
 The harness reads the merged `systemd/logind.conf` configuration with
