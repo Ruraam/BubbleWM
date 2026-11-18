@@ -963,7 +963,8 @@ mod tests {
         );
     }
 
-    fn spawn_exited_leader_with_background_descendant() -> (ManagedUserProcess, libc::pid_t, tempfile::TempDir) {
+    fn spawn_exited_leader_with_background_descendant()
+    -> (ManagedUserProcess, libc::pid_t, tempfile::TempDir) {
         use std::os::unix::process::CommandExt;
 
         let directory = tempfile::tempdir().expect("temporary directory");
@@ -1031,8 +1032,7 @@ mod tests {
 
     #[test]
     fn managed_process_drop_kills_descendants_after_leader_exits() {
-        let (process, descendant, _directory) =
-            spawn_exited_leader_with_background_descendant();
+        let (process, descendant, _directory) = spawn_exited_leader_with_background_descendant();
 
         drop(process);
 
