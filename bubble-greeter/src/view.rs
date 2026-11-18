@@ -163,6 +163,213 @@ pub fn account_rows(
         .collect()
 }
 
+/// RGBA color used by renderers without prescribing a graphics backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Color(pub u8, pub u8, pub u8, pub u8);
+
+/// Semantic colors for the default dark greeter appearance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GreeterPalette {
+    pub backdrop: Color,
+    pub surface: Color,
+    pub surface_selected: Color,
+    pub text_primary: Color,
+    pub text_muted: Color,
+    pub accent: Color,
+    pub success: Color,
+    pub warning: Color,
+    pub danger: Color,
+    pub disabled: Color,
+}
+
+impl Default for GreeterPalette {
+    fn default() -> Self {
+        Self {
+            backdrop: Color(12, 15, 24, 255),
+            surface: Color(27, 32, 46, 255),
+            surface_selected: Color(38, 52, 78, 255),
+            text_primary: Color(244, 247, 255, 255),
+            text_muted: Color(158, 170, 192, 255),
+            accent: Color(91, 156, 255, 255),
+            success: Color(82, 196, 138, 255),
+            warning: Color(245, 190, 82, 255),
+            danger: Color(245, 104, 112, 255),
+            disabled: Color(91, 99, 116, 255),
+        }
+    }
+}
+
+/// Visual details for the leading avatar in an account row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvatarPresentation {
+    pub bounds: Rect,
+    pub initials: String,
+    pub background: Color,
+}
+
+/// Selection marker shown beside an account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectionIndicator {
+    pub bounds: Rect,
+    pub selected: bool,
+    pub color: Color,
+}
+
+/// State of the primary login button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrimaryButtonState {
+    Enabled,
+    Disabled,
+    Busy,
+}
+
+/// Render-ready primary action presentation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrimaryButtonPresentation {
+    pub bounds: Rect,
+    pub label: &'static str,
+    pub state: PrimaryButtonState,
+    pub background: Color,
+    pub foreground: Color,
+}
+
+/// Semantic severity for the status panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusTone {
+    Neutral,
+    Progress,
+    Success,
+    Warning,
+    Error,
+}
+
+/// Render-ready status panel presentation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusPanelPresentation {
+    pub bounds: Rect,
+    pub message: &'static str,
+    pub tone: StatusTone,
+    pub color: Color,
+}
+
+/// Derives avatar initials from the display name, falling back to username.
+pub fn avatar_initials(display_name: &str, username: &str) -> String {
+    let source = if display_name.trim().is_empty() {
+        username.trim()
+    } else {
+        display_name.trim()
+    };
+
+    source
+        .chars()
+        .next()
+        .map(|character| character.to_uppercase().collect())
+        .unwrap_or_else(|| "?".to_owned())
+}
+
+/// Builds a circular-avatar layout centered vertically in an account row.
+pub fn avatar_presentation(
+    row: &AccountRowPresentation,
+    palette: GreeterPalette,
+) -> AvatarPresentation {
+    let size = 36.min(row.bounds.height);
+    AvatarPresentation {
+        bounds: Rect {
+            x: row.bounds.x + 8,
+            y: row.bounds.y + row.bounds.height.saturating_sub(size) / 2,
+            width: size,
+            height: size,
+        },
+        initials: avatar_initials(&row.display_name, &row.username),
+        background: if row.selected {
+            palette.accent
+        } else {
+            palette.surface_selected
+        },
+    }
+}
+
+/// Builds a compact selection marker aligned to the right edge of a row.
+pub fn selection_indicator(
+    row: &AccountRowPresentation,
+    palette: GreeterPalette,
+) -> SelectionIndicator {
+    let size = 16.min(row.bounds.height);
+    SelectionIndicator {
+        bounds: Rect {
+            x: row.bounds.x + row.bounds.width.saturating_sub(size + 8),
+            y: row.bounds.y + row.bounds.height.saturating_sub(size) / 2,
+            width: size,
+            height: size,
+        },
+        selected: row.selected,
+        color: if row.selected {
+            palette.accent
+        } else {
+            palette.disabled
+        },
+    }
+}
+
+/// Builds the primary button state from the greeter model.
+pub fn primary_button(
+    model: &crate::GreeterModel,
+    layout: GreeterLayout,
+    palette: GreeterPalette,
+) -> PrimaryButtonPresentation {
+    let state = match model.status() {
+        crate::GreeterStatus::Authenticating | crate::GreeterStatus::StartingSession => {
+            PrimaryButtonState::Busy
+        }
+        _ if model.selected_user().is_some_and(|user| user.is_available()) => {
+            PrimaryButtonState::Enabled
+        }
+        _ => PrimaryButtonState::Disabled,
+    };
+
+    let (label, background) = match state {
+        PrimaryButtonState::Enabled => ("Sign in", palette.accent),
+        PrimaryButtonState::Disabled => ("Sign in", palette.disabled),
+        PrimaryButtonState::Busy => ("Signing in…", palette.disabled),
+    };
+
+    PrimaryButtonPresentation {
+        bounds: layout.action,
+        label,
+        state,
+        background,
+        foreground: palette.text_primary,
+    }
+}
+
+/// Builds a status panel with a semantic tone and matching palette color.
+pub fn status_panel(
+    model: &crate::GreeterModel,
+    layout: GreeterLayout,
+    palette: GreeterPalette,
+) -> StatusPanelPresentation {
+    let (tone, color) = match model.status() {
+        crate::GreeterStatus::Ready => (StatusTone::Neutral, palette.text_muted),
+        crate::GreeterStatus::Authenticating | crate::GreeterStatus::StartingSession => {
+            (StatusTone::Progress, palette.accent)
+        }
+        crate::GreeterStatus::Error(crate::GreeterError::AuthenticationFailed)
+        | crate::GreeterStatus::Error(crate::GreeterError::AccountUnavailable)
+        | crate::GreeterStatus::Error(crate::GreeterError::SessionStartFailed)
+        | crate::GreeterStatus::Error(crate::GreeterError::ServiceUnavailable) => {
+            (StatusTone::Error, palette.danger)
+        }
+        crate::GreeterStatus::SessionEnded => (StatusTone::Success, palette.success),
+    };
+
+    StatusPanelPresentation {
+        bounds: layout.status,
+        message: status_message(model.status()),
+        tone,
+        color,
+    }
+}
+
 /// Interactive regions exposed to a frontend event handler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GreeterHitTarget {
@@ -281,6 +488,54 @@ mod tests {
         let busy_rows = account_rows(&model, layout);
         assert!(busy_rows.iter().all(|row| row.disabled));
         assert!(busy_rows[0].selected);
+    }
+
+    #[test]
+    fn visual_components_reflect_selection_availability_and_busy_state() {
+        let mut accounts = vec![
+            crate::LocalUser::new("alice", "Élodie").unwrap(),
+            crate::LocalUser::new("bob", "Bob").unwrap(),
+        ];
+        accounts[1].set_available(false);
+        let mut model = crate::GreeterModel::new(accounts).unwrap();
+        let layout = GreeterLayout::for_viewport(1280, 800);
+        let palette = GreeterPalette::default();
+        let rows = account_rows(&model, layout);
+
+        assert_eq!(avatar_initials(" Élodie ", "alice"), "É");
+        assert_eq!(avatar_initials(" ", "alice"), "A");
+        assert_eq!(avatar_initials("", ""), "?");
+
+        let avatar = avatar_presentation(&rows[0], palette);
+        assert_eq!(avatar.initials, "É");
+        assert_eq!(avatar.background, palette.accent);
+        assert!(avatar.bounds.width > 0);
+
+        let marker = selection_indicator(&rows[0], palette);
+        assert!(marker.selected);
+        assert_eq!(marker.color, palette.accent);
+        assert!(!selection_indicator(&rows[1], palette).selected);
+
+        let button = primary_button(&model, layout, palette);
+        assert_eq!(button.state, PrimaryButtonState::Enabled);
+        assert_eq!(button.label, "Sign in");
+
+        let status = status_panel(&model, layout, palette);
+        assert_eq!(status.tone, StatusTone::Neutral);
+
+        model.submit();
+        let busy_button = primary_button(&model, layout, palette);
+        assert_eq!(busy_button.state, PrimaryButtonState::Busy);
+        assert_eq!(busy_button.label, "Signing in…");
+        assert_eq!(
+            status_panel(&model, layout, palette).tone,
+            StatusTone::Progress
+        );
+
+        model.authentication_failed(crate::GreeterError::AuthenticationFailed);
+        let error = status_panel(&model, layout, palette);
+        assert_eq!(error.tone, StatusTone::Error);
+        assert_eq!(error.color, palette.danger);
     }
 
     #[test]
