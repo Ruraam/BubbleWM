@@ -13,6 +13,7 @@ pub const MAX_USERNAME_BYTES: usize = 32;
 pub struct LocalUser {
     username: String,
     display_name: String,
+    available: bool,
 }
 
 impl LocalUser {
@@ -31,6 +32,7 @@ impl LocalUser {
         Ok(Self {
             username,
             display_name,
+            available: true,
         })
     }
 
@@ -40,6 +42,16 @@ impl LocalUser {
 
     pub fn display_name(&self) -> &str {
         &self.display_name
+    }
+
+    /// Whether this account may currently be selected for login.
+    pub fn is_available(&self) -> bool {
+        self.available
+    }
+
+    /// Updates the presentation availability supplied by the account provider.
+    pub fn set_available(&mut self, available: bool) {
+        self.available = available;
     }
 }
 
@@ -128,6 +140,7 @@ impl GreeterModel {
 
     pub fn select_user(&mut self, index: usize) -> bool {
         if index >= self.users.len()
+            || !self.users[index].available
             || !matches!(
                 self.status,
                 GreeterStatus::Ready | GreeterStatus::Error(_) | GreeterStatus::SessionEnded
@@ -148,7 +161,7 @@ impl GreeterModel {
         ) {
             return GreeterAction::None;
         }
-        let Some(user) = self.selected_user() else {
+        let Some(user) = self.selected_user().filter(|user| user.available) else {
             return GreeterAction::None;
         };
         let action = GreeterAction::SubmitLogin {
@@ -217,6 +230,22 @@ mod tests {
         );
         assert_eq!(model.status(), &GreeterStatus::Authenticating);
         assert_eq!(model.submit(), GreeterAction::None);
+    }
+
+    #[test]
+    fn unavailable_accounts_cannot_be_selected_or_submitted() {
+        let mut accounts = users();
+        accounts[1].set_available(false);
+        let mut model = GreeterModel::new(accounts).unwrap();
+
+        assert!(!model.select_user(1));
+        assert_eq!(model.selected_user().unwrap().username(), "alice");
+        assert_eq!(
+            model.submit(),
+            GreeterAction::SubmitLogin {
+                username: "alice".into()
+            }
+        );
     }
 
     #[test]
