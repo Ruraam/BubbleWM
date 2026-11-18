@@ -21,6 +21,7 @@ all:
 	$(CARGO) build --release --bin bubblewm --bin bubblewm-session --bin bubblewm-session-worker --bin bubblewm-config
 
 install: all
+	@test -n "$(DESTDIR)" || test ! -e "$(PAMDIR)/bubblewm" || { echo "Refusing to overwrite $(PAMDIR)/bubblewm; use a reviewed package upgrade or install-pam after manual review" >&2; exit 1; }
 	install -D -m 0755 target/release/bubblewm "$(DESTDIR)$(BINDIR)/bubblewm"
 	install -D -m 0755 target/release/bubblewm-session "$(DESTDIR)$(BINDIR)/bubblewm-session"
 	install -D -m 0755 target/release/bubblewm-session-worker "$(DESTDIR)$(LIBEXECDIR)/bubblewm-session-worker"
