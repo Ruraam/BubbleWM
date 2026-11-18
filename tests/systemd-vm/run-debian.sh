@@ -49,6 +49,12 @@ probe_pid=
 escaped_pid=
 scope_to_stop=
 cleanup() {
+    if [ -z "$scope_to_stop" ] && [ -f "$test_log" ]; then
+        scope_to_stop=$(sed -n 's/^SESSION_ID=[^ ]* SCOPE=\([^ ]*\).*/\1/p' "$test_log")
+    fi
+    if [ -z "$escaped_pid" ] && [ -f "$test_log" ]; then
+        escaped_pid=$(sed -n 's/^ESCAPED_PID=\([0-9][0-9]*\)$/\1/p' "$test_log")
+    fi
     if [ -n "$scope_to_stop" ]; then
         systemctl stop "$scope_to_stop" >/dev/null 2>&1 || true
     fi
