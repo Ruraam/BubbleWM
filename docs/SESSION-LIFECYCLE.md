@@ -158,6 +158,14 @@ VT activation, pause/resume, and recovery if startup fails midway.
 BubbleWM's current libseat pause/resume handling is a backend primitive, not
 yet a complete greeter-to-session handoff.
 
+## Supervisor crash guardian
+
+The out-of-scope guardian architecture, including pidfd-based worker tracking,
+arm-before-approval ordering, normal completion, and bounded emergency cleanup,
+is specified in [SESSION-GUARDIAN-DESIGN.md](SESSION-GUARDIAN-DESIGN.md).
+This is a design decision only: the guardian is not implemented or validated
+against a real logind scope yet.
+
 ## Required validation
 
 Before production use, extend the systemd VM integration tests to cover:
