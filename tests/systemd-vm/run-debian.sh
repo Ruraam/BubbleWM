@@ -46,7 +46,12 @@ probe=$(mktemp)
 test_user_created=0
 pam_service_created=0
 probe_pid=
+escaped_pid=
+scope_to_stop=
 cleanup() {
+    if [ -n "$scope_to_stop" ]; then
+        systemctl stop "$scope_to_stop" >/dev/null 2>&1 || true
+    fi
     if [ -n "$probe_pid" ]; then
         if kill -0 "$probe_pid" 2>/dev/null; then
             kill -TERM "$probe_pid" 2>/dev/null || true
@@ -107,7 +112,7 @@ fi
 
 # A real VT is required for a full seat/VT assertion. /dev/tty1 is supplied
 # as PAM_TTY here; launch from the VM's local console for meaningful VT data.
-printf '%s\n' "$test_password" | BUBBLEWM_TEST_HOLD_SECONDS=8 \
+printf '%s\n' "$test_password" | BUBBLEWM_TEST_HOLD_SECONDS=8 BUBBLEWM_TEST_ESCAPE_GROUP=1 \
     "$probe" "$test_user" /dev/tty1 >"$test_log" 2>&1 &
 probe_pid=$!
 
@@ -131,7 +136,9 @@ fi
 
 session_id=$(sed -n 's/^SESSION_ID=\([^ ]*\).*/\1/p' "$test_log")
 scope=$(sed -n 's/^SESSION_ID=[^ ]* SCOPE=\([^ ]*\).*/\1/p' "$test_log")
-[ -n "$session_id" ] && [ -n "$scope" ] || {
+escaped_pid=$(sed -n 's/^ESCAPED_PID=\([0-9][0-9]*\)$/\1/p' "$test_log")
+scope_to_stop=$scope
+[ -n "$session_id" ] && [ -n "$scope" ] && [ -n "$escaped_pid" ] || {
     echo "Probe returned malformed session metadata." >&2
     exit 1
 }
@@ -149,15 +156,35 @@ if ! wait "$probe_pid"; then
 fi
 probe_pid=
 
-# pam_systemd should release the session scope when pam_close_session runs.
+# The test child has called setsid(): process-group signalling cannot reach it.
+# The supervisor must stop the retained logind scope after the PAM worker exits.
+if ! kill -0 "$escaped_pid" 2>/dev/null; then
+    echo "Escaped-group test child exited before supervisor scope cleanup." >&2
+    exit 1
+fi
+systemctl stop "$scope"
 attempt=0
 while systemctl is-active --quiet "$scope"; do
     attempt=$((attempt + 1))
     if [ "$attempt" -gt 50 ]; then
-        echo "Session scope remained active after pam_close_session: $scope" >&2
+        echo "Session scope remained active after supervisor cleanup: $scope" >&2
         exit 1
     fi
     sleep 0.1
 done
 
-echo "PASS: real PAM authentication/open/close and logind scope lifecycle ($session_id)."
+# Accept a zombie as terminated: PID 1 may need a scheduling turn to reap it.
+attempt=0
+while [ -d "/proc/$escaped_pid" ]; do
+    child_state=$(awk '{print $3}' "/proc/$escaped_pid/stat" 2>/dev/null || true)
+    [ "$child_state" = Z ] && break
+    attempt=$((attempt + 1))
+    if [ "$attempt" -gt 50 ]; then
+        echo "Escaped process survived logind scope cleanup: $escaped_pid" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+scope_to_stop=
+
+echo "PASS: PAM authentication/open/close and supervisor cleanup of an escaped process-group descendant ($session_id)."
