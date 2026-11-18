@@ -1,3 +1,5 @@
+pub mod view;
+
 //! BubbleGreeter presentation model.
 //!
 //! This unprivileged state model contains no PAM calls, password storage,
