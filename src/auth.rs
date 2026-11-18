@@ -7,6 +7,7 @@ use std::{
     os::unix::process::CommandExt,
     path::PathBuf,
     process::{Child, Command, ExitStatus},
+    os::unix::net::UnixStream,
     ptr,
     sync::atomic::{Ordering, compiler_fence},
     thread,
@@ -402,6 +403,64 @@ impl ManagedUserProcess {
         let status = self.child.wait()?;
         self.child_status = Some(status);
         Ok(status)
+    }
+
+    /// Waits for the session leader while monitoring the private supervisor
+    /// socket. A peer hangup or any unexpected post-approval byte is treated as
+    /// supervisor loss and terminates the entire managed process group.
+    pub fn wait_while_supervised(
+        &mut self,
+        channel: &mut UnixStream,
+        poll_interval: Duration,
+        termination_grace: Duration,
+    ) -> std::io::Result<(ExitStatus, bool)> {
+        loop {
+            if let Some(status) = self.try_wait()? {
+                return Ok((status, false));
+            }
+
+            let mut descriptor = libc::pollfd {
+                fd: channel.as_raw_fd(),
+                events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+                revents: 0,
+            };
+            let timeout = poll_interval.as_millis().min(i32::MAX as u128) as i32;
+            let result = unsafe { libc::poll(&mut descriptor, 1, timeout) };
+            if result < 0 {
+                let error = std::io::Error::last_os_error();
+                if error.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(error);
+            }
+            if result == 0 {
+                continue;
+            }
+            if descriptor.revents & libc::POLLNVAL != 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "invalid supervisor control descriptor",
+                ));
+            }
+            if descriptor.revents & (libc::POLLHUP | libc::POLLERR) != 0 {
+                return self
+                    .terminate(termination_grace)
+                    .map(|status| (status, true));
+            }
+            if descriptor.revents & libc::POLLIN != 0 {
+                let mut unexpected = [0_u8; 1];
+                match channel.read(&mut unexpected) {
+                    Ok(0) | Ok(_) => {
+                        return self
+                            .terminate(termination_grace)
+                            .map(|status| (status, true));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => continue,
+                    Err(error) => return Err(error),
+                }
+            }
+        }
     }
 
     /// Sends SIGTERM to the session process group, then SIGKILL after the
@@ -920,6 +979,61 @@ mod tests {
         symlink(&target, &link).expect("create symlink");
 
         assert!(validate_runtime_directory(&link, unsafe { libc::getuid() }).is_err());
+    }
+
+    #[test]
+    fn managed_process_is_terminated_when_supervisor_socket_closes() {
+        use std::os::unix::process::CommandExt;
+        use std::os::unix::process::ExitStatusExt;
+
+        let child = Command::new("/bin/sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .expect("spawn supervised process");
+        let process_group = child.id() as libc::pid_t;
+        let mut process = ManagedUserProcess::new(child);
+        let (supervisor, mut worker) = UnixStream::pair().expect("control socket pair");
+        drop(supervisor);
+
+        let (status, supervisor_lost) = process
+            .wait_while_supervised(
+                &mut worker,
+                Duration::from_millis(10),
+                Duration::from_secs(1),
+            )
+            .expect("detect supervisor loss and terminate process");
+
+        assert!(supervisor_lost);
+        assert_eq!(status.signal(), Some(libc::SIGTERM));
+        assert_eq!(unsafe { libc::kill(-process_group, 0) }, -1);
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
+        );
+    }
+
+    #[test]
+    fn managed_process_exits_normally_while_supervisor_channel_stays_open() {
+        use std::os::unix::process::CommandExt;
+
+        let child = Command::new("/bin/true")
+            .process_group(0)
+            .spawn()
+            .expect("spawn short-lived process");
+        let mut process = ManagedUserProcess::new(child);
+        let (_supervisor, mut worker) = UnixStream::pair().expect("control socket pair");
+
+        let (status, supervisor_lost) = process
+            .wait_while_supervised(
+                &mut worker,
+                Duration::from_millis(10),
+                Duration::from_secs(1),
+            )
+            .expect("wait for normal process exit");
+
+        assert!(status.success());
+        assert!(!supervisor_lost);
     }
 
     #[test]
