@@ -134,6 +134,7 @@ pub struct AccountRowPresentation {
     pub display_name: String,
     pub bounds: Rect,
     pub selected: bool,
+    pub focused: bool,
     pub disabled: bool,
 }
 
@@ -157,6 +158,7 @@ pub fn account_rows(
                 display_name: user.display_name().to_owned(),
                 bounds: layout.account_rect(index, model.users().len())?,
                 selected: model.selected_index() == Some(index),
+                focused: model.focus() == Some(crate::GreeterFocus::Account(index)),
                 disabled: !user.is_available() || interaction_locked,
             })
         })
@@ -229,6 +231,7 @@ pub struct PrimaryButtonPresentation {
     pub bounds: Rect,
     pub label: &'static str,
     pub state: PrimaryButtonState,
+    pub focused: bool,
     pub background: Color,
     pub foreground: Color,
 }
@@ -340,6 +343,8 @@ pub fn primary_button(
         bounds: layout.action,
         label,
         state,
+        focused: model.focus() == Some(crate::GreeterFocus::Submit)
+            && state != PrimaryButtonState::Busy,
         background,
         foreground: palette.text_primary,
     }
@@ -530,8 +535,10 @@ mod tests {
         assert_eq!(rows[0].display_name, "Alice Example");
         assert_eq!(rows[0].username, "alice");
         assert!(rows[0].selected);
+        assert!(rows[0].focused);
         assert!(!rows[0].disabled);
         assert!(!rows[1].selected);
+        assert!(!rows[1].focused);
         assert!(rows[1].disabled);
         assert!(rows[0].bounds.width > 0);
 
@@ -570,6 +577,13 @@ mod tests {
         let button = primary_button(&model, layout, palette);
         assert_eq!(button.state, PrimaryButtonState::Enabled);
         assert_eq!(button.label, "Sign in");
+        assert!(!button.focused);
+
+        model.handle_key(crate::GreeterKey::Tab);
+        model.handle_key(crate::GreeterKey::Tab);
+        let focused_button = primary_button(&model, layout, palette);
+        assert!(focused_button.focused);
+        assert!(account_rows(&model, layout).iter().all(|row| !row.focused));
 
         let status = status_panel(&model, layout, palette);
         assert_eq!(status.tone, StatusTone::Neutral);
@@ -605,6 +619,8 @@ mod tests {
         assert_eq!(screen.accounts.len(), 2);
         assert_eq!(screen.accounts[0].avatar.initials, "A");
         assert!(screen.accounts[0].selection.selected);
+        assert!(screen.accounts[0].row.focused);
+        assert!(!screen.action.focused);
         assert!(screen.accounts[1].row.disabled);
         assert_eq!(screen.status.tone, StatusTone::Neutral);
         assert_eq!(screen.action.state, PrimaryButtonState::Enabled);
