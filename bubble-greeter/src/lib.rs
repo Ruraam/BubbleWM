@@ -97,6 +97,14 @@ pub enum GreeterAction {
     SubmitLogin { username: String },
 }
 
+/// Keyboard commands understood by the renderer-independent greeter model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GreeterKey {
+    Up,
+    Down,
+    Enter,
+}
+
 /// UI state only. It never accepts or stores a password.
 #[derive(Debug, Clone)]
 pub struct GreeterModel {
@@ -140,6 +148,46 @@ impl GreeterModel {
 
     pub fn status(&self) -> &GreeterStatus {
         &self.status
+    }
+
+    /// Handles basic account navigation and submit keys without reading secrets.
+    ///
+    /// Up/down skip unavailable accounts and wrap around the visible list.
+    /// Enter emits the same username-only action as the primary button.
+    pub fn handle_key(&mut self, key: GreeterKey) -> GreeterAction {
+        match key {
+            GreeterKey::Enter => self.submit(),
+            GreeterKey::Up | GreeterKey::Down => {
+                if !matches!(
+                    self.status,
+                    GreeterStatus::Ready | GreeterStatus::Error(_) | GreeterStatus::SessionEnded
+                ) || self.users.is_empty()
+                {
+                    return GreeterAction::None;
+                }
+
+                let len = self.users.len();
+                let start = self.selected.unwrap_or(if key == GreeterKey::Down {
+                    len - 1
+                } else {
+                    0
+                });
+
+                for step in 1..=len {
+                    let index = match key {
+                        GreeterKey::Down => (start + step) % len,
+                        GreeterKey::Up => (start + len - (step % len)) % len,
+                        GreeterKey::Enter => unreachable!(),
+                    };
+                    if self.users[index].available {
+                        self.selected = Some(index);
+                        self.status = GreeterStatus::Ready;
+                        break;
+                    }
+                }
+                GreeterAction::None
+            }
+        }
     }
 
     pub fn select_user(&mut self, index: usize) -> bool {
@@ -250,6 +298,46 @@ mod tests {
                 username: "alice".into()
             }
         );
+    }
+
+    #[test]
+    fn keyboard_navigation_skips_unavailable_accounts_and_wraps() {
+        let mut accounts = vec![
+            LocalUser::new("alice", "Alice").unwrap(),
+            LocalUser::new("bob", "Bob").unwrap(),
+            LocalUser::new("carol", "Carol").unwrap(),
+        ];
+        accounts[1].set_available(false);
+        let mut model = GreeterModel::new(accounts).unwrap();
+
+        assert_eq!(model.handle_key(GreeterKey::Down), GreeterAction::None);
+        assert_eq!(model.selected_user().unwrap().username(), "carol");
+        assert_eq!(model.handle_key(GreeterKey::Down), GreeterAction::None);
+        assert_eq!(model.selected_user().unwrap().username(), "alice");
+        assert_eq!(model.handle_key(GreeterKey::Up), GreeterAction::None);
+        assert_eq!(model.selected_user().unwrap().username(), "carol");
+
+        assert_eq!(
+            model.handle_key(GreeterKey::Enter),
+            GreeterAction::SubmitLogin {
+                username: "carol".into()
+            }
+        );
+        assert_eq!(model.handle_key(GreeterKey::Down), GreeterAction::None);
+        assert_eq!(model.selected_user().unwrap().username(), "carol");
+    }
+
+    #[test]
+    fn keyboard_navigation_handles_empty_and_all_unavailable_lists() {
+        let mut empty = GreeterModel::new(Vec::new()).unwrap();
+        assert_eq!(empty.handle_key(GreeterKey::Down), GreeterAction::None);
+
+        let mut unavailable = LocalUser::new("alice", "Alice").unwrap();
+        unavailable.set_available(false);
+        let mut model = GreeterModel::new(vec![unavailable]).unwrap();
+        assert_eq!(model.handle_key(GreeterKey::Down), GreeterAction::None);
+        assert_eq!(model.selected_index(), Some(0));
+        assert_eq!(model.submit(), GreeterAction::None);
     }
 
     #[test]
