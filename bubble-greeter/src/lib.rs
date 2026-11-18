@@ -167,11 +167,9 @@ impl GreeterModel {
                 }
 
                 let len = self.users.len();
-                let start = self.selected.unwrap_or(if key == GreeterKey::Down {
-                    len - 1
-                } else {
-                    0
-                });
+                let start =
+                    self.selected
+                        .unwrap_or(if key == GreeterKey::Down { len - 1 } else { 0 });
 
                 for step in 1..=len {
                     let index = match key {
