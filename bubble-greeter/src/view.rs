@@ -590,6 +590,37 @@ mod tests {
     }
 
     #[test]
+    fn complete_screen_composes_accounts_status_and_action() {
+        let mut accounts = vec![
+            crate::LocalUser::new("alice", "Alice").unwrap(),
+            crate::LocalUser::new("bob", "Bob").unwrap(),
+        ];
+        accounts[1].set_available(false);
+        let model = crate::GreeterModel::new(accounts).unwrap();
+        let palette = GreeterPalette::default();
+
+        let screen = greeter_screen(&model, 1280, 800, palette);
+        assert_eq!(screen.title, "Welcome");
+        assert_eq!(screen.subtitle, "Choose an account to sign in");
+        assert_eq!(screen.accounts.len(), 2);
+        assert_eq!(screen.accounts[0].avatar.initials, "A");
+        assert!(screen.accounts[0].selection.selected);
+        assert!(screen.accounts[1].row.disabled);
+        assert_eq!(screen.status.tone, StatusTone::Neutral);
+        assert_eq!(screen.action.state, PrimaryButtonState::Enabled);
+        assert_eq!(screen.layout, GreeterLayout::for_viewport(1280, 800));
+    }
+
+    #[test]
+    fn complete_screen_handles_empty_account_list() {
+        let model = crate::GreeterModel::new(Vec::new()).unwrap();
+        let screen = greeter_screen(&model, 1280, 800, GreeterPalette::default());
+
+        assert!(screen.accounts.is_empty());
+        assert_eq!(screen.action.state, PrimaryButtonState::Disabled);
+    }
+
+    #[test]
     fn status_copy_covers_authentication_states() {
         assert_eq!(
             status_message(&crate::GreeterStatus::Ready),
