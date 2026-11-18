@@ -180,6 +180,43 @@ mod tests {
     }
 
     #[test]
+    fn account_rows_cover_region_and_hit_testing_selects_correct_target() {
+        let layout = GreeterLayout::for_viewport(1280, 800);
+        let first = layout.account_rect(0, 3).unwrap();
+        let second = layout.account_rect(1, 3).unwrap();
+        let third = layout.account_rect(2, 3).unwrap();
+
+        assert_eq!(first.y, layout.accounts.y);
+        assert_eq!(first.y + first.height, second.y);
+        assert_eq!(second.y + second.height, third.y);
+        assert_eq!(third.y + third.height, layout.accounts.y + layout.accounts.height);
+
+        assert_eq!(
+            layout.hit_test(first.x, first.y, 3),
+            Some(GreeterHitTarget::Account(0))
+        );
+        assert_eq!(
+            layout.hit_test(second.x, second.y, 3),
+            Some(GreeterHitTarget::Account(1))
+        );
+        assert_eq!(
+            layout.hit_test(layout.action.x, layout.action.y, 3),
+            Some(GreeterHitTarget::Submit)
+        );
+        assert_eq!(layout.hit_test(layout.card.x, layout.card.y, 3), None);
+    }
+
+    #[test]
+    fn account_hit_testing_rejects_empty_excessive_and_unavailable_rows() {
+        let layout = GreeterLayout::for_viewport(320, 240);
+        assert_eq!(layout.account_rect(0, 0), None);
+        assert_eq!(layout.account_rect(0, crate::MAX_VISIBLE_USERS + 1), None);
+        assert_eq!(layout.account_rect(0, 1), None);
+        assert_eq!(layout.hit_test(0, 0, 0), None);
+        assert_eq!(layout.hit_test(0, 0, crate::MAX_VISIBLE_USERS + 1), None);
+    }
+
+    #[test]
     fn status_copy_covers_authentication_states() {
         assert_eq!(
             status_message(&crate::GreeterStatus::Ready),
