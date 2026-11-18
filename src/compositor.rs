@@ -187,6 +187,8 @@ struct ManagedWindow {
     minimized: bool,
     minimized_order: Option<u64>,
     workspace: u32,
+    /// Back-to-front stacking position retained while the window is unmapped.
+    stacking_order: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2538,6 +2540,16 @@ impl CompositorStateData {
 
     /// Makes the Space contain exactly the active workspace's live windows.
     fn remap_active_workspace(&mut self) {
+        // Preserve Smithay's actual back-to-front order before removing windows
+        // from the Space. Hidden windows keep their last known position until
+        // they are mapped again, even across multiple workspace switches.
+        let stacking_order = self.space.elements().cloned().collect::<Vec<_>>();
+        for (order, window) in stacking_order.iter().enumerate() {
+            if let Some(entry) = self.windows.iter_mut().find(|entry| entry.window == *window) {
+                entry.stacking_order = order as u64;
+            }
+        }
+
         // A client may acknowledge an in-flight resize after its window has
         // been moved to another workspace. Do not let that late commit map
         // the hidden window back into the active Space.
@@ -2569,7 +2581,7 @@ impl CompositorStateData {
             }
         }
 
-        let visible = self
+        let mut visible = self
             .windows
             .iter()
             .filter(|entry| entry.workspace == self.active_workspace && !entry.minimized)
@@ -2581,9 +2593,19 @@ impl CompositorStateData {
                     .unwrap_or(false)
                 })
             })
-            .map(|entry| (entry.window.clone(), entry.location))
+            .map(|entry| {
+                (
+                    entry.stacking_order,
+                    entry.id,
+                    entry.window.clone(),
+                    entry.location,
+                )
+            })
             .collect::<Vec<_>>();
-        for (window, location) in visible {
+        // map_element() always inserts at the top, so replay the saved order
+        // from back to front to reconstruct the exact stacking sequence.
+        visible.sort_by_key(|(order, id, _, _)| (*order, *id));
+        for (_, _, window, location) in visible {
             let content_location = self.content_location(&window, location);
             self.space.map_element(window, content_location, false);
         }
@@ -3597,6 +3619,7 @@ impl XdgShellHandler for CompositorStateData {
             minimized: false,
             minimized_order: None,
             workspace: self.active_workspace,
+            stacking_order: 0,
         });
         self.update_transient_parent(&surface);
 
