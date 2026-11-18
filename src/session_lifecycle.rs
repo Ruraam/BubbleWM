@@ -7,6 +7,9 @@
 
 use std::{io, process::ExitStatus, time::Duration};
 
+const WORKER_EXIT_TIMEOUT: Duration = Duration::from_secs(30);
+const WORKER_TERMINATION_GRACE: Duration = Duration::from_secs(1);
+
 use crate::{
     logind::ResolvedLogindSession,
     session_control::{SessionReady, SessionWorker, validate_session_ready_against},
@@ -18,6 +21,15 @@ pub trait SessionWorkerLifecycle {
     fn receive_session_ready(&mut self, timeout: Duration) -> io::Result<SessionReady>;
     fn approve_session(&mut self) -> io::Result<()>;
     fn wait(&mut self) -> io::Result<ExitStatus>;
+
+    fn wait_with_timeout(
+        &mut self,
+        timeout: Duration,
+        termination_grace: Duration,
+    ) -> io::Result<(ExitStatus, bool)> {
+        let _ = (timeout, termination_grace);
+        self.wait().map(|status| (status, false))
+    }
 }
 
 impl SessionWorkerLifecycle for SessionWorker {
@@ -35,6 +47,14 @@ impl SessionWorkerLifecycle for SessionWorker {
 
     fn wait(&mut self) -> io::Result<ExitStatus> {
         SessionWorker::wait(self)
+    }
+
+    fn wait_with_timeout(
+        &mut self,
+        timeout: Duration,
+        termination_grace: Duration,
+    ) -> io::Result<(ExitStatus, bool)> {
+        SessionWorker::wait_with_timeout(self, timeout, termination_grace)
     }
 }
 
@@ -79,17 +99,24 @@ where
         .approve_session()
         .map_err(|error| format!("impossible d'autoriser le démarrage de la session: {error}"))?;
 
-    let status = worker
-        .wait()
+    let (status, worker_timed_out) = worker
+        .wait_with_timeout(WORKER_EXIT_TIMEOUT, WORKER_TERMINATION_GRACE)
         .map_err(|error| format!("impossible d'attendre le nettoyage PAM du worker: {error}"))?;
 
-    // The worker has now closed PAM. Stop the trusted scope from outside it.
+    // The worker has now exited. Stop the trusted scope from outside it.
     stop_scope(&trusted.scope, scope_stop_timeout).map_err(|error| {
         format!(
             "impossible de terminer le scope logind {}: {error}",
             trusted.scope
         )
     })?;
+
+    if worker_timed_out {
+        return Err(format!(
+            "le worker n'a pas terminé son nettoyage PAM dans le délai de {} secondes; arrêt forcé effectué",
+            WORKER_EXIT_TIMEOUT.as_secs()
+        ));
+    }
 
     Ok(status.code().unwrap_or(1))
 }
@@ -105,6 +132,7 @@ mod tests {
         ready: io::Result<SessionReady>,
         approval: io::Result<()>,
         exit_status: io::Result<ExitStatus>,
+        wait_timed_out: bool,
         pid: libc::pid_t,
     }
 
@@ -137,6 +165,21 @@ mod tests {
                 Err(io::Error::other("worker already waited")),
             )
         }
+
+        fn wait_with_timeout(
+            &mut self,
+            timeout: Duration,
+            termination_grace: Duration,
+        ) -> io::Result<(ExitStatus, bool)> {
+            assert_eq!(timeout, WORKER_EXIT_TIMEOUT);
+            assert_eq!(termination_grace, WORKER_TERMINATION_GRACE);
+            self.events.borrow_mut().push("wait");
+            std::mem::replace(
+                &mut self.exit_status,
+                Err(io::Error::other("worker already waited")),
+            )
+            .map(|status| (status, self.wait_timed_out))
+        }
     }
 
     fn sample_ready() -> SessionReady {
@@ -168,6 +211,7 @@ mod tests {
             ready: Ok(sample_ready()),
             approval: Ok(()),
             exit_status: Ok(ExitStatus::from_raw(0)),
+            wait_timed_out: false,
             pid: 4242,
         }
     }
@@ -432,6 +476,34 @@ mod tests {
         );
 
         assert_eq!(result.unwrap(), 1);
+        assert_eq!(
+            *events.borrow(),
+            ["metadata", "resolve", "approve", "wait", "stop_scope"]
+        );
+    }
+
+    #[test]
+    fn worker_timeout_still_stops_scope_before_reporting_forced_termination() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let mut worker = mock_worker(events.clone());
+        worker.wait_timed_out = true;
+
+        let result = supervise_session(
+            &mut worker,
+            Duration::from_secs(10),
+            Duration::from_secs(15),
+            |_| {
+                events.borrow_mut().push("resolve");
+                Ok(trusted(&sample_ready()))
+            },
+            |scope, _| {
+                assert_eq!(scope, "session-c7.scope");
+                events.borrow_mut().push("stop_scope");
+                Ok(())
+            },
+        );
+
+        assert!(result.unwrap_err().contains("nettoyage PAM"));
         assert_eq!(
             *events.borrow(),
             ["metadata", "resolve", "approve", "wait", "stop_scope"]
