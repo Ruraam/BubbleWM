@@ -1017,6 +1017,7 @@ mod tests {
 
     #[test]
     fn managed_process_is_terminated_on_unexpected_supervisor_data() {
+        use std::io::Write;
         use std::os::unix::process::CommandExt;
         use std::os::unix::process::ExitStatusExt;
 
