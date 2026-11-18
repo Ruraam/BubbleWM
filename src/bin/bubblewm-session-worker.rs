@@ -5,9 +5,11 @@
 
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Read, Write};
+use std::os::unix::net::UnixStream;
+use std::process::ExitStatus;
 use std::time::Duration;
 
-use bubblewm::auth::PamLoginSession;
+use bubblewm::auth::{ManagedUserProcess, PamLoginSession};
 use bubblewm::session_control::{
     read_supervisor_approval_with_timeout, take_worker_channel, validate_password_pipe_fd,
     write_session_ready,
@@ -77,9 +79,11 @@ fn run() -> Result<i32, String> {
 
     let mut process =
         session.spawn_user_command(OsStr::new(COMPOSITOR), &[OsString::from(SESSION_CONFIG)])?;
-    let status = process
-        .wait()
-        .map_err(|error| format!("impossible d'attendre la session utilisateur: {error}"))?;
+    let (status, supervisor_lost) = wait_for_compositor_or_supervisor(
+        &mut process,
+        &mut channel,
+    )
+    .map_err(|error| format!("surveillance de la session impossible: {error}"))?;
     cleanup_session(
         || {
             let result = process
@@ -91,7 +95,70 @@ fn run() -> Result<i32, String> {
         },
         || session.close(),
     )?;
+    if supervisor_lost {
+        return Err("le superviseur a disparu; la session utilisateur a été arrêtée".into());
+    }
     Ok(status.code().unwrap_or(1))
+}
+
+/// Waits for the compositor while retaining the supervisor-liveness
+/// channel. EOF, hangup, or unexpected post-approval data means the privileged
+/// supervisor disappeared or the protocol was violated; the caller then
+/// performs ordinary process-group and PAM cleanup.
+fn wait_for_compositor_or_supervisor(
+    process: &mut ManagedUserProcess,
+    channel: &mut UnixStream,
+) -> io::Result<(ExitStatus, bool)> {
+    loop {
+        if let Some(status) = process.try_wait()? {
+            return Ok((status, false));
+        }
+
+        let mut descriptor = libc::pollfd {
+            fd: std::os::fd::AsRawFd::as_raw_fd(channel),
+            events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+            revents: 0,
+        };
+        let result = unsafe { libc::poll(&mut descriptor, 1, 100) };
+        if result < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
+        }
+        if result == 0 {
+            continue;
+        }
+        if descriptor.revents & libc::POLLNVAL != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "descripteur de contrôle invalide",
+            ));
+        }
+
+        if descriptor.revents & (libc::POLLHUP | libc::POLLERR) != 0 {
+            return process
+                .terminate(TERMINATION_GRACE)
+                .map(|status| (status, true));
+        }
+
+        if descriptor.revents & libc::POLLIN != 0 {
+            // No messages are valid after the one-way approval. Any readable
+            // byte is therefore a protocol violation; EOF is supervisor loss.
+            let mut unexpected = [0_u8; 1];
+            match channel.read(&mut unexpected) {
+                Ok(0) | Ok(_) => {
+                    return process
+                        .terminate(TERMINATION_GRACE)
+                        .map(|status| (status, true));
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+                Err(error) => return Err(error),
+            }
+        }
+    }
 }
 
 /// Runs both cleanup stages, even when terminating user processes fails.
