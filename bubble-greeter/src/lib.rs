@@ -172,7 +172,10 @@ impl GreeterModel {
                 ) {
                     return GreeterAction::None;
                 }
-                let available: Vec<usize> = self.users.iter().enumerate()
+                let available: Vec<usize> = self
+                    .users
+                    .iter()
+                    .enumerate()
                     .filter_map(|(index, user)| user.available.then_some(index))
                     .collect();
                 if available.is_empty() {
@@ -180,7 +183,9 @@ impl GreeterModel {
                     return GreeterAction::None;
                 }
                 let current = match self.focus {
-                    Some(GreeterFocus::Account(index)) => available.iter().position(|i| *i == index),
+                    Some(GreeterFocus::Account(index)) => {
+                        available.iter().position(|i| *i == index)
+                    },
                     Some(GreeterFocus::Submit) => Some(available.len()),
                     None => None,
                 };
@@ -246,7 +251,7 @@ impl GreeterModel {
             view::GreeterHitTarget::Submit => {
                 self.focus = Some(GreeterFocus::Submit);
                 self.submit()
-            },
+            }
         }
     }
 
