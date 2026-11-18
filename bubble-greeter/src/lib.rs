@@ -134,6 +134,10 @@ impl GreeterModel {
         self.selected.and_then(|i| self.users.get(i))
     }
 
+    pub fn selected_index(&self) -> Option<usize> {
+        self.selected
+    }
+
     pub fn status(&self) -> &GreeterStatus {
         &self.status
     }
