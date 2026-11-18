@@ -553,10 +553,17 @@ impl SessionWorker {
         timeout: Duration,
         termination_grace: Duration,
     ) -> io::Result<(std::process::ExitStatus, bool)> {
-        self.channel.take();
+        // Keep the control socket open for the entire desktop session. The
+        // worker monitors peer loss and tears down its process group/PAM
+        // session if this supervisor disappears unexpectedly.
         if let Some(status) = self.process.wait_timeout(timeout)? {
+            self.channel.take();
             return Ok((status, false));
         }
+
+        // On timeout, close the channel first so a worker blocked on protocol
+        // input can unwind before we escalate to TERM/KILL.
+        self.channel.take();
         self.process
             .terminate_and_reap(termination_grace)
             .map(|status| (status, true))
@@ -631,7 +638,7 @@ impl SessionWorker {
                 "cannot approve a session before receiving worker metadata",
             ));
         }
-        let Some(mut channel) = self.channel.take() else {
+        let Some(channel) = self.channel.as_mut() else {
             return Err(io::Error::new(
                 io::ErrorKind::NotConnected,
                 "worker channel is closed",
@@ -641,10 +648,11 @@ impl SessionWorker {
             .write_all(SUPERVISOR_APPROVAL)
             .and_then(|()| channel.flush())
         {
-            drop(channel);
             let _ = self.abort_and_reap(Duration::from_secs(1));
             return Err(error);
         }
+        // Do not close the channel here: its lifetime is the worker's
+        // supervisor-liveness signal after compositor startup.
         Ok(())
     }
 
