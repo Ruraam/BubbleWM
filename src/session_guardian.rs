@@ -86,10 +86,10 @@ impl PidFd {
 
 /// Transfers exactly one pidfd over a private Unix stream using SCM_RIGHTS.
 pub fn send_pidfd(channel: &UnixStream, pidfd: &PidFd) -> io::Result<()> {
-    let mut byte = *PIDFD_MARKER;
+    let mut marker = *PIDFD_MARKER;
     let mut iov = libc::iovec {
-        iov_base: byte.as_mut_ptr().cast(),
-        iov_len: PIDFD_MARKER.len(),
+        iov_base: marker.as_mut_ptr().cast(),
+        iov_len: marker.len(),
     };
     let mut control = [0_usize; 8];
     let space = unsafe { libc::CMSG_SPACE(std::mem::size_of::<RawFd>() as u32) as usize };
@@ -108,25 +108,23 @@ pub fn send_pidfd(channel: &UnixStream, pidfd: &PidFd) -> io::Result<()> {
         (*header).cmsg_len = libc::CMSG_LEN(std::mem::size_of::<RawFd>() as u32) as usize;
         std::ptr::write_unaligned(libc::CMSG_DATA(header).cast::<RawFd>(), pidfd.as_raw_fd());
     }
+
     let sent = unsafe { libc::sendmsg(channel.as_raw_fd(), &message, libc::MSG_NOSIGNAL) };
     if sent < 0 {
         return Err(io::Error::last_os_error());
     }
-    if sent != PIDFD_MARKER.len() as isize {
-        return Err(io::Error::new(
-            io::ErrorKind::WriteZero,
-            "short pidfd transfer",
-        ));
+    if sent == 0 {
+        return Err(io::Error::new(io::ErrorKind::WriteZero, "empty pidfd transfer"));
     }
-    Ok(())
+    channel.write_all(&marker[sent as usize..])
 }
 
 /// Receives one pidfd and rejects missing, truncated, or unexpected ancillary data.
-pub fn receive_pidfd(channel: &UnixStream) -> io::Result<PidFd> {
-    let mut byte = [0_u8; 8];
+pub fn receive_pidfd(channel: &mut UnixStream) -> io::Result<PidFd> {
+    let mut marker = [0_u8; PIDFD_MARKER.len()];
     let mut iov = libc::iovec {
-        iov_base: byte.as_mut_ptr().cast(),
-        iov_len: PIDFD_MARKER.len(),
+        iov_base: marker.as_mut_ptr().cast(),
+        iov_len: marker.len(),
     };
     let mut control = [0_usize; 8];
     let mut message: libc::msghdr = unsafe { std::mem::zeroed() };
@@ -134,43 +132,80 @@ pub fn receive_pidfd(channel: &UnixStream) -> io::Result<PidFd> {
     message.msg_iovlen = 1;
     message.msg_control = control.as_mut_ptr().cast();
     message.msg_controllen = std::mem::size_of_val(&control);
-    let received =
-        unsafe { libc::recvmsg(channel.as_raw_fd(), &mut message, libc::MSG_CMSG_CLOEXEC) };
+
+    let received = unsafe {
+        libc::recvmsg(
+            channel.as_raw_fd(),
+            &mut message,
+            libc::MSG_CMSG_CLOEXEC | libc::MSG_WAITALL,
+        )
+    };
     if received < 0 {
         return Err(io::Error::last_os_error());
     }
-    if received != PIDFD_MARKER.len() as isize
-        || &byte != PIDFD_MARKER
-        || message.msg_flags & libc::MSG_CTRUNC != 0
-    {
+    if received == 0 {
         return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "invalid pidfd transfer frame",
+            io::ErrorKind::UnexpectedEof,
+            "pidfd transfer channel closed",
         ));
     }
-    let header = unsafe { libc::CMSG_FIRSTHDR(&message) };
-    if header.is_null()
-        || unsafe {
-            (*header).cmsg_level != libc::SOL_SOCKET
-                || (*header).cmsg_type != libc::SCM_RIGHTS
-                || (*header).cmsg_len
-                    != libc::CMSG_LEN(std::mem::size_of::<RawFd>() as u32) as usize
+    if received < marker.len() as isize {
+        channel.read_exact(&mut marker[received as usize..])?;
+    }
+
+    let mut received_fd = None;
+    let mut ancillary_invalid = message.msg_flags & libc::MSG_CTRUNC != 0;
+    let mut header_count = 0_usize;
+    unsafe {
+        let mut header = libc::CMSG_FIRSTHDR(&message);
+        while !header.is_null() {
+            header_count += 1;
+            if (*header).cmsg_level == libc::SOL_SOCKET
+                && (*header).cmsg_type == libc::SCM_RIGHTS
+            {
+                let minimum = libc::CMSG_LEN(0) as usize;
+                if (*header).cmsg_len < minimum {
+                    ancillary_invalid = true;
+                } else {
+                    let payload_len = (*header).cmsg_len - minimum;
+                    if payload_len == 0 || payload_len % std::mem::size_of::<RawFd>() != 0 {
+                        ancillary_invalid = true;
+                    } else {
+                        let count = payload_len / std::mem::size_of::<RawFd>();
+                        let data = libc::CMSG_DATA(header).cast::<RawFd>();
+                        for index in 0..count {
+                            let fd = std::ptr::read_unaligned(data.add(index));
+                            if received_fd.is_none() && count == 1 && header_count == 1 {
+                                received_fd = Some(fd);
+                            } else {
+                                libc::close(fd);
+                                ancillary_invalid = true;
+                            }
+                        }
+                    }
+                }
+            } else {
+                ancillary_invalid = true;
+            }
+            header = libc::CMSG_NXTHDR(&message, header);
         }
-        || !unsafe { libc::CMSG_NXTHDR(&message, header) }.is_null()
-    {
+    }
+
+    if received != marker.len() as isize || &marker != PIDFD_MARKER {
+        ancillary_invalid = true;
+    }
+    if ancillary_invalid || header_count != 1 || received_fd.is_none() {
+        if let Some(fd) = received_fd {
+            unsafe { libc::close(fd) };
+        }
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "unexpected ancillary data",
+            "invalid pidfd transfer frame or ancillary data",
         ));
     }
-    let fd = unsafe { std::ptr::read_unaligned(libc::CMSG_DATA(header).cast::<RawFd>()) };
-    if fd < 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "invalid received pidfd",
-        ));
-    }
-    // SAFETY: SCM_RIGHTS installed a new descriptor owned by this process.
+
+    let fd = received_fd.expect("validated pidfd descriptor");
+    // SAFETY: the single SCM_RIGHTS descriptor is now owned by this process.
     let owned = unsafe { OwnedFd::from_raw_fd(fd) };
     let flags = unsafe { libc::fcntl(owned.as_raw_fd(), libc::F_GETFD) };
     if flags < 0
