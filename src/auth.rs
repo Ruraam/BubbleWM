@@ -962,4 +962,80 @@ mod tests {
             Some(libc::ESRCH)
         );
     }
+
+    fn spawn_exited_leader_with_background_descendant() -> (ManagedUserProcess, libc::pid_t, tempfile::TempDir) {
+        use std::os::unix::process::CommandExt;
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let pid_file = directory.path().join("descendant.pid");
+        let child = Command::new("/bin/sh")
+            .arg("-c")
+            .arg("sleep 30 & echo $! > \"$PID_FILE\"; exit 0")
+            .env("PID_FILE", &pid_file)
+            .process_group(0)
+            .spawn()
+            .expect("spawn shell with background descendant");
+        let mut process = ManagedUserProcess::new(child);
+        assert!(process.wait().expect("wait for session leader").success());
+
+        let descendant = std::fs::read_to_string(&pid_file)
+            .expect("read descendant PID")
+            .trim()
+            .parse::<libc::pid_t>()
+            .expect("parse descendant PID");
+        assert_eq!(
+            unsafe { libc::kill(descendant, 0) },
+            0,
+            "background descendant should outlive its leader"
+        );
+
+        (process, descendant, directory)
+    }
+
+    fn assert_process_stopped(pid: libc::pid_t) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+                Ok(stat) => {
+                    let state = stat
+                        .rsplit_once(')')
+                        .and_then(|(_, fields)| fields.split_whitespace().next());
+                    if state == Some("Z") {
+                        return;
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+                Err(error) => panic!("inspect descendant process: {error}"),
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "descendant process {pid} is still running"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn managed_process_terminate_kills_descendants_after_leader_exits() {
+        let (mut process, descendant, _directory) =
+            spawn_exited_leader_with_background_descendant();
+
+        // The direct child has already been reaped. Cleanup must still target
+        // the process group so a background descendant cannot outlive the session.
+        process
+            .terminate(Duration::from_millis(100))
+            .expect("terminate remaining session process group");
+
+        assert_process_stopped(descendant);
+    }
+
+    #[test]
+    fn managed_process_drop_kills_descendants_after_leader_exits() {
+        let (process, descendant, _directory) =
+            spawn_exited_leader_with_background_descendant();
+
+        drop(process);
+
+        assert_process_stopped(descendant);
+    }
 }
