@@ -17,6 +17,7 @@ pub mod menu;
 pub mod notifications;
 pub mod render;
 pub mod session_control;
+pub mod session_guardian;
 pub mod session_lifecycle;
 pub mod status;
 pub mod theme;
