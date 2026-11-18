@@ -97,6 +97,7 @@ int main(int argc, char **argv) {
     pam_handle_t *pamh = NULL;
     struct passwd *account;
     char *session_id = NULL;
+    char *pid_session = NULL;
     char *scope = NULL;
     const char *runtime_dir;
     const char *tty;
@@ -152,7 +153,7 @@ int main(int argc, char **argv) {
     if (pam_status != PAM_SUCCESS)
         goto cleanup;
 
-    session_id = sd_getenv("XDG_SESSION_ID");
+    session_id = (char *)pam_getenv(pamh, "XDG_SESSION_ID");
     runtime_dir = pam_getenv(pamh, "XDG_RUNTIME_DIR");
     if (session_id == NULL || session_id[0] == '\0' ||
         runtime_dir == NULL || validate_runtime_dir(runtime_dir, account->pw_uid) != 0) {
@@ -200,7 +201,8 @@ cleanup:
         }
     }
     wipe(&data, sizeof(data));
-    free(session_id);
+    /* session_id is owned by PAM. */
+    free(pid_session);
     free(scope);
     return status;
 }
