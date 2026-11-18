@@ -21,9 +21,12 @@ independently resolved scope and waits until `ActiveState` becomes `inactive`.
 The packaging staging target now includes the Debian PAM profile and the
 root-managed session configuration, while refusing to overwrite an existing
 live PAM service during a direct install. A real-PAM/logind probe and disposable
-Debian 13 VM runner are available under `tests/systemd-vm`. The probe has not
-yet been executed in a real Debian VM; greeter/VT handoff and end-to-end
-compositor/descendant containment tests remain outstanding.
+Debian 13 VM runner are available under `tests/systemd-vm`. The VM harness now
+also exercises invalid-password rejection and supervisor-owned scope cleanup
+of a child that escapes its original process group with `setsid()`. The
+harness has not yet been executed in a real Debian VM; greeter/VT handoff,
+full compositor startup, and supervisor crash-recovery tests remain
+outstanding.
 
 ## Ownership boundaries
 
@@ -157,8 +160,9 @@ Before production use, extend the systemd VM integration tests to cover:
 - successful PAM open and close with a real `pam_systemd` session;
 - correct `XDG_SESSION_ID`, `XDG_RUNTIME_DIR`, seat and VT metadata;
 - compositor and ordinary descendants placed in the same session scope;
-- a descendant that deliberately escapes its process group still stopped by
-  supervisor-owned scope cleanup;
+- [x] a descendant that deliberately escapes its process group stopped by
+  supervisor-owned scope cleanup (VM harness implemented; runtime execution
+  still pending);
 - compositor crash, failed exec, failed PAM setup, worker crash and supervisor
   restart;
 - logout when `KillUserProcesses=yes` and when it is `no`;
