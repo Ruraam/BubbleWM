@@ -2545,7 +2545,11 @@ impl CompositorStateData {
         // they are mapped again, even across multiple workspace switches.
         let stacking_order = self.space.elements().cloned().collect::<Vec<_>>();
         for (order, window) in stacking_order.iter().enumerate() {
-            if let Some(entry) = self.windows.iter_mut().find(|entry| entry.window == *window) {
+            if let Some(entry) = self
+                .windows
+                .iter_mut()
+                .find(|entry| entry.window == *window)
+            {
                 entry.stacking_order = order as u64;
             }
         }
