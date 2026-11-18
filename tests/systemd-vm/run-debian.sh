@@ -33,9 +33,11 @@ fi
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential libpam0g-dev libsystemd-dev
 
-if [ ! -e /etc/pam.d/bubblewm ]; then
-    install -m 0644 "$(dirname "$0")/../../packaging/pam/bubblewm.debian" /etc/pam.d/bubblewm
+if [ -e /etc/pam.d/bubblewm ]; then
+    echo "/etc/pam.d/bubblewm already exists; refusing to test an unknown host policy." >&2
+    exit 1
 fi
+install -m 0644 "$(dirname "$0")/../../packaging/pam/bubblewm.debian" /etc/pam.d/bubblewm
 
 test_user="bwm-pam-test"
 test_password=$(openssl rand -hex 24)
@@ -84,7 +86,7 @@ fi
 
 session_id=$(sed -n 's/^SESSION_ID=\([^ ]*\).*/\1/p' "$test_log")
 scope=$(sed -n 's/^SESSION_ID=[^ ]* SCOPE=\([^ ]*\).*/\1/p' "$test_log")
-[ -n "$session_id" ] && [ -n "$scope ] || {
+[ -n "$session_id" ] && [ -n "$scope" ] || {
     echo "Probe returned malformed session metadata." >&2
     exit 1
 }
