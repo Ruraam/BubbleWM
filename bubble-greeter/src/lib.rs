@@ -103,6 +103,8 @@ pub enum GreeterKey {
     Up,
     Down,
     Enter,
+    Tab,
+    BackTab,
 }
 
 /// UI state only. It never accepts or stores a password.
@@ -110,6 +112,7 @@ pub enum GreeterKey {
 pub struct GreeterModel {
     users: Vec<LocalUser>,
     selected: Option<usize>,
+    focus: Option<GreeterFocus>,
     status: GreeterStatus,
 }
 
@@ -130,6 +133,7 @@ impl GreeterModel {
         Ok(Self {
             users,
             selected,
+            focus: selected.map(GreeterFocus::Account),
             status: GreeterStatus::Ready,
         })
     }
@@ -150,6 +154,10 @@ impl GreeterModel {
         &self.status
     }
 
+    pub fn focus(&self) -> Option<GreeterFocus> {
+        self.focus
+    }
+
     /// Handles basic account navigation and submit keys without reading secrets.
     ///
     /// Up/down skip unavailable accounts and wrap around the visible list.
@@ -157,6 +165,42 @@ impl GreeterModel {
     pub fn handle_key(&mut self, key: GreeterKey) -> GreeterAction {
         match key {
             GreeterKey::Enter => self.submit(),
+            GreeterKey::Tab | GreeterKey::BackTab => {
+                if !matches!(
+                    self.status,
+                    GreeterStatus::Ready | GreeterStatus::Error(_) | GreeterStatus::SessionEnded
+                ) {
+                    return GreeterAction::None;
+                }
+                let available: Vec<usize> = self.users.iter().enumerate()
+                    .filter_map(|(index, user)| user.available.then_some(index))
+                    .collect();
+                if available.is_empty() {
+                    self.focus = Some(GreeterFocus::Submit);
+                    return GreeterAction::None;
+                }
+                let current = match self.focus {
+                    Some(GreeterFocus::Account(index)) => available.iter().position(|i| *i == index),
+                    Some(GreeterFocus::Submit) => Some(available.len()),
+                    None => None,
+                };
+                let next = match (key, current) {
+                    (GreeterKey::Tab, Some(index)) => (index + 1) % (available.len() + 1),
+                    (GreeterKey::BackTab, Some(0)) => available.len(),
+                    (GreeterKey::BackTab, Some(index)) => index - 1,
+                    (GreeterKey::Tab, None) => 0,
+                    (GreeterKey::BackTab, None) => available.len(),
+                    _ => unreachable!(),
+                };
+                if next == available.len() {
+                    self.focus = Some(GreeterFocus::Submit);
+                } else {
+                    let index = available[next];
+                    self.selected = Some(index);
+                    self.focus = Some(GreeterFocus::Account(index));
+                }
+                GreeterAction::None
+            }
             GreeterKey::Up | GreeterKey::Down => {
                 if !matches!(
                     self.status,
@@ -179,6 +223,7 @@ impl GreeterModel {
                     };
                     if self.users[index].available {
                         self.selected = Some(index);
+                        self.focus = Some(GreeterFocus::Account(index));
                         self.status = GreeterStatus::Ready;
                         break;
                     }
@@ -198,7 +243,10 @@ impl GreeterModel {
                 self.select_user(index);
                 GreeterAction::None
             }
-            view::GreeterHitTarget::Submit => self.submit(),
+            view::GreeterHitTarget::Submit => {
+                self.focus = Some(GreeterFocus::Submit);
+                self.submit()
+            },
         }
     }
 
@@ -213,6 +261,7 @@ impl GreeterModel {
             return false;
         }
         self.selected = Some(index);
+        self.focus = Some(GreeterFocus::Account(index));
         self.status = GreeterStatus::Ready;
         true
     }
