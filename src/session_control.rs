@@ -543,6 +543,25 @@ impl SessionWorker {
         self.process.wait()
     }
 
+    /// Waits for graceful worker/PAM cleanup up to `timeout`, then escalates
+    /// through SIGTERM and SIGKILL using the supplied termination grace.
+    ///
+    /// Returns whether the graceful deadline was exceeded. The private
+    /// channel is closed first so a worker blocked on approval can unwind.
+    pub fn wait_with_timeout(
+        &mut self,
+        timeout: Duration,
+        termination_grace: Duration,
+    ) -> io::Result<(std::process::ExitStatus, bool)> {
+        self.channel.take();
+        if let Some(status) = self.process.wait_timeout(timeout)? {
+            return Ok((status, false));
+        }
+        self.process
+            .terminate_and_reap(termination_grace)
+            .map(|status| (status, true))
+    }
+
     /// Receives the worker's single bounded session-metadata frame.
     ///
     /// The returned values are untrusted claims: the privileged supervisor
