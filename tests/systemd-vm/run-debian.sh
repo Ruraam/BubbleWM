@@ -6,7 +6,7 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-for command in apt-get cc loginctl systemctl useradd userdel chpasswd openssl; do
+for command in apt-get cc loginctl systemctl useradd userdel chpasswd openssl grep sed; do
     command -v "$command" >/dev/null 2>&1 || {
         echo "Missing command: $command" >&2
         exit 1
@@ -15,6 +15,12 @@ done
 
 if ! systemctl is-active --quiet systemd-logind.service; then
     echo "systemd-logind.service must be active; boot a normal Debian 13 VM." >&2
+    exit 1
+fi
+
+if [ ! -f /etc/pam.d/login ] ||
+   ! grep -Eq '^[[:space:]]*@include[[:space:]]+common-session|^[[:space:]]*session[[:space:]]+include[[:space:]]+common-session' /etc/pam.d/login; then
+    echo "Debian login PAM stack must include common-session." >&2
     exit 1
 fi
 
@@ -33,13 +39,6 @@ fi
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential libpam0g-dev libsystemd-dev
 
-if [ -e /etc/pam.d/bubblewm ]; then
-    echo "/etc/pam.d/bubblewm already exists; refusing to test an unknown host policy." >&2
-    exit 1
-fi
-install -m 0644 "$(dirname "$0")/../../packaging/pam/bubblewm.debian" /etc/pam.d/bubblewm
-pam_service_created=1
-
 test_user="bwm-pam-test"
 test_password=$(openssl rand -hex 24)
 test_log=$(mktemp)
@@ -55,12 +54,21 @@ cleanup() {
     fi
     rm -f "$probe" "$test_log" "$test_log.state"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 if id "$test_user" >/dev/null 2>&1; then
     echo "Refusing to reuse existing account $test_user." >&2
     exit 1
 fi
+if [ -e /etc/pam.d/bubblewm ]; then
+    echo "/etc/pam.d/bubblewm already exists; refusing to test an unknown host policy." >&2
+    exit 1
+fi
+
+install -m 0644 "$(dirname "$0")/../../packaging/pam/bubblewm.debian" /etc/pam.d/bubblewm
+pam_service_created=1
+
 useradd --create-home --shell /bin/bash "$test_user"
 test_user_created=1
 printf '%s:%s\n' "$test_user" "$test_password" | chpasswd
@@ -69,7 +77,7 @@ cc -std=c11 -O2 -Wall -Wextra -Werror \
     "$(dirname "$0")/pam-session-probe.c" -o "$probe" -lpam -lsystemd
 
 # A real VT is required for a full seat/VT assertion. /dev/tty1 is supplied
-# as PAM_TTY here; the VM procedure should be launched from its local console.
+# as PAM_TTY here; launch from the VM's local console for meaningful VT data.
 printf '%s\n' "$test_password" | BUBBLEWM_TEST_HOLD_SECONDS=8 \
     "$probe" "$test_user" /dev/tty1 >"$test_log" 2>&1 &
 probe_pid=$!
@@ -121,5 +129,4 @@ while systemctl is-active --quiet "$scope"; do
     sleep 0.1
 done
 
-rm -f "$test_log.state"
 echo "PASS: real PAM authentication/open/close and logind scope lifecycle ($session_id)."
