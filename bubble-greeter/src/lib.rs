@@ -107,6 +107,13 @@ pub enum GreeterKey {
     BackTab,
 }
 
+/// Keyboard focus target for the greeter controls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GreeterFocus {
+    Account(usize),
+    Submit,
+}
+
 /// UI state only. It never accepts or stores a password.
 #[derive(Debug, Clone)]
 pub struct GreeterModel {
