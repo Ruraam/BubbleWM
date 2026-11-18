@@ -1854,17 +1854,22 @@ impl CompositorStateData {
             index += 1;
         }
 
-        let family_windows = self
-            .windows
+        // Raise parents before descendants so transient dialogs remain above
+        // their owners, even when a child was created before its parent.
+        let family_windows = family
             .iter()
-            .filter(|entry| {
-                !entry.minimized
-                    && entry
-                        .window
-                        .toplevel()
-                        .is_some_and(|surface| family.contains(surface.wl_surface()))
+            .filter_map(|surface| {
+                self.windows
+                    .iter()
+                    .find(|entry| {
+                        !entry.minimized
+                            && entry
+                                .window
+                                .toplevel()
+                                .is_some_and(|toplevel| toplevel.wl_surface() == surface)
+                    })
+                    .map(|entry| entry.window.clone())
             })
-            .map(|entry| entry.window.clone())
             .collect::<Vec<_>>();
 
         for member in family_windows {
