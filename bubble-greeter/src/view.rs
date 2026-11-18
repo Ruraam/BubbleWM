@@ -84,6 +84,52 @@ impl GreeterLayout {
             },
         }
     }
+
+    /// Returns the clickable rectangle for an account row.
+    ///
+    /// Rows divide the available account region evenly. The final row absorbs
+    /// any remainder, so hit testing covers the full region without gaps.
+    pub fn account_rect(self, index: usize, account_count: usize) -> Option<Rect> {
+        if account_count == 0
+            || account_count > crate::MAX_VISIBLE_USERS
+            || index >= account_count
+            || self.accounts.height == 0
+        {
+            return None;
+        }
+
+        let count = account_count as u64;
+        let height = u64::from(self.accounts.height);
+        let top = height * index as u64 / count;
+        let bottom = height * (index as u64 + 1) / count;
+        if bottom == top {
+            return None;
+        }
+
+        Some(Rect {
+            x: self.accounts.x,
+            y: self.accounts.y + top as u32,
+            width: self.accounts.width,
+            height: (bottom - top) as u32,
+        })
+    }
+
+    /// Resolves pointer coordinates to an account or the primary action.
+    pub fn hit_test(self, x: u32, y: u32, account_count: usize) -> Option<GreeterHitTarget> {
+        for index in 0..account_count.min(crate::MAX_VISIBLE_USERS) {
+            if self.account_rect(index, account_count)?.contains(x, y) {
+                return Some(GreeterHitTarget::Account(index));
+            }
+        }
+        self.action.contains(x, y).then_some(GreeterHitTarget::Submit)
+    }
+}
+
+/// Interactive regions exposed to a frontend event handler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GreeterHitTarget {
+    Account(usize),
+    Submit,
 }
 
 /// User-facing copy for a state in the presentation model.
