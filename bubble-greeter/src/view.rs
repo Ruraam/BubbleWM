@@ -580,7 +580,6 @@ mod tests {
         assert!(!button.focused);
 
         model.handle_key(crate::GreeterKey::Tab);
-        model.handle_key(crate::GreeterKey::Tab);
         let focused_button = primary_button(&model, layout, palette);
         assert!(focused_button.focused);
         assert!(account_rows(&model, layout).iter().all(|row| !row.focused));
