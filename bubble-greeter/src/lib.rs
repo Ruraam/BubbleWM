@@ -436,6 +436,10 @@ mod tests {
         assert_eq!(model.handle_key(GreeterKey::Up), GreeterAction::None);
         assert_eq!(model.selected_user().unwrap().username(), "carol");
 
+        assert_eq!(model.handle_key(GreeterKey::Enter), GreeterAction::None);
+        assert_eq!(model.status(), &GreeterStatus::Ready);
+        assert_eq!(model.handle_key(GreeterKey::Tab), GreeterAction::None);
+        assert_eq!(model.focus(), Some(GreeterFocus::Submit));
         assert_eq!(
             model.handle_key(GreeterKey::Enter),
             GreeterAction::SubmitLogin {
