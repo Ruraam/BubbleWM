@@ -98,12 +98,7 @@ where
 mod tests {
     use super::*;
     use crate::session_control::SessionIdentity;
-    use std::{
-        cell::RefCell,
-        io,
-        os::unix::process::ExitStatusExt,
-        rc::Rc,
-    };
+    use std::{cell::RefCell, io, os::unix::process::ExitStatusExt, rc::Rc};
 
     struct MockWorker {
         events: Rc<RefCell<Vec<&'static str>>>,
@@ -211,7 +206,10 @@ mod tests {
     fn metadata_failure_never_resolves_or_approves_a_session() {
         let events = Rc::new(RefCell::new(Vec::new()));
         let mut worker = mock_worker(events.clone());
-        worker.ready = Err(io::Error::new(io::ErrorKind::UnexpectedEof, "worker exited"));
+        worker.ready = Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "worker exited",
+        ));
 
         let result = supervise_session(
             &mut worker,
