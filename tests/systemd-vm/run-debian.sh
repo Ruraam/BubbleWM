@@ -38,15 +38,22 @@ if [ -e /etc/pam.d/bubblewm ]; then
     exit 1
 fi
 install -m 0644 "$(dirname "$0")/../../packaging/pam/bubblewm.debian" /etc/pam.d/bubblewm
+pam_service_created=1
 
 test_user="bwm-pam-test"
 test_password=$(openssl rand -hex 24)
 test_log=$(mktemp)
 probe=$(mktemp)
+test_user_created=0
+pam_service_created=0
 cleanup() {
-    if [ -n "${probe:-}" ]; then rm -f "$probe"; fi
-    if [ -n "${test_log:-}" ]; then rm -f "$test_log"; fi
-    userdel -r "$test_user" >/dev/null 2>&1 || true
+    if [ "$test_user_created" -eq 1 ]; then
+        userdel -r "$test_user" >/dev/null 2>&1 || true
+    fi
+    if [ "$pam_service_created" -eq 1 ]; then
+        rm -f /etc/pam.d/bubblewm
+    fi
+    rm -f "$probe" "$test_log" "$test_log.state"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -55,6 +62,7 @@ if id "$test_user" >/dev/null 2>&1; then
     exit 1
 fi
 useradd --create-home --shell /bin/bash "$test_user"
+test_user_created=1
 printf '%s:%s\n' "$test_user" "$test_password" | chpasswd
 
 cc -std=c11 -O2 -Wall -Wextra -Werror \
