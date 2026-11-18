@@ -6,7 +6,7 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-for command in apt-get cc loginctl systemctl useradd userdel chpasswd openssl grep sed; do
+for command in apt-get awk cc loginctl systemd-analyze systemctl useradd userdel chpasswd openssl grep sed; do
     command -v "$command" >/dev/null 2>&1 || {
         echo "Missing command: $command" >&2
         exit 1
@@ -44,6 +44,55 @@ test_password=$(openssl rand -hex 24)
 test_log=$(mktemp)
 probe=$(mktemp)
 test_tmpdir=$(mktemp -d)
+logind_config="$test_tmpdir/logind.conf"
+systemd-analyze cat-config systemd/logind.conf >"$logind_config"
+kill_user_processes=$(awk -F= '
+    /^[[:space:]]*KillUserProcesses[[:space:]]*=/ {
+        value = $2
+        sub(/[[:space:]]*#.*/, "", value)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+    }
+    END { print value == "" ? "yes" : value }
+' "$logind_config")
+kill_only_users=$(awk -F= '
+    /^[[:space:]]*KillOnlyUsers[[:space:]]*=/ {
+        value = $2
+        sub(/[[:space:]]*#.*/, "", value)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+    }
+    END { print value }
+' "$logind_config")
+kill_exclude_users=$(awk -F= '
+    /^[[:space:]]*KillExcludeUsers[[:space:]]*=/ {
+        value = $2
+        sub(/[[:space:]]*#.*/, "", value)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+    }
+    END { print value }
+' "$logind_config")
+case "$kill_user_processes" in
+    yes|true|1|on) kill_user_processes=yes ;;
+    no|false|0|off) kill_user_processes=no ;;
+    *)
+        echo "Unrecognized effective KillUserProcesses value: $kill_user_processes" >&2
+        exit 1
+        ;;
+esac
+if [ "${BUBBLEWM_EXPECT_KILL_USER_PROCESSES:-}" != "$kill_user_processes" ]; then
+    echo "Set BUBBLEWM_EXPECT_KILL_USER_PROCESSES=$kill_user_processes to match the active logind policy." >&2
+    exit 1
+fi
+if [ -n "$kill_only_users" ]; then
+    echo "KillOnlyUsers must be empty for this global policy test (found: $kill_only_users)." >&2
+    exit 1
+fi
+case " $kill_exclude_users " in
+    *" $test_user "*)
+        echo "$test_user is excluded by KillExcludeUsers; refusing an ambiguous policy test." >&2
+        exit 1
+        ;;
+esac
+echo "Testing effective KillUserProcesses=$kill_user_processes."
 mkfifo "$test_tmpdir/password"
 test_user_created=0
 pam_service_created=0
@@ -92,6 +141,13 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
+
+process_is_running() {
+    pid=$1
+    [ -r "/proc/$pid/stat" ] || return 1
+    state=$(awk '{print $3}' "/proc/$pid/stat" 2>/dev/null || true)
+    [ -n "$state" ] && [ "$state" != Z ]
+}
 
 if id "$test_user" >/dev/null 2>&1; then
     echo "Refusing to reuse existing account $test_user." >&2
@@ -180,34 +236,46 @@ fi
 probe_pid=
 
 # The test child has called setsid(): process-group signalling cannot reach it.
-# The supervisor must stop the retained logind scope after the PAM worker exits.
-if ! kill -0 "$escaped_pid" 2>/dev/null; then
-    echo "Escaped-group test child exited before supervisor scope cleanup." >&2
-    exit 1
-fi
-systemctl stop "$scope"
-attempt=0
-while systemctl is-active --quiet "$scope"; do
-    attempt=$((attempt + 1))
-    if [ "$attempt" -gt 50 ]; then
-        echo "Session scope remained active after supervisor cleanup: $scope" >&2
+# logind may already have stopped the scope (yes), or the supervisor must do so (no).
+if [ "$kill_user_processes" = yes ]; then
+    attempt=0
+    while process_is_running "$escaped_pid" || systemctl is-active --quiet "$scope"; do
+        attempt=$((attempt + 1))
+        if [ "$attempt" -gt 50 ]; then
+            echo "logind did not clean up the escaped child and session scope with KillUserProcesses=yes." >&2
+            exit 1
+        fi
+        sleep 0.1
+    done
+    echo "PASS: logind automatically removed the escaped child and scope (KillUserProcesses=yes)."
+else
+    if ! process_is_running "$escaped_pid"; then
+        echo "Escaped-group test child exited before supervisor scope cleanup with KillUserProcesses=no." >&2
         exit 1
     fi
-    sleep 0.1
-done
+    systemctl stop "$scope"
+    attempt=0
+    while systemctl is-active --quiet "$scope"; do
+        attempt=$((attempt + 1))
+        if [ "$attempt" -gt 50 ]; then
+            echo "Session scope remained active after supervisor cleanup: $scope" >&2
+            exit 1
+        fi
+        sleep 0.1
+    done
 
-# Accept a zombie as terminated: PID 1 may need a scheduling turn to reap it.
-attempt=0
-while [ -d "/proc/$escaped_pid" ]; do
-    child_state=$(awk '{print $3}' "/proc/$escaped_pid/stat" 2>/dev/null || true)
-    [ "$child_state" = Z ] && break
-    attempt=$((attempt + 1))
-    if [ "$attempt" -gt 50 ]; then
-        echo "Escaped process survived logind scope cleanup: $escaped_pid" >&2
-        exit 1
-    fi
-    sleep 0.1
-done
+    # Accept a zombie as terminated: PID 1 may need a scheduling turn to reap it.
+    attempt=0
+    while process_is_running "$escaped_pid"; do
+        attempt=$((attempt + 1))
+        if [ "$attempt" -gt 50 ]; then
+            echo "Escaped process survived supervisor scope cleanup: $escaped_pid" >&2
+            exit 1
+        fi
+        sleep 0.1
+    done
+    echo "PASS: supervisor scope cleanup removed the escaped child (KillUserProcesses=no)."
+fi
 scope_to_stop=
 
 echo "PASS: PAM authentication/open/close and supervisor cleanup of an escaped process-group descendant ($session_id)."
