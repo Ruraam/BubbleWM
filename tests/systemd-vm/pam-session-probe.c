@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <signal.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -177,6 +178,25 @@ int main(int argc, char **argv) {
 
     printf("SESSION_ID=%s SCOPE=%s UID=%u\n", session_id, scope, (unsigned)session_uid);
     fflush(stdout);
+
+    /* Optional adversarial child: leave the worker's process group with setsid(),
+     * but remain in the logind session cgroup for supervisor cleanup testing. */
+    if (getenv("BUBBLEWM_TEST_ESCAPE_GROUP") != NULL) {
+        pid_t child = fork();
+        if (child < 0) {
+            fprintf(stderr, "could not fork escaped-group test child: %s\n", strerror(errno));
+            goto close_session;
+        }
+        if (child == 0) {
+            if (setsid() < 0)
+                _exit(2);
+            for (;;)
+                pause();
+        }
+        printf("ESCAPED_PID=%ld\n", (long)child);
+        fflush(stdout);
+    }
+
     hold_text = getenv("BUBBLEWM_TEST_HOLD_SECONDS");
     if (hold_text != NULL) {
         char *end = NULL;
