@@ -2,7 +2,8 @@
 
 This test is intentionally destructive to a disposable VM only: it installs
 build dependencies, adds and removes a temporary local account, and installs
-`/etc/pam.d/bubblewm` only when that service file does not already exist.
+`/etc/pam.d/bubblewm` only when that service file does not already exist; it
+refuses to proceed if the path is already occupied.
 Do not run it on a workstation or production login host.
 
 ## VM requirements
