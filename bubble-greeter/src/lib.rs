@@ -47,9 +47,9 @@ fn valid_username(value: &str) -> bool {
         return false;
     }
     (bytes[0].is_ascii_lowercase() || bytes[0] == b'_')
-        && bytes[1..].iter().all(|b| {
-            b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'_' || *b == b'-'
-        })
+        && bytes[1..]
+            .iter()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'_' || *b == b'-')
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
