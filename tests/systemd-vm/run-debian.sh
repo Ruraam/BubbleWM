@@ -117,7 +117,7 @@ printf '%s\n' "$test_password" | BUBBLEWM_TEST_HOLD_SECONDS=8 BUBBLEWM_TEST_ESCA
 probe_pid=$!
 
 attempt=0
-while [ ! -s "$test_log" ] && kill -0 "$probe_pid" 2>/dev/null; do
+while ! grep -q '^ESCAPED_PID=' "$test_log" && kill -0 "$probe_pid" 2>/dev/null; do
     attempt=$((attempt + 1))
     if [ "$attempt" -gt 100 ]; then
         echo "Timed out waiting for PAM session registration." >&2
