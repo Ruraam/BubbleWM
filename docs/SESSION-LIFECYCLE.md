@@ -22,9 +22,11 @@ The packaging staging target now includes the Debian PAM profile and the
 root-managed session configuration, while refusing to overwrite an existing
 live PAM service during a direct install. A real-PAM/logind probe and disposable
 Debian 13 VM runner are available under `tests/systemd-vm`. The VM harness now
-also exercises invalid-password rejection and supervisor-owned scope cleanup
-of a child that escapes its original process group with `setsid()`. The
-harness has not yet been executed in a real Debian VM; greeter/VT handoff,
+also exercises invalid-password rejection and escaped-process cleanup under
+both effective `KillUserProcesses` policies: logind-owned cleanup when enabled,
+and explicit supervisor-owned scope cleanup when disabled. The harness checks
+the merged logind configuration and rejects policy overrides that would make
+the test ambiguous. It has not yet been executed in a real Debian VM; greeter/VT handoff,
 full compositor startup, and supervisor crash-recovery tests remain
 outstanding.
 
