@@ -2522,6 +2522,25 @@ impl CompositorStateData {
 
     /// Makes the Space contain exactly the active workspace's live windows.
     fn remap_active_workspace(&mut self) {
+        // A client may acknowledge an in-flight resize after its window has
+        // been moved to another workspace. Do not let that late commit map
+        // the hidden window back into the active Space.
+        let resize_belongs_to_hidden_workspace = self
+            .resize_session
+            .as_ref()
+            .and_then(|session| {
+                self.windows.iter().find(|entry| {
+                    entry
+                        .window
+                        .toplevel()
+                        .is_some_and(|toplevel| toplevel.wl_surface() == &session.surface)
+                })
+            })
+            .is_some_and(|entry| entry.workspace != self.active_workspace);
+        if resize_belongs_to_hidden_workspace {
+            self.resize_session = None;
+        }
+
         let windows = self
             .windows
             .iter()
