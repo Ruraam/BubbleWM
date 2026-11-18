@@ -373,6 +373,54 @@ pub fn status_panel(
     }
 }
 
+/// A complete, renderer-neutral account row with all visual subcomponents.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GreeterAccountPresentation {
+    pub row: AccountRowPresentation,
+    pub avatar: AvatarPresentation,
+    pub selection: SelectionIndicator,
+}
+
+/// Complete login-screen presentation assembled from the model and viewport.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GreeterScreenPresentation {
+    pub layout: GreeterLayout,
+    pub palette: GreeterPalette,
+    pub title: &'static str,
+    pub subtitle: &'static str,
+    pub accounts: Vec<GreeterAccountPresentation>,
+    pub status: StatusPanelPresentation,
+    pub action: PrimaryButtonPresentation,
+}
+
+/// Builds every visual element needed to render one greeter frame.
+pub fn greeter_screen(
+    model: &crate::GreeterModel,
+    width: u32,
+    height: u32,
+    palette: GreeterPalette,
+) -> GreeterScreenPresentation {
+    let layout = GreeterLayout::for_viewport(width, height);
+    let accounts = account_rows(model, layout)
+        .into_iter()
+        .map(|row| GreeterAccountPresentation {
+            avatar: avatar_presentation(&row, palette),
+            selection: selection_indicator(&row, palette),
+            row,
+        })
+        .collect();
+
+    GreeterScreenPresentation {
+        layout,
+        palette,
+        title: "Welcome",
+        subtitle: "Choose an account to sign in",
+        accounts,
+        status: status_panel(model, layout, palette),
+        action: primary_button(model, layout, palette),
+    }
+}
+
 /// Interactive regions exposed to a frontend event handler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GreeterHitTarget {
