@@ -321,7 +321,10 @@ pub fn primary_button(
         crate::GreeterStatus::Authenticating | crate::GreeterStatus::StartingSession => {
             PrimaryButtonState::Busy
         }
-        _ if model.selected_user().is_some_and(|user| user.is_available()) => {
+        _ if model
+            .selected_user()
+            .is_some_and(|user| user.is_available()) =>
+        {
             PrimaryButtonState::Enabled
         }
         _ => PrimaryButtonState::Disabled,
