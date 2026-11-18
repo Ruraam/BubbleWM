@@ -553,17 +553,18 @@ impl SessionWorker {
         timeout: Duration,
         termination_grace: Duration,
     ) -> io::Result<(std::process::ExitStatus, bool)> {
-        // Keep the control socket open for the entire desktop session. The
-        // worker monitors peer loss and tears down its process group/PAM
-        // session if this supervisor disappears unexpectedly.
+        // The desktop session has ended: close the control socket now so
+        // the worker can observe EOF and perform its PAM/session cleanup.
+        // While the session is active, the caller keeps this channel open;
+        // this method is specifically the post-session cleanup wait.
+        self.channel.take();
+
         if let Some(status) = self.process.wait_timeout(timeout)? {
-            self.channel.take();
             return Ok((status, false));
         }
 
-        // On timeout, close the channel first so a worker blocked on protocol
-        // input can unwind before we escalate to TERM/KILL.
-        self.channel.take();
+        // The worker did not finish cleanup before the deadline. Escalate
+        // through the bounded TERM/KILL path.
         self.process
             .terminate_and_reap(termination_grace)
             .map(|status| (status, true))
