@@ -64,35 +64,15 @@ fn run() -> Result<i32, String> {
     )
     .map_err(|error| format!("impossible de démarrer le worker PAM: {error}"))?;
 
-    let ready = worker
-        .receive_session_ready(METADATA_TIMEOUT)
-        .map_err(|error| format!("le worker n'a pas fourni de métadonnées valides: {error}"))?;
-
-    // Resolve identity from the worker PID, not from this supervisor. PAM's
-    // pam_systemd integration must already have placed the worker in scope.
-    let trusted = resolve_session_for_pid(worker.id() as u32)
-        .map_err(|error| format!("impossible de vérifier la session logind du worker: {error}"))?;
-    bubblewm::session_control::validate_session_ready_against(&ready, &trusted.identity)
-        .map_err(|error| format!("identité de session refusée: {error}"))?;
-    worker
-        .approve_session()
-        .map_err(|error| format!("impossible d'autoriser le démarrage de la session: {error}"))?;
-
-    let status = worker
-        .wait()
-        .map_err(|error| format!("impossible d'attendre le nettoyage PAM du worker: {error}"))?;
-
-    // PAM has been closed by the worker. The supervisor, which remains
-    // outside the session scope, now removes any descendants that escaped
-    // the worker's original process group.
-    bubblewm::logind::stop_session_scope(&trusted.scope, SCOPE_STOP_TIMEOUT).map_err(|error| {
-        format!(
-            "impossible de terminer le scope logind {}: {error}",
-            trusted.scope
-        )
-    })?;
-
-    Ok(status.code().unwrap_or(1))
+    // Keep the privileged orchestration in a separately tested state machine.
+    // The worker's PID and metadata are independently checked against logind.
+    bubblewm::session_lifecycle::supervise_session(
+        &mut worker,
+        METADATA_TIMEOUT,
+        SCOPE_STOP_TIMEOUT,
+        resolve_session_for_pid,
+        bubblewm::logind::stop_session_scope,
+    )
 }
 
 fn validate_vt(tty: &str) -> Result<(), String> {
