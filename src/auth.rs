@@ -2,6 +2,7 @@
 
 use std::{
     ffi::{CStr, CString, c_char, c_int, c_void},
+    io::Read,
     os::unix::ffi::OsStringExt,
     os::unix::fs::MetadataExt,
     os::unix::process::CommandExt,
@@ -1012,6 +1013,33 @@ mod tests {
             std::io::Error::last_os_error().raw_os_error(),
             Some(libc::ESRCH)
         );
+    }
+
+    #[test]
+    fn managed_process_is_terminated_on_unexpected_supervisor_data() {
+        use std::os::unix::process::CommandExt;
+        use std::os::unix::process::ExitStatusExt;
+
+        let child = Command::new("/bin/sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .expect("spawn supervised process");
+        let mut process = ManagedUserProcess::new(child);
+        let (mut supervisor, mut worker) =
+            UnixStream::pair().expect("control socket pair");
+        supervisor.write_all(b"unexpected").expect("write invalid protocol data");
+
+        let (status, supervisor_lost) = process
+            .wait_while_supervised(
+                &mut worker,
+                Duration::from_millis(10),
+                Duration::from_secs(1),
+            )
+            .expect("reject unexpected control data");
+
+        assert!(supervisor_lost);
+        assert_eq!(status.signal(), Some(libc::SIGTERM));
     }
 
     #[test]
