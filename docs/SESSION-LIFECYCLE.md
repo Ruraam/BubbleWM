@@ -8,10 +8,13 @@ the fixed `BUBWORK1` marker, reads the password directly from inherited stdin,
 opens PAM, sends one bounded `SessionReady` frame, and waits for an explicit
 `BUBOKAY1` approval from the supervisor before starting the fixed compositor
 as the user. The worker's approval wait is bounded to 30 seconds; timeout,
-EOF, or an invalid marker aborts the session and triggers PAM cleanup. The
-supervisor never reads or buffers the password; it resolves the worker PID
-through logind, compares the result with the worker's metadata, and only then
-sends approval. After the desktop process group exits, the worker closes PAM.
+EOF, or an invalid marker aborts the session and triggers PAM cleanup. After
+approval, the private control socket remains open for the full desktop-session
+lifetime. The worker polls it while monitoring the compositor; supervisor EOF,
+hangup, or unexpected post-approval data causes process-group termination and
+PAM cleanup. The supervisor never reads or buffers the password; it resolves
+the worker PID through logind, compares the result with the worker's metadata,
+and only then sends approval.
 
 The separation of PAM ownership and the independent logind identity check are
 implemented. The worker binary is expected at
@@ -166,7 +169,9 @@ Before production use, extend the systemd VM integration tests to cover:
   supervisor-owned scope cleanup (VM harness implemented; runtime execution
   still pending);
 - compositor crash, failed exec, failed PAM setup, worker crash and supervisor
-  restart;
+  restart; the worker's response to supervisor socket loss is covered by
+  process-level unit tests, but crash recovery against a real logind scope is
+  still outstanding;
 - logout when `KillUserProcesses=yes` and when it is `no`;
 - no leaked scope, runtime directory, device access, or stale greeter state;
 - seat/VT handoff and recovery on real virtual terminals.
