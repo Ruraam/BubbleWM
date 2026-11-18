@@ -185,7 +185,7 @@ impl GreeterModel {
                 let current = match self.focus {
                     Some(GreeterFocus::Account(index)) => {
                         available.iter().position(|i| *i == index)
-                    },
+                    }
                     Some(GreeterFocus::Submit) => Some(available.len()),
                     None => None,
                 };
