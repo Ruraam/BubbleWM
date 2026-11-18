@@ -9,7 +9,7 @@ repository = "https://github.com/Ruraam/BubbleWM"
 readme = "README.md"
 
 [workspace]
-members = ["bubble-ipc", "bubblepanel"]
+members = ["bubble-ipc", "bubblepanel", "bubble-greeter"]
 resolver = "3"
 
 [dependencies]
