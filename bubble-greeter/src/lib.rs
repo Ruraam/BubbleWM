@@ -1,10 +1,10 @@
-pub mod view;
-
 //! BubbleGreeter presentation model.
 //!
 //! This unprivileged state model contains no PAM calls, password storage,
 //! privileged process control, or session launching. Those belong behind a
 //! separately reviewed authentication boundary.
+
+pub mod view;
 
 pub const MAX_VISIBLE_USERS: usize = 64;
 pub const MAX_USERNAME_BYTES: usize = 32;
