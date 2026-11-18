@@ -7,7 +7,7 @@ use std::ffi::{OsStr, OsString};
 use std::io::{self, Read, Write};
 use std::time::Duration;
 
-use bubblewm::auth::{ManagedUserProcess, PamLoginSession};
+use bubblewm::auth::PamLoginSession;
 use bubblewm::session_control::{
     read_supervisor_approval_with_timeout, take_worker_channel, validate_password_pipe_fd,
     write_session_ready,
