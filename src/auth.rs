@@ -3,11 +3,11 @@
 use std::{
     ffi::{CStr, CString, c_char, c_int, c_void},
     io::Read,
+    os::fd::AsRawFd,
     os::unix::ffi::OsStringExt,
     os::unix::fs::MetadataExt,
     os::unix::net::UnixStream,
     os::unix::process::CommandExt,
-    os::fd::AsRawFd,
     path::PathBuf,
     process::{Child, Command, ExitStatus},
     ptr,
@@ -1027,9 +1027,10 @@ mod tests {
             .spawn()
             .expect("spawn supervised process");
         let mut process = ManagedUserProcess::new(child);
-        let (mut supervisor, mut worker) =
-            UnixStream::pair().expect("control socket pair");
-        supervisor.write_all(b"unexpected").expect("write invalid protocol data");
+        let (mut supervisor, mut worker) = UnixStream::pair().expect("control socket pair");
+        supervisor
+            .write_all(b"unexpected")
+            .expect("write invalid protocol data");
 
         let (status, supervisor_lost) = process
             .wait_while_supervised(
