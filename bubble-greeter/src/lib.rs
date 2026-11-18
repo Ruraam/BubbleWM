@@ -219,7 +219,7 @@ impl GreeterModel {
                     let index = match key {
                         GreeterKey::Down => (start + step) % len,
                         GreeterKey::Up => (start + len - (step % len)) % len,
-                        GreeterKey::Enter => unreachable!(),
+                        GreeterKey::Enter | GreeterKey::Tab | GreeterKey::BackTab => unreachable!(),
                     };
                     if self.users[index].available {
                         self.selected = Some(index);
@@ -425,6 +425,25 @@ mod tests {
         );
         assert_eq!(model.handle_key(GreeterKey::Down), GreeterAction::None);
         assert_eq!(model.selected_user().unwrap().username(), "carol");
+    }
+
+    #[test]
+    fn tab_focus_cycles_accounts_and_submit_in_both_directions() {
+        let mut model = GreeterModel::new(users()).unwrap();
+
+        assert_eq!(model.focus(), Some(GreeterFocus::Account(0)));
+        assert_eq!(model.handle_key(GreeterKey::Tab), GreeterAction::None);
+        assert_eq!(model.focus(), Some(GreeterFocus::Account(1)));
+        assert_eq!(model.selected_index(), Some(1));
+        assert_eq!(model.handle_key(GreeterKey::Tab), GreeterAction::None);
+        assert_eq!(model.focus(), Some(GreeterFocus::Submit));
+        assert_eq!(model.handle_key(GreeterKey::Tab), GreeterAction::None);
+        assert_eq!(model.focus(), Some(GreeterFocus::Account(0)));
+
+        assert_eq!(model.handle_key(GreeterKey::BackTab), GreeterAction::None);
+        assert_eq!(model.focus(), Some(GreeterFocus::Submit));
+        assert_eq!(model.handle_key(GreeterKey::BackTab), GreeterAction::None);
+        assert_eq!(model.focus(), Some(GreeterFocus::Account(1)));
     }
 
     #[test]
