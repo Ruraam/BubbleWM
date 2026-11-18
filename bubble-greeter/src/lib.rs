@@ -188,6 +188,20 @@ impl GreeterModel {
         }
     }
 
+    /// Applies a pointer hit target to the model without handling credentials.
+    ///
+    /// Account hits update the selected account; the primary action emits the
+    /// same username-only login intent as keyboard Enter.
+    pub fn handle_pointer(&mut self, target: view::GreeterHitTarget) -> GreeterAction {
+        match target {
+            view::GreeterHitTarget::Account(index) => {
+                self.select_user(index);
+                GreeterAction::None
+            }
+            view::GreeterHitTarget::Submit => self.submit(),
+        }
+    }
+
     pub fn select_user(&mut self, index: usize) -> bool {
         if index >= self.users.len()
             || !self.users[index].available
@@ -280,6 +294,45 @@ mod tests {
         );
         assert_eq!(model.status(), &GreeterStatus::Authenticating);
         assert_eq!(model.submit(), GreeterAction::None);
+    }
+
+    #[test]
+    fn pointer_account_selection_and_submit_follow_model_rules() {
+        let mut model = GreeterModel::new(users()).unwrap();
+
+        assert_eq!(
+            model.handle_pointer(view::GreeterHitTarget::Account(1)),
+            GreeterAction::None
+        );
+        assert_eq!(model.selected_user().unwrap().username(), "bob");
+        assert_eq!(
+            model.handle_pointer(view::GreeterHitTarget::Submit),
+            GreeterAction::SubmitLogin {
+                username: "bob".into()
+            }
+        );
+        assert_eq!(
+            model.handle_pointer(view::GreeterHitTarget::Account(0)),
+            GreeterAction::None
+        );
+        assert_eq!(model.selected_user().unwrap().username(), "bob");
+    }
+
+    #[test]
+    fn pointer_cannot_select_unavailable_or_out_of_range_accounts() {
+        let mut accounts = users();
+        accounts[1].set_available(false);
+        let mut model = GreeterModel::new(accounts).unwrap();
+
+        assert_eq!(
+            model.handle_pointer(view::GreeterHitTarget::Account(1)),
+            GreeterAction::None
+        );
+        assert_eq!(
+            model.handle_pointer(view::GreeterHitTarget::Account(99)),
+            GreeterAction::None
+        );
+        assert_eq!(model.selected_user().unwrap().username(), "alice");
     }
 
     #[test]
