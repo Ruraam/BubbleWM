@@ -7,13 +7,13 @@
 
 use std::{io, process::ExitStatus, time::Duration};
 
-const WORKER_EXIT_TIMEOUT: Duration = Duration::from_secs(30);
-const WORKER_TERMINATION_GRACE: Duration = Duration::from_secs(1);
-
 use crate::{
     logind::ResolvedLogindSession,
     session_control::{SessionReady, SessionWorker, validate_session_ready_against},
 };
+
+const WORKER_EXIT_TIMEOUT: Duration = Duration::from_secs(30);
+const WORKER_TERMINATION_GRACE: Duration = Duration::from_secs(1);
 
 /// The narrow worker interface required by the session supervisor.
 pub trait SessionWorkerLifecycle {
