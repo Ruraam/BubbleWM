@@ -78,11 +78,7 @@ fn run() -> Result<i32, String> {
     let mut process =
         session.spawn_user_command(OsStr::new(COMPOSITOR), &[OsString::from(SESSION_CONFIG)])?;
     let (status, supervisor_lost) = process
-        .wait_while_supervised(
-            &mut channel,
-            Duration::from_millis(100),
-            TERMINATION_GRACE,
-        )
+        .wait_while_supervised(&mut channel, Duration::from_millis(100), TERMINATION_GRACE)
         .map_err(|error| format!("surveillance de la session impossible: {error}"))?;
     cleanup_session(
         || {
