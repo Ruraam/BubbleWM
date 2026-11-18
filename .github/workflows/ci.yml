@@ -31,5 +31,9 @@ jobs:
           components: rustfmt
       - name: Format
         run: cargo fmt --all -- --check
+      - name: Validate systemd VM harness
+        run: |
+          sh -n tests/systemd-vm/run-debian.sh
+          cc -std=c11 -Wall -Wextra -Werror -fsyntax-only tests/systemd-vm/pam-session-probe.c
       - name: Test workspace
         run: cargo test --workspace --all-targets
