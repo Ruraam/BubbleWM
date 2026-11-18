@@ -18,8 +18,12 @@ implemented. The worker binary is expected at
 `/usr/libexec/bubblewm-session-worker`. Supervisor-owned systemd scope-stop cleanup is now implemented: after the
 worker exits and PAM has closed, the supervisor requests `StopUnit` for the
 independently resolved scope and waits until `ActiveState` becomes `inactive`.
-Package installation of the worker, greeter/VT handoff, and real-systemd
-integration tests are still outstanding.
+The packaging staging target now includes the Debian PAM profile and the
+root-managed session configuration, while refusing to overwrite an existing
+live PAM service during a direct install. A real-PAM/logind probe and disposable
+Debian 13 VM runner are available under `tests/systemd-vm`. The probe has not
+yet been executed in a real Debian VM; greeter/VT handoff and end-to-end
+compositor/descendant containment tests remain outstanding.
 
 ## Ownership boundaries
 
@@ -148,7 +152,7 @@ yet a complete greeter-to-session handoff.
 
 ## Required validation
 
-Before production use, add systemd VM integration tests covering:
+Before production use, extend the systemd VM integration tests to cover:
 
 - successful PAM open and close with a real `pam_systemd` session;
 - correct `XDG_SESSION_ID`, `XDG_RUNTIME_DIR`, seat and VT metadata;
