@@ -40,9 +40,8 @@ impl PidFd {
         let owned = unsafe { OwnedFd::from_raw_fd(fd) };
         let flags = unsafe { libc::fcntl(owned.as_raw_fd(), libc::F_GETFD) };
         if flags < 0
-            || unsafe {
-                libc::fcntl(owned.as_raw_fd(), libc::F_SETFD, flags | libc::FD_CLOEXEC)
-            } < 0
+            || unsafe { libc::fcntl(owned.as_raw_fd(), libc::F_SETFD, flags | libc::FD_CLOEXEC) }
+                < 0
         {
             return Err(io::Error::last_os_error());
         }
@@ -174,7 +173,9 @@ pub fn receive_pidfd(channel: &UnixStream) -> io::Result<PidFd> {
     // SAFETY: SCM_RIGHTS installed a new descriptor owned by this process.
     let owned = unsafe { OwnedFd::from_raw_fd(fd) };
     let flags = unsafe { libc::fcntl(owned.as_raw_fd(), libc::F_GETFD) };
-    if flags < 0 || unsafe { libc::fcntl(owned.as_raw_fd(), libc::F_SETFD, flags | libc::FD_CLOEXEC) } < 0 {
+    if flags < 0
+        || unsafe { libc::fcntl(owned.as_raw_fd(), libc::F_SETFD, flags | libc::FD_CLOEXEC) } < 0
+    {
         return Err(io::Error::last_os_error());
     }
     Ok(PidFd(owned))
