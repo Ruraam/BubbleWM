@@ -45,14 +45,30 @@ test_log=$(mktemp)
 probe=$(mktemp)
 test_user_created=0
 pam_service_created=0
+probe_pid=
 cleanup() {
+    if [ -n "$probe_pid" ]; then
+        if kill -0 "$probe_pid" 2>/dev/null; then
+            kill -TERM "$probe_pid" 2>/dev/null || true
+            attempt=0
+            while kill -0 "$probe_pid" 2>/dev/null && [ "$attempt" -lt 20 ]; do
+                attempt=$((attempt + 1))
+                sleep 0.1
+            done
+            if kill -0 "$probe_pid" 2>/dev/null; then
+                kill -KILL "$probe_pid" 2>/dev/null || true
+            fi
+        fi
+        wait "$probe_pid" 2>/dev/null || true
+        probe_pid=
+    fi
     if [ "$test_user_created" -eq 1 ]; then
         userdel -r "$test_user" >/dev/null 2>&1 || true
     fi
     if [ "$pam_service_created" -eq 1 ]; then
         rm -f /etc/pam.d/bubblewm
     fi
-    rm -f "$probe" "$test_log" "$test_log.state"
+    rm -f "$probe" "$test_log" "$test_log.state" "$test_log.failure"
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
@@ -75,6 +91,19 @@ printf '%s:%s\n' "$test_user" "$test_password" | chpasswd
 
 cc -std=c11 -O2 -Wall -Wextra -Werror \
     "$(dirname "$0")/pam-session-probe.c" -o "$probe" -lpam -lsystemd
+
+# First prove that a bad password is rejected without opening a logind session.
+wrong_password=$(openssl rand -hex 24)
+if printf '%s\n' "$wrong_password" | "$probe" "$test_user" /dev/tty1 >"$test_log.failure" 2>&1; then
+    cat "$test_log.failure" >&2
+    echo "PAM unexpectedly accepted an invalid password." >&2
+    exit 1
+fi
+if grep -q '^SESSION_ID=' "$test_log.failure"; then
+    cat "$test_log.failure" >&2
+    echo "A session was reported after failed authentication." >&2
+    exit 1
+fi
 
 # A real VT is required for a full seat/VT assertion. /dev/tty1 is supplied
 # as PAM_TTY here; launch from the VM's local console for meaningful VT data.
@@ -112,11 +141,13 @@ grep -Fx "Scope=$scope" "$test_log.state" >/dev/null
 grep -Fx "State=active" "$test_log.state" >/dev/null
 systemctl is-active --quiet "$scope"
 
-wait "$probe_pid" || {
+if ! wait "$probe_pid"; then
+    probe_pid=
     cat "$test_log" >&2
     echo "PAM close/end failed." >&2
     exit 1
-}
+fi
+probe_pid=
 
 # pam_systemd should release the session scope when pam_close_session runs.
 attempt=0
