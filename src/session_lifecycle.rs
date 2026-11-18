@@ -385,4 +385,84 @@ mod tests {
         assert!(result.unwrap_err().contains("processus worker"));
         assert_eq!(*events.borrow(), ["metadata"]);
     }
+
+    #[test]
+    fn worker_wait_failure_never_stops_the_logind_scope() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let mut worker = mock_worker(events.clone());
+        worker.exit_status = Err(io::Error::new(
+            io::ErrorKind::Child,
+            "waitpid failed",
+        ));
+
+        let result = supervise_session(
+            &mut worker,
+            Duration::from_secs(10),
+            Duration::from_secs(15),
+            |_| {
+                events.borrow_mut().push("resolve");
+                Ok(trusted(&sample_ready()))
+            },
+            |_, _| {
+                events.borrow_mut().push("stop_scope");
+                Ok(())
+            },
+        );
+
+        assert!(result.unwrap_err().contains("nettoyage PAM"));
+        assert_eq!(*events.borrow(), ["metadata", "resolve", "approve", "wait"]);
+    }
+
+    #[test]
+    fn signaled_worker_exit_maps_to_failure_status_after_scope_cleanup() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let mut worker = mock_worker(events.clone());
+        worker.exit_status = Ok(ExitStatus::from_raw(libc::SIGTERM));
+
+        let result = supervise_session(
+            &mut worker,
+            Duration::from_secs(10),
+            Duration::from_secs(15),
+            |_| {
+                events.borrow_mut().push("resolve");
+                Ok(trusted(&sample_ready()))
+            },
+            |scope, _| {
+                assert_eq!(scope, "session-c7.scope");
+                events.borrow_mut().push("stop_scope");
+                Ok(())
+            },
+        );
+
+        assert_eq!(result.unwrap(), 1);
+        assert_eq!(
+            *events.borrow(),
+            ["metadata", "resolve", "approve", "wait", "stop_scope"]
+        );
+    }
+
+    #[test]
+    fn negative_worker_pid_fails_before_logind_lookup() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let mut worker = mock_worker(events.clone());
+        worker.pid = -1;
+
+        let result = supervise_session(
+            &mut worker,
+            Duration::from_secs(10),
+            Duration::from_secs(15),
+            |_| {
+                events.borrow_mut().push("resolve");
+                Ok(trusted(&sample_ready()))
+            },
+            |_, _| {
+                events.borrow_mut().push("stop_scope");
+                Ok(())
+            },
+        );
+
+        assert!(result.unwrap_err().contains("processus worker"));
+        assert_eq!(*events.borrow(), ["metadata"]);
+    }
+
 }
