@@ -7,6 +7,7 @@ use std::{
     os::unix::process::CommandExt,
     path::PathBuf,
     process::{Child, Command, ExitStatus},
+    os::fd::AsRawFd,
     os::unix::net::UnixStream,
     ptr,
     sync::atomic::{Ordering, compiler_fence},
