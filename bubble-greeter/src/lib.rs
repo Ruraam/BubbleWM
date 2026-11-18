@@ -168,10 +168,17 @@ impl GreeterModel {
     /// Handles basic account navigation and submit keys without reading secrets.
     ///
     /// Up/down skip unavailable accounts and wrap around the visible list.
-    /// Enter emits the same username-only action as the primary button.
+    /// Enter activates only the focused control; account focus never logs in.
     pub fn handle_key(&mut self, key: GreeterKey) -> GreeterAction {
         match key {
-            GreeterKey::Enter => self.submit(),
+            GreeterKey::Enter => match self.focus {
+                Some(GreeterFocus::Submit) => self.submit(),
+                Some(GreeterFocus::Account(index)) => {
+                    self.select_user(index);
+                    GreeterAction::None
+                }
+                None => GreeterAction::None,
+            },
             GreeterKey::Tab | GreeterKey::BackTab => {
                 if !matches!(
                     self.status,
@@ -456,6 +463,26 @@ mod tests {
         assert_eq!(model.focus(), Some(GreeterFocus::Submit));
         assert_eq!(model.handle_key(GreeterKey::BackTab), GreeterAction::None);
         assert_eq!(model.focus(), Some(GreeterFocus::Account(1)));
+    }
+
+    #[test]
+    fn enter_activates_only_the_focused_control() {
+        let mut model = GreeterModel::new(users()).unwrap();
+
+        assert_eq!(model.focus(), Some(GreeterFocus::Account(0)));
+        assert_eq!(model.handle_key(GreeterKey::Enter), GreeterAction::None);
+        assert_eq!(model.status(), &GreeterStatus::Ready);
+
+        assert_eq!(model.handle_key(GreeterKey::Tab), GreeterAction::None);
+        assert_eq!(model.handle_key(GreeterKey::Tab), GreeterAction::None);
+        assert_eq!(model.focus(), Some(GreeterFocus::Submit));
+        assert_eq!(
+            model.handle_key(GreeterKey::Enter),
+            GreeterAction::SubmitLogin {
+                username: "bob".into()
+            }
+        );
+        assert_eq!(model.status(), &GreeterStatus::Authenticating);
     }
 
     #[test]
