@@ -1523,9 +1523,7 @@ mod tests {
             std::ffi::OsStr::new("/bin/sh"),
             &[
                 std::ffi::OsString::from("-c"),
-                std::ffi::OsString::from(
-                    "printf BUBWORK1 >&3; trap '' TERM; exec /bin/sleep 30",
-                ),
+                std::ffi::OsString::from("printf BUBWORK1 >&3; trap '' TERM; exec /bin/sleep 30"),
             ],
             Duration::from_secs(1),
         )
