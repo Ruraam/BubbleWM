@@ -390,7 +390,7 @@ mod tests {
     fn worker_wait_failure_never_stops_the_logind_scope() {
         let events = Rc::new(RefCell::new(Vec::new()));
         let mut worker = mock_worker(events.clone());
-        worker.exit_status = Err(io::Error::new(io::ErrorKind::Child, "waitpid failed"));
+        worker.exit_status = Err(io::Error::new(io::ErrorKind::Other, "waitpid failed"));
 
         let result = supervise_session(
             &mut worker,
