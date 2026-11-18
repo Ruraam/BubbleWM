@@ -128,9 +128,7 @@ impl GreeterModel {
         if index >= self.users.len()
             || !matches!(
                 self.status,
-                GreeterStatus::Ready
-                    | GreeterStatus::Error(_)
-                    | GreeterStatus::SessionEnded
+                GreeterStatus::Ready | GreeterStatus::Error(_) | GreeterStatus::SessionEnded
             )
         {
             return false;
@@ -144,9 +142,7 @@ impl GreeterModel {
     pub fn submit(&mut self) -> GreeterAction {
         if !matches!(
             self.status,
-            GreeterStatus::Ready
-                | GreeterStatus::Error(_)
-                | GreeterStatus::SessionEnded
+            GreeterStatus::Ready | GreeterStatus::Error(_) | GreeterStatus::SessionEnded
         ) {
             return GreeterAction::None;
         }
