@@ -125,14 +125,18 @@ pub fn send_pidfd(channel: &UnixStream, pidfd: &PidFd) -> io::Result<()> {
 /// Receives one pidfd and rejects missing, truncated, or unexpected ancillary data.
 pub fn receive_pidfd(channel: &UnixStream) -> io::Result<PidFd> {
     let mut byte = [0_u8; 8];
-    let mut iov = libc::iovec { iov_base: byte.as_mut_ptr().cast(), iov_len: 1 };
+    let mut iov = libc::iovec {
+        iov_base: byte.as_mut_ptr().cast(),
+        iov_len: PIDFD_MARKER.len(),
+    };
     let mut control = [0_usize; 8];
     let mut message: libc::msghdr = unsafe { std::mem::zeroed() };
     message.msg_iov = &mut iov;
     message.msg_iovlen = 1;
     message.msg_control = control.as_mut_ptr().cast();
     message.msg_controllen = std::mem::size_of_val(&control);
-    let received = unsafe { libc::recvmsg(channel.as_raw_fd(), &mut message, libc::MSG_CMSG_CLOEXEC) };
+    let received =
+        unsafe { libc::recvmsg(channel.as_raw_fd(), &mut message, libc::MSG_CMSG_CLOEXEC) };
     if received < 0 {
         return Err(io::Error::last_os_error());
     }
