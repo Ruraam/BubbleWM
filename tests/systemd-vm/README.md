@@ -19,7 +19,7 @@ Take a VM snapshot first. Log in on the VM's local console as root, then run:
 git clone https://github.com/Ruraam/BubbleWM.git
 cd BubbleWM
 git checkout codex/bubblewm-visual-theme-engine
-sudo sh tests/systemd-vm/run-debian.sh
+BUBBLEWM_EXPECT_KILL_USER_PROCESSES=yes sudo -E sh tests/systemd-vm/run-debian.sh
 ```
 
 The harness verifies that Debian's `common-session` contains exactly one
@@ -35,16 +35,49 @@ creates a disposable unprivileged account, and exercises the actual
 5. rejection of an invalid password without reporting an opened session;
 6. a child that calls `setsid()` and escapes the worker's process group while
    remaining in the logind session cgroup;
-7. worker PAM close followed by an explicit supervisor-side `systemctl stop`
-   of the independently retained scope, proving the escaped child is terminated;
-8. scope deactivation and removal of the escaped child.
+7. both effective `KillUserProcesses` policies:
+   - `yes`: logind removes the escaped child and session scope during logout;
+   - `no`: the child survives PAM close, then the supervisor's explicit
+     `systemctl stop` must remove it;
+8. scope deactivation and removal of the escaped child in either policy.
 
 The password is generated for the temporary account and passed to the probe
 through stdin, never through argv. The account and temporary files are removed
 on exit.
 
-This test validates PAM/logind registration and explicit supervisor-owned
-scope cleanup for a descendant that escaped its original process group. It
+## Running the policy matrix
+
+Run the harness twice, from separate disposable VM snapshots or clean boots.
+Set the policy in a logind drop-in before booting the VM; do not restart
+`systemd-logind` from the active console session just to change the setting.
+
+For the first boot, configure:
+
+```ini
+[Login]
+KillUserProcesses=yes
+```
+
+Then run:
+
+```sh
+BUBBLEWM_EXPECT_KILL_USER_PROCESSES=yes sudo -E sh tests/systemd-vm/run-debian.sh
+```
+
+For the second boot, configure `KillUserProcesses=no` and run:
+
+```sh
+BUBBLEWM_EXPECT_KILL_USER_PROCESSES=no sudo -E sh tests/systemd-vm/run-debian.sh
+```
+
+The harness reads the merged `systemd/logind.conf` configuration with
+`systemd-analyze cat-config`, checks the expected value, and refuses ambiguous
+`KillOnlyUsers` or test-user `KillExcludeUsers` overrides. The `yes` case
+validates logind's automatic logout cleanup; the `no` case specifically
+validates the supervisor's explicit scope-stop cleanup. Both must pass.
+
+This test validates PAM/logind registration and cleanup of a descendant that
+escaped its original process group under both supported logind policies. It
 does **not** yet validate the full BubbleWM compositor startup, greeter/VT
 handoff, DRM seat acquisition, or supervisor crash recovery. Those require
 separate VM scenarios and must not be inferred from this probe.
