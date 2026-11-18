@@ -127,6 +127,42 @@ impl GreeterLayout {
     }
 }
 
+/// Render-ready account row data; contains no credentials or process state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountRowPresentation {
+    pub username: String,
+    pub display_name: String,
+    pub bounds: Rect,
+    pub selected: bool,
+    pub disabled: bool,
+}
+
+/// Builds visible account rows from the model and current responsive layout.
+pub fn account_rows(
+    model: &crate::GreeterModel,
+    layout: GreeterLayout,
+) -> Vec<AccountRowPresentation> {
+    let interaction_locked = matches!(
+        model.status(),
+        crate::GreeterStatus::Authenticating | crate::GreeterStatus::StartingSession
+    );
+
+    model
+        .users()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, user)| {
+            Some(AccountRowPresentation {
+                username: user.username().to_owned(),
+                display_name: user.display_name().to_owned(),
+                bounds: layout.account_rect(index, model.users().len())?,
+                selected: model.selected_index() == Some(index),
+                disabled: !user.is_available() || interaction_locked,
+            })
+        })
+        .collect()
+}
+
 /// Interactive regions exposed to a frontend event handler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GreeterHitTarget {
@@ -219,6 +255,32 @@ mod tests {
         assert_eq!(layout.account_rect(0, 1), None);
         assert_eq!(layout.hit_test(0, 0, 0), None);
         assert_eq!(layout.hit_test(0, 0, crate::MAX_VISIBLE_USERS + 1), None);
+    }
+
+    #[test]
+    fn account_rows_expose_names_selection_and_disabled_state() {
+        let mut accounts = vec![
+            crate::LocalUser::new("alice", "Alice Example").unwrap(),
+            crate::LocalUser::new("bob", "Bob Example").unwrap(),
+        ];
+        accounts[1].set_available(false);
+        let mut model = crate::GreeterModel::new(accounts).unwrap();
+        let layout = GreeterLayout::for_viewport(1280, 800);
+
+        let rows = account_rows(&model, layout);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].display_name, "Alice Example");
+        assert_eq!(rows[0].username, "alice");
+        assert!(rows[0].selected);
+        assert!(!rows[0].disabled);
+        assert!(!rows[1].selected);
+        assert!(rows[1].disabled);
+        assert!(rows[0].bounds.width > 0);
+
+        model.submit();
+        let busy_rows = account_rows(&model, layout);
+        assert!(busy_rows.iter().all(|row| row.disabled));
+        assert!(busy_rows[0].selected);
     }
 
     #[test]
