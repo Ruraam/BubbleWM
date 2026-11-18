@@ -34,6 +34,7 @@ password through its anonymous stdin pipe.
 
 This is a distribution-neutral staging primitive, not yet a complete package
 or display manager. Greeter integration, VT/seat handoff, package maintainer
-scripts and real-systemd VM tests remain separate work. The real-PAM/logind
-probe under `tests/systemd-vm` is designed to run inside a disposable Debian
-13 VM with systemd-logind active.
+scripts remain separate work. A real-PAM/logind probe under
+`tests/systemd-vm` is provided for a disposable Debian 13 VM with
+systemd-logind active; it must still be executed on a real VM before claiming
+runtime validation.
