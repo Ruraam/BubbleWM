@@ -121,7 +121,9 @@ impl GreeterLayout {
                 return Some(GreeterHitTarget::Account(index));
             }
         }
-        self.action.contains(x, y).then_some(GreeterHitTarget::Submit)
+        self.action
+            .contains(x, y)
+            .then_some(GreeterHitTarget::Submit)
     }
 }
 
@@ -189,7 +191,10 @@ mod tests {
         assert_eq!(first.y, layout.accounts.y);
         assert_eq!(first.y + first.height, second.y);
         assert_eq!(second.y + second.height, third.y);
-        assert_eq!(third.y + third.height, layout.accounts.y + layout.accounts.height);
+        assert_eq!(
+            third.y + third.height,
+            layout.accounts.y + layout.accounts.height
+        );
 
         assert_eq!(
             layout.hit_test(first.x, first.y, 3),
