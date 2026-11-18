@@ -1921,6 +1921,17 @@ impl CompositorStateData {
     fn minimize_window(&mut self, surface: &ToplevelSurface) {
         let root = surface.wl_surface().clone();
         let family = self.window_family_surfaces(&root);
+
+        // A late client commit must not let an in-flight resize remap a
+        // window after its family has been minimized.
+        let resize_belongs_to_family = self
+            .resize_session
+            .as_ref()
+            .is_some_and(|session| family.contains(&session.surface));
+        if resize_belongs_to_family {
+            self.resize_session = None;
+        }
+
         let order = self.next_minimized_order;
         self.next_minimized_order = self.next_minimized_order.wrapping_add(1);
         let animate = self.animations.enabled();
